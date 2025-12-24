@@ -1,0 +1,132 @@
+Product: Resume Roast Arena — Minimum Viable Product (MVP)
+Purpose: canonical system design and product description to drive backend-only implementation (no frontend). Auth via Google (Firebase). Cloud: Microsoft Azure.
+
+PRODUCT OVERVIEW
+
+product_name: Resume Roast Arena (MVP)
+
+one_liner: Instant, anonymized resume “roasts”: automated, shareable scorecard and targeted fix suggestions.
+
+target_audience: college students and early-career hires seeking fast feedback and viral shareability.
+
+primary_value: low-friction upload → automated harsh-but-actionable feedback → shareable roast card.
+
+MVP_goals:
+
+Accept uploads (PDF/DOCX/JPG/PNG).
+
+Reliable text extraction (DOCX/PDF parsing + OCR fallback).
+
+Rule-based flagging + LLM-derived roast generation (sanitized).
+
+PII redaction before any external calls.
+
+Generate persisted roast result and a shareable public link/asset.
+
+Ephemeral storage policy and TTL enforcement.
+
+Basic observability and error handling.
+
+No frontend UI required; expose status endpoints and static roast card assets.
+
+CORE COMPONENTS (MVP)
+
+Ingest service (stateless) — receives file, stores to Azure Blob Storage, returns session_id.
+
+Extraction pipeline (asynchronous worker) — Tika + Tesseract local or Azure Cognitive Services OCR fallback. Produces normalized JSON (sections, bullets, metrics).
+
+Normalizer & Feature Extractor — tokenization, verb detection, numeric extraction, skill NER (spaCy/lightweight transformer).
+
+Anonymizer — deterministic PII redaction (email, phone, names, addresses). Must run before any LLM/API call.
+
+Rule-Based Evaluator — JSON ruleset (regex + dependency parse heuristics) returning flags and suggestions.
+
+LLM Roast Generator — Azure OpenAI (or OpenAI API) called with sanitized prompt templates. Constrained prompt to produce concise roast body.
+
+Scoring service — composite numeric scores: Clarity, Credibility, Signal-to-Noise. Store scoring rationale.
+
+Renderer — generate shareable Roast Card (HTML -> PNG or direct OG image). Store rendered asset in Blob Storage.
+
+Public Link Service — short permanent/TTL link resolver for shareable assets.
+
+Queueing & Workers — Redis-backed Celery or Azure Functions + Service Bus for tasks orchestration.
+
+Metadata DB — Azure Database for PostgreSQL to persist sessions, roasts, flags, and audit logs.
+
+Cache — Azure Cache for Redis for transient session states and throttling.
+
+Observability — Azure Monitor + Application Insights for metrics and traces.
+
+CI/CD — GitHub Actions to build images and deploy to Azure Container Instances/App Service for MVP.
+
+TECH STACK (MVP)
+
+Language & Framework: Python (FastAPI) for API + worker scripts.
+
+Task Queue: Celery with Redis (Azure Cache for Redis) or Azure Functions for simpler serverless tasks.
+
+Storage: Azure Blob Storage (uploads, redacted text, rendered cards). Server-side encryption enabled.
+
+DB: Azure Database for PostgreSQL (metadata, roast records). Use JSONB for flags.
+
+OCR/Extraction: Apache Tika for doc parsing; Tesseract local container OR Azure Cognitive Services OCR for better accuracy.
+
+LLM: Azure OpenAI (prompt templates stored in repo, provable unit tests). PII redaction mandatory before calls.
+
+Caching: Azure Cache for Redis (session cache, rate limiting).
+
+Auth: Google Sign-In via Firebase Authentication (token verification on backend). Allow anonymous uploads without login initially.
+
+Logging/Monitoring: Application Insights + Azure Monitor. Structured JSON logs.
+
+Containerization: Docker; local orchestration by docker-compose for dev.
+
+SYSTEM ARCHITECTURE (MVP — textual diagram + data flow)
+
+Components: Client → API Gateway (ingest) → Azure Blob Storage → Queue → Extraction Worker → Normalizer → Anonymizer → (Rule Evaluator + LLM Roast Generator) → Scoring → Renderer → Blob Storage (render) → Public Link Service → CDN
+
+Sequence (detailed):
+
+Client uploads file via POST /v1/ingest (or equivalent). Ingest service stores file to Azure Blob Storage and returns session_id.
+
+Ingest enqueues extraction task to Celery (Redis broker) or pushes message to Azure Service Bus.
+
+Extraction Worker downloads file from Blob Storage, runs Tika. If parsed text below confidence threshold, call Azure Cognitive Services OCR or run Tesseract. Produce normalized JSON (sectioned). Persist normalized JSON (redacted copy not yet) to Blob Storage and metadata to PostgreSQL. Emit extraction.completed event.
+
+Normalizer processes normalized JSON to produce features: verbs, metrics, skill tokens, bullet lengths, dates. Persist features to DB.
+
+Anonymizer redacts PII deterministically and generates sanitized_text. Store redacted text. Only sanitized_text is used for external API calls.
+
+Rule-Based Evaluator executes ruleset against features to produce initial flags and severity scores. Store flags.
+
+LLM Roast Generator builds a constrained prompt using sanitized_text + top rule flags and calls Azure OpenAI. Monitor for hallucination and safety; enforce max token and rate limits. Receive roast body.
+
+Scoring Service combines rule severity + LLM sentiment/quality signals into final numeric scores and rationale. Persist roast record.
+
+Renderer composes Roast Card (HTML template) and converts to PNG/OG image; store to Blob Storage.
+
+Public Link Service issues a short public slug and links it to the stored asset (with TTL). Expose static https://domain/r/<slug> for sharing.
+
+Observability hooks emit events to Application Insights at every stage.
+
+NON-FUNCTIONAL REQUIREMENTS (MVP)
+
+Security: PII redaction enforced before any external API. All data in transit TLS 1.2+. Blob Storage server-side encryption. DB access via managed identity.
+
+TTL: Uploaded raw files auto-delete after 24 hours; roast metadata TTL 30 days for anonymous; configurable for logged-in users.
+
+Rate Limiting: per-IP and per-session via Redis. Anonymous flows gated by CAPTCHA at high frequency.
+
+Costs: Use Azure OpenAI in controlled mode; set concurrency and daily budget caps.
+
+Compliance: GDPR-friendly by design: ephemeral storage and deletion endpoints.
+
+Tests: unit tests for extraction, anonymizer, rule engine; integration test covering full pipeline (file -> roast -> render).
+
+IMPLEMENTATION NOTES & DELIVERABLES (MVP)
+
+Deliver core services as containers; orchestrate locally with docker-compose.
+
+Provide Postgres DB migrations, sample ruleset JSON, prompt templates, and unit tests for prompt outputs.
+
+Provide runbook for local dev, staging deploy, and basic restore procedures.

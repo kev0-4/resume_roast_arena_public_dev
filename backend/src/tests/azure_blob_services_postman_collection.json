@@ -1,0 +1,217 @@
+{
+  "info": {
+    "name": "Azure Blob Storage Tests",
+    "description": "Test routes for Azure Blob Storage upload/download/delete operations",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Upload PDF to Blob Storage",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": []
+            }
+          ]
+        },
+        "url": {
+          "raw": "http://127.0.0.1:8000/api/v1/injest/test/upload/test-session-123",
+          "protocol": "http",
+          "host": [
+            "127",
+            "0",
+            "0",
+            "1"
+          ],
+          "port": "8000",
+          "path": [
+            "api",
+            "v1",
+            "injest",
+            "test",
+            "upload",
+            "test-session-123"
+          ]
+        },
+        "description": "Upload a PDF file to Azure Blob Storage. Select a file in the Body tab."
+      },
+      "response": []
+    },
+    {
+      "name": "2. Check if Blob Exists",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://127.0.0.1:8000/api/v1/injest/test/exists/test-session-123/resume.pdf",
+          "protocol": "http",
+          "host": [
+            "127",
+            "0",
+            "0",
+            "1"
+          ],
+          "port": "8000",
+          "path": [
+            "api",
+            "v1",
+            "injest",
+            "test",
+            "exists",
+            "test-session-123",
+            "resume.pdf"
+          ]
+        },
+        "description": "Check if a specific blob exists in storage. Change filename to match your uploaded file."
+      },
+      "response": []
+    },
+    {
+      "name": "3. Download PDF from Blob Storage",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://127.0.0.1:8000/api/v1/injest/test/download/test-session-123/resume.pdf",
+          "protocol": "http",
+          "host": [
+            "127",
+            "0",
+            "0",
+            "1"
+          ],
+          "port": "8000",
+          "path": [
+            "api",
+            "v1",
+            "injest",
+            "test",
+            "download",
+            "test-session-123",
+            "resume.pdf"
+          ]
+        },
+        "description": "Download a PDF file from Azure Blob Storage. The PDF will be displayed or downloaded."
+      },
+      "response": []
+    },
+    {
+      "name": "4. Delete All Files in Session",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "http://127.0.0.1:8000/api/v1/injest/test/delete/test-session-123",
+          "protocol": "http",
+          "host": [
+            "127",
+            "0",
+            "0",
+            "1"
+          ],
+          "port": "8000",
+          "path": [
+            "api",
+            "v1",
+            "injest",
+            "test",
+            "delete",
+            "test-session-123"
+          ]
+        },
+        "description": "Delete all blobs associated with a session ID."
+      },
+      "response": []
+    },
+    {
+      "name": "5. Verify Deletion (Exists Check)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://127.0.0.1:8000/api/v1/injest/test/exists/test-session-123/resume.pdf",
+          "protocol": "http",
+          "host": [
+            "127",
+            "0",
+            "0",
+            "1"
+          ],
+          "port": "8000",
+          "path": [
+            "api",
+            "v1",
+            "injest",
+            "test",
+            "exists",
+            "test-session-123",
+            "resume.pdf"
+          ]
+        },
+        "description": "Verify the file was deleted. Should return exists: false"
+      },
+      "response": []
+    },
+    {
+      "name": "Test Path Traversal Attack (Should Fail Safely)",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": []
+            }
+          ]
+        },
+        "url": {
+          "raw": "http://127.0.0.1:8000/api/v1/injest/test/upload/test-session-456",
+          "protocol": "http",
+          "host": [
+            "127",
+            "0",
+            "0",
+            "1"
+          ],
+          "port": "8000",
+          "path": [
+            "api",
+            "v1",
+            "injest",
+            "test",
+            "upload",
+            "test-session-456"
+          ]
+        },
+        "description": "Test security: Upload a file with malicious filename like '../../evil.pdf'. Your sanitize function should strip the path traversal."
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000/api/v1/injest",
+      "type": "string"
+    },
+    {
+      "key": "session_id",
+      "value": "test-session-123",
+      "type": "string"
+    },
+    {
+      "key": "filename",
+      "value": "resume.pdf",
+      "type": "string"
+    }
+  ]
+}

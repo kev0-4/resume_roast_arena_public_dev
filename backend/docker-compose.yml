@@ -1,0 +1,86 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: postgres_db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=devuser
+      - POSTGRES_PASSWORD=devpassword
+      - POSTGRES_DB=devdb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    
+  # redis:
+  #   image: redis:7
+  #   container_name: redis_cache
+  #   restart: unless-stopped
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  redis:
+    image: bitnami/redis:latest
+    container_name: redis_cache
+    ports:
+      - "6379:6379"
+    environment:
+      - REDIS_PASSWORD=devpassword
+      - ALLOW_EMPTY_PASSWORD=no
+    volumes:
+      - redis_data:/data
+  
+    
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    container_name: azurite_emulator
+    restart: unless-stopped
+    ports:
+      - "10000:10000" # Blob service
+      - "10001:10001" # Queue service
+      - "10002:10002" # Table service
+    command: ["azurite", "--blobHost", "0.0.0.0", "--queueHost", "0.0.0.0", "--tableHost", "0.0.0.0", "--location", "/data", "--loose"]
+    volumes:
+      - azurite_data:/data
+  apache-tika:
+    image: apache/tika:2.9.2.0-full
+    container_name: apache-tika
+    ports:
+      - 9998:9998
+  
+  # sqledge:
+  #   image: mcr.microsoft.com/azure-sql-edge
+  #   container_name: azure_sql_edge_sb
+  #   restart: unless-stopped
+  #   environment:
+  #     ACCEPT_EULA: Y
+  #     MSSQL_SA_PASSWORD: "devpassword!" 
+  #   volumes:
+  #     - sqledge_data:/var/opt/mssql
+
+  # servicebus-emulator:
+  #   image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
+  #   container_name: servicebus_emulator
+  #   restart: unless-stopped
+  #   ports:
+  #     - "5672:5672" 
+  #     - "5300:5300" 
+  #   depends_on:
+  #     - sqledge 
+  #   environment:
+  #     MSSQL_SA_PASSWORD: "devpassword!" 
+  #     SQL_SERVER: sqledge 
+  #     ACCEPT_EULA: Y
+  #     CONFIG_FILE_PATH: /app/config.json 
+  #   volumes:
+  #     - ./config.json:/app/config.json
+
+volumes:
+  postgres_data:
+  redis_data:
+  azurite_data:
+  # sqledge_data:
+  # servicebus_config:

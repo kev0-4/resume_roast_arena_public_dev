@@ -1,0 +1,20 @@
+# Environment files
+.env
+.env.*
+*.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# Service account credentials (never commit these!)
+**/service-account.json
+service-account*.json
+**/service-account*.json

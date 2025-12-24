@@ -1,0 +1,158 @@
+Product: Resume Roast Arena — Scalable Product Phase (post-MVP)
+Purpose: system design and product description for scale: multi-tenant readiness, concurrency, cost optimization, advanced observability, analytics, monetization hooks. Auth via Google (Firebase). Cloud: Microsoft Azure.
+
+SCALE OBJECTIVE SUMMARY
+
+target_concurrency: support thousands of concurrent upload-to-roast sessions with p95 roast latency SLO under defined budget.
+
+SLOs: p95 roast generation < 8s for rule-only, < 6s additional for cached LLM responses; p95 end-to-end < 20s (goal).
+
+cost_target: tune model routing to minimize unnecessary GPU/OpenAI usage; cache LLM partial outputs; use cheaper ARM spot GPUs for batch workloads.
+
+business_goals: improve retention via accounts, paid features (priority roast, style variants), B2B integrations (placement drives), and usage metering.
+
+ENHANCED ARCHITECTURE COMPONENTS (scale)
+
+API Gateway + WAF — Azure Application Gateway or Azure Front Door for global routing, TLS, WAF rules, bot mitigation, and DDoS basic protection.
+
+Auth & Identity — Firebase for Google Sign-In + Azure AD integration for enterprise customers. Use token exchange and validate tokens server-side. Implement multi-tenant claim processing.
+
+Ingress Autoscaling — Kubernetes (AKS) with Horizontal Pod Autoscaler (HPA) using KEDA to auto-scale based on queue length and custom metrics.
+
+Worker Fleet Segmentation — separate worker pools: CPU workers (extraction, rule evaluation), GPU workers (self-hosted LLM inference), and burst workers (serverless functions). Use AKS node pools with GPU nodes for model serving.
+
+Queueing & Event Bus — Kafka (Azure Event Hubs) for high-throughput event streaming instead of plain Redis/Celery for analytics and pipeline resilience.
+
+Model Serving Strategy — hybrid: Azure OpenAI for bursty low-volume LLM calls + self-hosted LLM cluster (Ray Serve/Triton) for predictable volume and cost control (use NVIDIA GPUs on AKS). Implement model router to choose provider by cost/latency policy.
+
+Vector DB & Similarity Engine — Weaviate or Milvus hosted on AKS (or managed Weaviate) for Career Doppelgänger and Peer Rankboard features. Secure vector data encryption.
+
+Caching & CDN — Azure Cache for Redis for near-instant session retrieval; Azure CDN or Cloudflare for roast-card assets and OG images globally.
+
+Data Warehouse & Analytics — ingest events to an analytics pipeline (Azure Event Hubs -> Azure Data Factory -> Azure Synapse / Azure Data Explorer or ClickHouse) for cohort analysis, virality metrics, and monetization signals.
+
+Billing & Metering — integrate Stripe; backend metering service records usage (per-roast, priority models, team seats) and produces invoices.
+
+Observability & SLOs — Prometheus + Grafana for detailed metrics (deployed via kube-prometheus-stack) integrated with Azure Monitor and Application Insights for distributed tracing. Implement SLIs, SLOs with alerting to PagerDuty.
+
+Secrets Management — Azure Key Vault for all secrets; RBAC enforced. Rotate API keys and model credentials via CI/CD pipelines.
+
+Governance & Compliance — automated PII detection, consent capture, data provenance logs, and GDPR/CCPA export/delete flows.
+
+SCALE SYSTEM ARCHITECTURE (textual diagram + flow)
+
+Edge: Client -> Azure Front Door (global) -> WAF -> API Gateway -> Auth layer (Firebase token verification) -> Ingress to AKS (stateless API pods)
+
+Core pipeline (scaled):
+
+Upload hits API pods behind AKS HPA. File stored to Azure Blob Storage (hot tier). A lightweight ingestion service persists metadata to Postgres and emits event to Event Hub.
+
+Event Hub fan-out to specialized pipelines: extraction stream (to CPU worker pool), analytics stream (to Data Lake), and moderation stream (for content checks).
+
+Extraction CPU pool scales via KEDA; extraction writes normalized JSON to Blob Storage and pushes an "extraction.completed" event.
+
+Feature extraction and Rule Evaluation remain CPU-bound and run in an autoscaled pool. Outputs persisted to Postgres (sharded if necessary) and to Redis cache for low-latency reads.
+
+LLM routing: model router decides between (A) Azure OpenAI, (B) self-hosted Ray Serve cluster, (C) cached templates. Routing policy uses current cost, queue depth, and customer tier.
+
+For premium customers: route to priority GPUs or faster OpenAI models.
+
+For anonymous/free: best-effort route to cached or cheaper models.
+
+Self-hosted model serving in AKS uses GPU node pool; autoscaling relies on queue length and prediction of bursts. Use model-versioning and canary deploy for new models.
+
+Renderer and asset generation run in a burstable job pool; final image stored to Blob Storage and pushed to CDN with signed URL.
+
+Public link service backed by distributed cache and Postgres for mapping slug -> asset. TTL and revocation service implemented.
+
+Observability pipelines collect metrics, traces, and logs via OpenTelemetry and ship to Prometheus + Azure Monitor. Alerting enforces SLO breaches.
+
+Analytics pipeline consumes events from Event Hub into Azure Synapse for cohort and virality dashboards.
+
+DATA LAYER & SCALING STRATEGY
+
+Postgres (Azure Database for PostgreSQL) for transactional metadata. Use read replicas and partitioning for large tables (sessions, roasts).
+
+Blob Storage (multi-tier): hot for recent assets, cool/archival for old data beyond retention. Lifecycle policies auto-transition.
+
+Vector DB (Weaviate/Milvus) for similarity with snapshots to cold storage. Use asynchronous ETL to refresh vectors.
+
+Data Warehouse: Azure Synapse or ClickHouse for high-throughput analytics; store anonymized events.
+
+Cache: Azure Cache for Redis (clustered) with Key TTLs for session-level caching and rate-limiting counters.
+
+SCALING PATTERNS & COST CONTROLS
+
+Model routing fallback policy: prefer cached or template answers; only escalate to OpenAI or GPU if rules indicate high-value roast (paid tier or complex resume).
+
+Autoscale GPU pools using spot/preemptible instances where acceptable; migrate long-run jobs to reserved capacity.
+
+Batch similar low-priority LLM calls to amortize inference cost.
+
+Implement aggressive caching for repeated inputs (hash(normalized_text)) to serve duplicates instantly.
+
+Implement per-tenant quotas and soft caps; throttle anonymous flows during peak.
+
+SECURITY & PRIVACY AT SCALE
+
+PII Redaction: central policy; never send raw resume text to external providers. Keep redaction logs for audit (hashed pointer, not raw PII).
+
+Encryption: TLS everywhere, Blob Storage server-side encryption, DB TDE. Key rotation in Key Vault.
+
+Access Control: RBAC for admin consoles; managed identities for services. Multi-tenant data isolation where required.
+
+Abuse Mitigation: ML-based content moderation, rate-limits, CAPTCHA gating for high-volume anonymous flows.
+
+Compliance: Data export/delete endpoints; data processing agreements for model vendors; DPIA for EU deployments.
+
+OPERATIONS & DEPLOYMENT (scale)
+
+GitOps via ArgoCD for AKS; GitHub Actions for build pipelines. Promote images through CI -> staging -> canary -> prod.
+
+Blue/Green or Canary model deployments for model updates. Feature flags via LaunchDarkly or homegrown system.
+
+Incident playbooks for model abuse, data leak, or SLO breaches. On-call rota via PagerDuty.
+
+Automated chaos testing for queue/backpressure scenarios.
+
+MONETIZATION & PRODUCT FEATURES (scale)
+
+Free tier: anonymous roasts with TTL 24–72h, rule-only fast roast.
+
+Paid tier: priority LLM roasts, roast styles, history retention, vanity slugs, team seats.
+
+B2B: bulk placement packs for college placement cells (API & dashboard), white-label integration.
+
+Ads/Partnerships: optional — career services, bootcamp integrators.
+
+EXTENSION PLANS (post-scale)
+
+Peer Rankboard, Career Doppelgänger and anonymous leaderboards (use vector DB & public opt-in dataset).
+
+Team analytics and placement dashboards for institutions.
+
+Advanced model features: behavioral interview simulations, STAR story generation, and multimodal resume review.
+
+SLO & METRICS (examples)
+
+ingestion_success_rate ≥ 99.5% (daily).
+
+p95_end_to_end_latency < 20s for free tier, < 8s for priority.
+
+roast_share_rate (shares / roasts) target ≥ 5% weekly.
+
+CAC/LTV targets defined in monetization roadmap.
+
+DEPLOYMENT CHECKLIST (scale)
+
+Implement model router and deploy Ray/Triton inference pods.
+
+Migrate queue to Event Hubs / Kafka and verify backpressure handling.
+
+Configure AKS node pools: CPU, GPU, spot-preemptible.
+
+Configure Azure Front Door + WAF and CDN.
+
+Integrate Stripe + billing metering.
+
+Harden security posture and automate compliance controls.
