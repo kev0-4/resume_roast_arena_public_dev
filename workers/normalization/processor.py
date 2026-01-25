@@ -2,19 +2,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.src.db.sessions import JobStatusEnum, Sessions
 from backend.src.utils.telemetry import emit_event
 from backend.src.db.sessions import JobStatusEnum
-from backend.src.services.blob import read_blob, upload_extracted
+from backend.src.services.blob import read_blob, upload_extracted, upload_normalized
 from asyncio import sleep
 from backend.src.services.session_service import get_session
 from .state import mark_normalized,mark_normalizing,mark_failed
 import enum
 import datetime
 from .schemas import NormalizationJobMessage
-from pipeline.loader import load_extracted
-from pipeline.segmenter import segment_text
-from pipeline.entities import extract_entities
-from pipeline.signals import compute_signals
-from pipeline.metrics import compute_metrics
-from pipeline.assembler import assemble_normalized
+from .pipeline.loader import load_extracted
+from .pipeline.segmenter import segment_text
+from .pipeline.entities import extract_entities
+from .pipeline.signals import compute_signals
+from .pipeline.metrics import compute_metrics
+from .pipeline.assembler import assemble_normalized
 from .errors import PermanentNormalizationError, TransientNormalizationError
 
 async def process_normalization_job(db: AsyncSession, message: NormalizationJobMessage) -> None:
@@ -32,6 +32,9 @@ async def process_normalization_job(db: AsyncSession, message: NormalizationJobM
         return 
     if session.status != JobStatusEnum.QUEUED:
         print(f"Returning: session status is {session.status}, session_id: {session.id} not queued")
+        return#as invalid/unexpected state for this function, only queued jobs will be moved further
+    if session.status != JobStatusEnum.EXTRACTED:
+        print(f"Returning: session status is {session.status}, session_id: {session.id} not Extracted")
         return#as invalid/unexpected state for this function, only queued jobs will be moved further
         
     session = await mark_normalizing(db=db, session=session)
@@ -66,5 +69,3 @@ async def process_normalization_job(db: AsyncSession, message: NormalizationJobM
         raise TransientNormalizationError(str(e))
 
 
-def upload_normalized(session_id, data):
-    pass # implement this in backend blob service
