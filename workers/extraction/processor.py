@@ -9,6 +9,7 @@ from .extractor.tika import extract_with_tika, compute_confidence, extract_with_
 from tika import parser
 from backend.src.db.sessions import Sessions, JobStatusEnum
 from backend.src.services.blob import read_blob, upload_extracted
+from backend.src.services.service_bus import enqueue_normalization
 from asyncio import sleep
 from backend.src.services.session_service import get_session
 from .schemas import ExtractionJobMessage
@@ -104,6 +105,11 @@ async def process_extraction_job(db: AsyncSession, message:ExtractionJobMessage)
         
 
         await mark_extracted(db=db,session=session)
+        db.commit()
+        enqueue_normalization(
+        session_id=str(session_id),
+        extracted_blob_path=f"extracted/{session_id}/extracted.json"
+        )
 
     except TransientExtractionError:
         raise

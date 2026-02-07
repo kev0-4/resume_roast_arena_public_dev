@@ -21,21 +21,21 @@ async def process_normalization_job(db: AsyncSession, message: NormalizationJobM
     print("--entered process_normalization_job")
     session_id = message.session_id
     session: Sessions | None = await get_session(db=db,session_id=message.session_id)
-    if session is None:
-        print("Returning: session is None")
-        return 
-    if session.status == JobStatusEnum.FAILED:
-        print(f"Returning: session status is FAILED, session_id: {session.id}")
-        return 
-    if session.status == JobStatusEnum.NORMALIZED:
-        print(f"Returning: session status is NORMALIZED, session_id: {session.id}")
-        return 
-    if session.status != JobStatusEnum.QUEUED:
-        print(f"Returning: session status is {session.status}, session_id: {session.id} not queued")
-        return#as invalid/unexpected state for this function, only queued jobs will be moved further
-    if session.status != JobStatusEnum.EXTRACTED:
-        print(f"Returning: session status is {session.status}, session_id: {session.id} not Extracted")
-        return#as invalid/unexpected state for this function, only queued jobs will be moved further
+    # if session is None:
+    #     print("Returning: session is None")
+    #     return 
+    # if session.status == JobStatusEnum.FAILED:
+    #     print(f"Returning: session status is FAILED, session_id: {session.id}")
+    #     return 
+    # if session.status == JobStatusEnum.NORMALIZED:
+    #     print(f"Returning: session status is NORMALIZED, session_id: {session.id}")
+    #     return 
+    # if session.status == JobStatusEnum.QUEUED:
+    #     print(f"Returning: session status is {session.status}, session_id: {session.id} not queued")
+    #     return#as invalid/unexpected state for this function, only queued jobs will be moved further
+    # if session.status != JobStatusEnum.EXTRACTED:
+    #     print(f"Returning: session status is {session.status}, session_id: {session.id} not Extracted")
+    #     return#as invalid/unexpected state for this function, only queued jobs will be moved further
         
     session = await mark_normalizing(db=db, session=session)
     normalization_started_at = datetime.datetime.utcnow()

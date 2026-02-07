@@ -111,7 +111,9 @@ def upload_normalized(session_id, data):
         payload = json.dumps(data, ensure_ascii=True).encode("utf-8")
         blob_client.upload_blob(payload, overwrite=True)
     except Exception as e:
+        print("--Issue with upload_normalized")
         pass
+    print("--uploaded normalized")
     return blob_path
 
 
