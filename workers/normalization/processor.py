@@ -21,35 +21,52 @@ async def process_normalization_job(db: AsyncSession, message: NormalizationJobM
     print("--entered process_normalization_job")
     session_id = message.session_id
     session: Sessions | None = await get_session(db=db,session_id=message.session_id)
-    # if session is None:
-    #     print("Returning: session is None")
-    #     return 
-    # if session.status == JobStatusEnum.FAILED:
-    #     print(f"Returning: session status is FAILED, session_id: {session.id}")
-    #     return 
-    # if session.status == JobStatusEnum.NORMALIZED:
-    #     print(f"Returning: session status is NORMALIZED, session_id: {session.id}")
-    #     return 
-    # if session.status == JobStatusEnum.QUEUED:
-    #     print(f"Returning: session status is {session.status}, session_id: {session.id} not queued")
-    #     return#as invalid/unexpected state for this function, only queued jobs will be moved further
-    # if session.status != JobStatusEnum.EXTRACTED:
-    #     print(f"Returning: session status is {session.status}, session_id: {session.id} not Extracted")
-    #     return#as invalid/unexpected state for this function, only queued jobs will be moved further
+    if session is None:
+        print("Returning: session is None")
+        return 
+    if session.status == JobStatusEnum.FAILED:
+        print(f"Returning: session status is FAILED, session_id: {session.id}")
+        return 
+    if session.status == JobStatusEnum.NORMALIZED:
+        print(f"Returning: session status is NORMALIZED, session_id: {session.id}")
+        return 
+    if session.status == JobStatusEnum.QUEUED:
+        print(f"Returning: session status is {session.status}, session_id: {session.id} not queued")
+        return
+    if session.status != JobStatusEnum.EXTRACTED:
+        print(f"Returning: session status is {session.status}, session_id: {session.id} not Extracted")
+        return#as invalid/unexpected state for this function, only queued jobs will be moved further
         
     session = await mark_normalizing(db=db, session=session)
     normalization_started_at = datetime.datetime.utcnow()
     print("--entered process_normalization_job -> marked normalizing")
+
+
     try:
-        extracted = load_extracted(blob_path=message.extracted_blob_path)
+        print(f"DEBUG: Starting normalization for blob_path: {message.extracted_blob_path}")
+        
+        extracted =  load_extracted(blob_path=message.extracted_blob_path)
+        print(f"DEBUG: Successfully loaded extracted data. Keys: {list(extracted.keys())}")
+        
         raw_text = extracted.get("raw_text")
+        print(f"DEBUG: Raw text retrieved. Length: {len(raw_text) if raw_text else 0} characters")
+        
         if not raw_text:
+            print("DEBUG: Error - raw_text is empty or None")
             raise PermanentNormalizationError("Extracted payload missing raw_text")
 
         blocks: dict = segment_text(raw_text=raw_text)
+        print(f"DEBUG: Text segmentation complete. Blocks found: {len(blocks)}")
+
         entities: dict = extract_entities(raw_text=raw_text)
-        signals : dict = compute_signals(blocks=blocks,raw_text=raw_text)
-        metrics : dict = compute_metrics(blocks=blocks,raw_text=raw_text)
+        print(f"DEBUG: Entity extraction complete. Entities found: {len(entities)}")
+
+        signals: dict = compute_signals(blocks=blocks, raw_text=raw_text,entities=entities)
+        print(f"DEBUG: Signals computed. Count: {len(signals)}")
+
+        metrics: dict = compute_metrics(blocks=blocks, raw_text=raw_text,entities=entities)
+        print(f"DEBUG: Metrics computed. Count: {len(metrics)}")
+
         normalized_payload: dict = assemble_normalized(
             session_id=session_id,
             extracted=extracted,
@@ -59,9 +76,17 @@ async def process_normalization_job(db: AsyncSession, message: NormalizationJobM
             metrics=metrics,
             normalized_at=normalization_started_at,
         )
-        upload_normalized(session_id=str(session_id),data=normalized_payload,)
-        await mark_normalized(db=db,session=session)
-    except TransientNormalizationError:
+        print("DEBUG: Normalized payload assembled successfully")
+
+        upload_normalized(session_id=str(session_id), data=normalized_payload)
+        print(f"DEBUG: Payload uploaded for session_id: {session_id}")
+
+        await mark_normalized(db=db, session=session)
+        print("DEBUG: Session marked as normalized in database")
+
+        
+    except TransientNormalizationError as e:
+        print("------------------------------",e)
         raise
     except PermanentNormalizationError as e:
         await mark_failed(db=db, session=session, error_code="NORMALIZATION_FAILED",error_reason=str(e))

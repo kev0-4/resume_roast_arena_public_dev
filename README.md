@@ -1,7 +1,7 @@
 # Resume Processing & Analysis Platform (WIP)
 
-> **Status:** 🚧 Actively under development
-> **Goal:** Build a production-grade, distributed system for resume ingestion, extraction, normalization, analysis, and AI-assisted feedback.
+> **Status:** 🟢 Core pipeline complete, verified end-to-end
+> **Goal:** Build a production-grade, distributed system for resume ingestion, extraction, normalization, and downstream analysis (anonymization, scoring, AI feedback).
 
 ---
 
@@ -35,7 +35,7 @@ Normalization Worker
 Blob Storage (normalized.json)
 ```
 
-Each stage is **decoupled**, **idempotent**, and **retry-safe**, following patterns used in production systems.
+Each stage is **decoupled**, **idempotent**, **stateless**, and **retry-safe**, following patterns used in production systems.
 
 ---
 
@@ -88,33 +88,46 @@ Each stage is **decoupled**, **idempotent**, and **retry-safe**, following patte
 - **Blob storage integration**
 - **Azure Service Bus integration**
 - **Extraction worker**
-
   - Tika-based text extraction
   - OCR fallback using Tesseract
   - Confidence-based decision logic
   - Correct retry vs permanent failure handling
+  - **Enqueues normalization job**
 
 - **Extraction artifacts (`extracted.json`)**
 - **Normalization worker skeleton**
-
   - Deterministic orchestration
   - State transitions (`EXTRACTED → NORMALIZING → NORMALIZED`)
   - Schema-first design
+  - Normalization converts extracted text into a **canonical, structured representation**.
+  - Implemented components:
+    - Loader (`extracted.json` validation)
+    - Deterministic segmenter (resume sections)
+    - Regex-based entity extraction (emails, phones, URLs)
+    - Tiered signal computation (boolean / categorical)
+    - Numeric metrics computation
+    - Assembler (schema-stable `normalized.json`)
+    - State transitions (`EXTRACTED → NORMALIZED`)
+
+  Output artifact:
+
+  ```
+  normalized/<session_id>/normalized.json
+  ```
+
+  This stage is **fully deterministic** and **non-ML** by design.
 
 ---
 
-## Normalization (In Progress)
+## Artifacts Produced
 
-Normalization converts raw extracted text into a **canonical, structured representation**.
+| Stage         | Artifact                                  |
+| ------------- | ----------------------------------------- |
+| Ingest        | `raw/<session_id>/<filename>`             |
+| Extraction    | `extracted/<session_id>/extracted.json`   |
+| Normalization | `normalized/<session_id>/normalized.json` |
 
-Planned output includes:
-
-- Sectioned resume blocks (summary, experience, education, skills, projects)
-- Entity detection (emails, phone numbers, names, organizations)
-- Deterministic signals (presence of sections, metrics usage, dates, etc.)
-- Quantitative metrics (word count, experience entries, skill count)
-
-This stage is intentionally **rule-based and deterministic**, not ML-driven.
+Artifacts are immutable and traceable across stages.
 
 ---
 
@@ -132,6 +145,10 @@ EXTRACTED
 NORMALIZING
   ↓
 NORMALIZED
+  ↓
+ANONYMIZING
+  ↓
+ANONYMIZED
 ```
 
 Failures are classified as:
@@ -141,29 +158,26 @@ Failures are classified as:
 
 ---
 
-## What’s Next (Planned Work)
+## What’s Next (Planned)
 
-### 🚧 In Progress
+### 🔜 Next Pipeline Stage
 
-- Normalization pipeline logic
+- **Anonymization**
+  - Span-based PII redaction
+  - Deterministic masking
+  - `anonymized.json`
+  - No ML, no heuristics
 
-  - Section segmentation
-  - Entity extraction
-  - Signal & metric computation
+### 🔮 Future Stages
 
-### ⏭️ Upcoming
-
-- Anonymization (PII redaction using entity spans)
-- Rule-based resume evaluation
-- Scoring engine with explainability
-- AI-assisted feedback / “resume roast”
-- Rendering results (HTML / image)
-- Public result links
-- Caching & rate limiting
+- Rule-based evaluation engine
+- Scoring with explainability
+- AI-assisted resume feedback (“resume roast”)
+- Rendering (HTML / image cards)
+- Public shareable result links
 - Observability (metrics, tracing)
 - CI/CD pipelines
-
----
+- Performance tuning & caching
 
 ## Why This Project Matters
 
@@ -193,4 +207,5 @@ It is being built incrementally, with **correctness and scalability prioritized 
 
 Built by **Kevin Tandon**
 Focused on backend systems, distributed architecture, and production-ready design.
-> For myself cd backedn && uvicorn app:app , cd to proj root  and python -m workers.normalization.main
+
+> For myself cd backedn && uvicorn app:app , cd to proj root and python -m workers.normalization.main

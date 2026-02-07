@@ -23,7 +23,7 @@ REQUIRED_TOP_LEVEL_FIELDS = {
 def load_extracted(blob_path: str) -> dict:
     #     Load and validate extracted.json.
     try:
-        raw_bytes = read_blob(blob_path)
+        raw_bytes =  read_blob(blob_path)
     except Exception as e:
         raise TransientNormalizationError(
             f"Failed to read extracted blob: {e}"
