@@ -1,1 +1,1 @@
-// fastapi, dotenv,  psycopg2, redis,azure-storage-blob , asyncio, sqlalchemy alembic,zon,firebase-admin, asyncpg,redis PyJWT,azure-storage-blob,  azure-servicebus azure-identity aiohttp , tika
+// fastapi, dotenv,  psycopg2, redis,azure-storage-blob , asyncio, sqlalchemy alembic,zon,firebase-admin, asyncpg,redis PyJWT,azure-storage-blob,  azure-servicebus azure-identity aiohttp , tika, spacy
