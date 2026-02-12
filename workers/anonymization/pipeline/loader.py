@@ -21,7 +21,7 @@ REQUIRED_TOP_LEVEL_FIELDS = {
     "content",
     "signals",
     "metrics",
-    "timestamp",
+    "timestamps",
 }
 
 REQUIRED_CONTENT_FIELDS = {
