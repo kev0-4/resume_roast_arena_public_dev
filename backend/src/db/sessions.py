@@ -25,6 +25,8 @@ class JobStatusEnum(str, enum.Enum):
     NORMALIZED = "NORMALIZED"
     ANONYMIZING = "ANONYMIZING"
     ANONYMIZED = "ANONYMIZED"
+    SCORING = "SCORING"
+    SCORED = "SCORED"
     
 class Sessions(Base):
     __tablename__ = "Sessions"

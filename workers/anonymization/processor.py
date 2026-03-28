@@ -54,7 +54,9 @@ from .pipeline.redactor import redact_content
 from .pipeline.assembler import assemble_anonymized
 
 # You will create this if not already present
-from backend.src.services.blob import upload_anonymized
+from backend.src.services.blob import upload_anonymized 
+from backend.src.services.service_bus import enqueue_scoring
+
 
 
 async def process_anonymization_job(
@@ -159,6 +161,12 @@ async def process_anonymization_job(
         await mark_anonymized(db=db, session=session)
 
         await db.commit()
+        print("----enqueing scoring")
+        enqueue_scoring(
+        session_id=str(session_id),
+        anonymized_blob_path=f"anonymized/{session_id}/anonymized.json"
+        )
+
 
     # ------------------------------------------------------------
     # Error handling
@@ -175,7 +183,7 @@ async def process_anonymization_job(
             error_reason=str(e),
         )
         await db.commit()
-
+        
     except Exception as e:
         # Unknown → treat as transient
         raise TransientAnonymizationError(str(e))
