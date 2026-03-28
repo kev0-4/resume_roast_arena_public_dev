@@ -5,6 +5,7 @@ from backend.src.db.sessions import JobStatusEnum
 from backend.src.services.blob import read_blob, upload_extracted, upload_normalized
 from asyncio import sleep
 from backend.src.services.session_service import get_session
+from backend.src.services.service_bus import enqueue_anonymization
 from .state import mark_normalized,mark_normalizing,mark_failed
 import enum
 import datetime
@@ -81,8 +82,14 @@ async def process_normalization_job(db: AsyncSession, message: NormalizationJobM
         upload_normalized(session_id=str(session_id), data=normalized_payload)
         print(f"DEBUG: Payload uploaded for session_id: {session_id}")
 
+        print("-- marking normalized")
         await mark_normalized(db=db, session=session)
         print("DEBUG: Session marked as normalized in database")
+        await db.commit()
+        enqueue_anonymization(
+            session_id=str(session_id),
+            normalized_blob_path=f"normalized/{session_id}/normalized.json"
+        )
 
         
     except TransientNormalizationError as e:

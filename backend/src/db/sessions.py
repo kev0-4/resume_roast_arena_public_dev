@@ -23,6 +23,9 @@ class JobStatusEnum(str, enum.Enum):
     DONE = "DONE"
     NORMALIZING = "NORMALIZING"
     NORMALIZED = "NORMALIZED"
+    ANONYMIZING = "ANONYMIZING"
+    ANONYMIZED = "ANONYMIZED"
+    
 class Sessions(Base):
     __tablename__ = "Sessions"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

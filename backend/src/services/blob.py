@@ -117,6 +117,19 @@ def upload_normalized(session_id, data):
     return blob_path
 
 
+def upload_anonymized(session_id, data):
+    blob_path = f"anonymized/{session_id}/anonymized.json"
+    blob_client = get_blob_client(blob_path=blob_path)
+    try:
+        payload = json.dumps(data, ensure_ascii=True).encode("utf-8")
+        blob_client.upload_blob(payload, overwrite=True)
+    except Exception as e:
+        print(f"--Issue with upload_anonymized {e}")
+        pass
+    print("--uploaded anonymized")  
+    return blob_path
+
+
 def initialize_blob_storage() -> None:
     # explicit initialization, jsut call once at fastapi
     _initialize_clients()

@@ -159,16 +159,24 @@ def _flush_buffer(
     start: int,
     end: int,
 ):
-    """
-    Append buffered text as a block to blocks[section].
-    """
-    text = "\n".join(buffer_lines).strip()
-    if not text:
+    # Lines already have \n endings from keepends=True, just concatenate
+    text = "".join(buffer_lines)
+
+    # Adjust span for any leading whitespace stripped
+    lstripped = text.lstrip()
+    leading = len(text) - len(lstripped)
+    rstripped = lstripped.rstrip()
+
+    if not rstripped:
         return
 
     blocks[section].append(
         {
-            "text": text,
-            "source_span": {"start": start, "end": end},
+            "text": rstripped,
+            "source_span": {
+                "start": start + leading,
+                "end": end,
+            },
         }
     )
+    

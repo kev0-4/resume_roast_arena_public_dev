@@ -208,4 +208,5 @@ It is being built incrementally, with **correctness and scalability prioritized 
 Built by **Kevin Tandon**
 Focused on backend systems, distributed architecture, and production-ready design.
 
-> For myself cd backedn && uvicorn app:app , cd to proj root and python -m workers.normalization.main
+> For myself cd backend && uvicorn app:app , cd to proj root and python -m workers.normalization.main
+> source venv/bin/activate

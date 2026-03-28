@@ -2,7 +2,7 @@ class AnonymizationError(Exception):
     """Base class for all Anonymization-related failures."""
 
 
-class TransientEAnonymizationError(AnonymizationError):
+class TransientAnonymizationError(AnonymizationError):
     """
     Errors that MAY succeed on retry.
     Example: network timeout, blob temporary failure.

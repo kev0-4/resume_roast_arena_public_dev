@@ -55,7 +55,7 @@ async def mark_normalizing(db: AsyncSession, session: Sessions) -> Sessions:
 
 async def mark_normalized(db: AsyncSession, session: Sessions) -> Sessions:
     current_status = session.status
-    if current_status != JobStatusEnum.NORMALIZING | JobStatusEnum.EXTRACTED:
+    if current_status not in (JobStatusEnum.NORMALIZING, JobStatusEnum.EXTRACTED):
         emit_event(
             "session.status.invalid_transition",
             {
