@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from src.routes.status import status_router
 from src.routes.auth import auth_router
 from src.routes.injest import injest_router
+from src.routes.public import public_router
 def create_app()-> FastAPI:
     '''
     Created fastapi app, auto configures its metadata and settings
@@ -15,6 +16,7 @@ def create_app()-> FastAPI:
     app.include_router(status_router, prefix="/api/v1")
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(injest_router, prefix="/api/v1")
+    app.include_router(public_router)
     @app.get("/")
     def get_root():
         return {"message":" Welcome to resume roast arena"}

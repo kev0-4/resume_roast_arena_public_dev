@@ -29,11 +29,13 @@ async def mark_done(
     session: Sessions,
     render_blob_path: str,
     composite_score: int,
+    slug: str,
 ) -> Sessions:
     """RENDERING → DONE"""
     session.status = JobStatusEnum.DONE
     session.render_blob_path = render_blob_path
     session.composite_score = composite_score
+    session.slug = slug
     session.updated_at = datetime.utcnow()
     db.add(session)
     return session

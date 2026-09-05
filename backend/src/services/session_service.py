@@ -39,6 +39,15 @@ async def get_session(session_id : uuid.UUID | str, db: AsyncSession) ->SessionM
     return session
 
 
+async def get_session_by_slug(db: AsyncSession, slug: str) -> SessionModel | None:
+    stmt = (
+        select(SessionModel)
+        .where(SessionModel.slug == slug)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 ALLOWED_TRANSITIONS = {
     JobStatusEnum.UPLOADED: {JobStatusEnum.QUEUED, JobStatusEnum.FAILED},
     JobStatusEnum.QUEUED: {JobStatusEnum.PROCESSING, JobStatusEnum.FAILED},

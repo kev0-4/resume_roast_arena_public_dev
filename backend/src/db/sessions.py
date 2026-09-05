@@ -43,6 +43,7 @@ class Sessions(Base):
     # sanitized_blob_path = Column(Text, nullable=True)
     render_blob_path: Optional[str] = Column(Text, nullable=True)
     composite_score: Optional[int] = Column(Integer, nullable=True)
+    slug: Optional[str] = Column(String(16), unique=True, nullable=True, index=True)
     error_code: Optional[str] = Column(String(50), nullable=True)
     error_message: Optional[str] = Column(Text, nullable=True)
     # expires_at = Column(DateTime, nullable=True)

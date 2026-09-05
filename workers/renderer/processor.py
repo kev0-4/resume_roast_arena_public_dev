@@ -15,7 +15,8 @@ Pipeline:
 6. Build card context (score, stamp, punchline, ...)
 7. Render HTML -> screenshot PNG
 8. Upload render.png
-9. Mark DONE (sets render_blob_path + composite_score)
+8b. Generate unique public slug
+9. Mark DONE (sets render_blob_path + composite_score + slug)
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,8 +24,9 @@ from playwright.async_api import Error as PlaywrightError
 
 from backend.src.db.sessions import Sessions, JobStatusEnum
 from backend.src.db.users import Users
-from backend.src.services.session_service import get_session
+from backend.src.services.session_service import get_session, get_session_by_slug
 from backend.src.services.blob import upload_render
+from backend.src.utils.slug import generate_slug
 
 from .schemas import RenderJobMessage
 from .state import mark_rendering, mark_done, mark_failed
@@ -129,6 +131,19 @@ async def process_render_job(
         print(f"DEBUG: render.png uploaded for session_id: {session_id}")
 
         # ------------------------------------------------------------
+        # 8b. Generate a unique public slug
+        # ------------------------------------------------------------
+        slug = None
+        for _ in range(5):
+            candidate = generate_slug()
+            if await get_session_by_slug(db=db, slug=candidate) is None:
+                slug = candidate
+                break
+        if slug is None:
+            raise TransientRenderError("Failed to generate a unique slug after 5 attempts")
+        print(f"DEBUG: Generated slug {slug} for session_id: {session_id}")
+
+        # ------------------------------------------------------------
         # 9. Mark DONE
         # ------------------------------------------------------------
         await mark_done(
@@ -136,6 +151,7 @@ async def process_render_job(
             session=session,
             render_blob_path=render_blob_path,
             composite_score=context["score"],
+            slug=slug,
         )
         await db.commit()
         print(f"DEBUG: Session marked DONE, session_id: {session_id}")
