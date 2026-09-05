@@ -1195,13 +1195,13 @@ HTML roast card
 
 ## Public Link Service
 
-Still outstanding:
-
 ```text
 short slug
 → roast asset
 → TTL/public resolver
 ```
+
+**Update 2026-09-05: DONE.** `GET /r/{slug}` implemented — see section 30 for the full implementation record.
 
 **Planned follow-on (not yet designed):** a leaderboard / global comparison feature — ranking public roasts by the composite score (section 29), e.g. percentile stats like "better than 92% of resumes." Noted here 2026-09-05 so scoring/renderer decisions don't paint this into a corner (e.g. the composite score needs to stay a stored, comparable field, not just rendered text on the card).
 
@@ -1430,7 +1430,7 @@ When starting a new chat/model, give it this document and ask it to:
 
 # 28. Current project status
 
-**Updated 2026-09-05 (later same day)** — Renderer now built; see section 29 for the implementation notes appended below the original design decisions.
+**Updated 2026-09-05 (later still)** — Public Link Service now built too; see section 30.
 
 ```text
 INGEST                  ██████████  COMPLETE (incl. anonymous sessions)
@@ -1446,10 +1446,14 @@ COMPOSITE SCORE (0-100) ██████████  COMPLETE — Sessions.co
                                      separately still outstanding.
 RENDERER                ██████████  COMPLETE — workers/renderer/, ROASTED → RENDERING → DONE, see
                                      section 29. Verified end-to-end with a real generated PNG card.
-PUBLIC LINK             ░░░░░░░░░░  NOT IMPLEMENTED
+PUBLIC LINK             ██████████  COMPLETE — GET /r/{slug}, see section 30. A roast can now
+                                     actually be shared end-to-end. Only the original MVP's core
+                                     pipeline items remain unimplemented below.
 LEADERBOARD/GLOBAL CMP  ░░░░░░░░░░  NOT IMPLEMENTED — planned feature, composite_score is ready for
                                      it (stored + queryable), see section 29
-TTL/CLEANUP             ░░░░░░░░░░  NOT IMPLEMENTED
+TTL/CLEANUP             ░░░░░░░░░░  NOT IMPLEMENTED — GET /r/{slug} enforces the 30-day anonymous
+                                     TTL at *read* time (410 Gone), but nothing actually deletes
+                                     expired blobs/rows yet — see section 30
 REDIS/RATE LIMITING     ░░░░░░░░░░  NOT IMPLEMENTED
 PRODUCTION HARDENING    ███░░░░░░░  PARTIAL
 CI/CD/AZURE DEPLOY      ░░░░░░░░░░  NOT VERIFIED
@@ -1522,3 +1526,21 @@ The reference component's sparkline/`longStat` trend graph has **no real data so
 - **Migration**: `Sessions.composite_score` (`Integer`, nullable) added via a real Alembic migration (`backend/src/alembic/versions/6bca0908464c_add_composite_score_to_sessions.py`, `down_revision='fd4485ea5e78'`) — unlike the `RENDERING` enum value (no migration needed, `status` is a plain `String` column), a new column always needs one. Already applied to the local dev DB.
 
 **Not done / explicitly deferred**: the real-anonymized-snippet toggle (decision 3), the raw-counts toggle (decision 2), and per-section issue tagging for a future sparkline replacement — none of these were in scope for v1.
+
+---
+
+# 30. Public Link Service — IMPLEMENTED (2026-09-05)
+
+`GET /r/{slug}` — the one deliberately unauthenticated route in the app, registered with no `/api/v1` prefix. Implements `context/mvp_prompt.txt`'s "Public Link Service issues a short public slug and links it to the stored asset (with TTL). Expose static `https://domain/r/<slug>` for sharing."
+
+**Slug lifecycle**: generated in `workers/renderer/processor.py`, the very last step before `mark_done` — same call site that sets `render_blob_path`/`composite_score`. This means **a session can only ever have a slug once it's `DONE`** — the route needs no separate "exists but not ready yet" branch, that state is unreachable by construction. Format: 8 chars from an unambiguous 32-symbol alphabet (`backend/src/utils/slug.py`, no `0/o/1/l/i`), `secrets.choice`-generated, same style as `anon_identity.py`. `Sessions.slug` has a real DB-level unique index (not just app-level discipline) plus a bounded 5-attempt collision-retry loop in the processor.
+
+**TTL enforcement**: read-time only, no deletion job (that's the separately-tracked, still-unbuilt "TTL cleanup" item — the row/blob still physically exist after expiry, the route just stops serving them). Per spec's "roast metadata TTL 30 days for anonymous; configurable for logged-in users": anonymous users (`Users.is_anonymous`) past 30 days from `session.created_at` get `410 Gone`. Logged-in users get **no expiry in v1** — nothing configures "configurable retention" yet, so no number was invented; deliberate scope decision.
+
+**Response shape**: raw PNG bytes (`Response(content=png_bytes, media_type="image/png")`), proxied straight through the API by reading the blob server-side — no SAS token, no public blob container ACL, no CDN. Spec's "→ CDN" is an explicit later-phase concern (`context/scale_prompt.txt`); every other blob read in this codebase already works this way (server-mediated, not direct blob exposure), this just follows the same pattern. No wrapping HTML/Open-Graph page either — `<img src=".../r/<slug>">` or pasting the link directly both just work as-is; an OG-meta wrapper for nicer social-preview embeds is a natural future add, not needed without a frontend to link it from yet.
+
+**Found and fixed along the way**: `conftest.py` only put the project root on `sys.path`, not `backend/` — meaning `pytest` run from the repo root could never actually import anything under `backend.src.*` (it needs `backend/` on `sys.path` too, for `backend/src/__init__.py`'s internal `from src.routes...` imports to resolve — the same fix every manual e2e script this session already had to apply by hand). It also didn't load `workers/.env`, so `DATABASE_URL` etc. were never set when running from the root either. Both fixed directly in `conftest.py`. Consequence: `backend/src/tests/` and any `backend/src/**/test_*.py` were **never actually being collected/run** before this — worth knowing if "the test suite" was assumed to include backend tests in an earlier session; it didn't, silently. Whole-repo `pytest` (not `pytest workers/`) now passes 100/100.
+
+**Verified against real infra end-to-end**: a full session driven through the entire pipeline reached `DONE` with a slug, then `GET /r/{slug}` via the real FastAPI app returned `200`, `image/png`, and bytes identical to what's in blob storage; an unknown slug returned `404`.
+
+**Not done / explicitly deferred**: TTL cleanup (deletion job), rate limiting on this route (mentioned in the original MVP's Redis rate-limiting plan, not built anywhere yet), an HTML/OG-meta wrapper response, vanity slugs (`context/scale_prompt.txt`, paid-tier future feature — the `slug` column can carry them as-is, no schema change needed later).
