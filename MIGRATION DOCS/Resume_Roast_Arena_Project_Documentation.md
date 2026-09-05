@@ -1286,7 +1286,7 @@ container builds
 Azure deployment
 ```
 
-Still needs production implementation/verification.
+**Update 2026-09-05: test half DONE** — `.github/workflows/ci.yml` runs the full `pytest` suite on every push/PR, see section 33. **Container builds and Azure deployment still not implemented** — those need Azure credentials and a target environment that don't exist yet.
 
 ---
 
@@ -1430,7 +1430,7 @@ When starting a new chat/model, give it this document and ask it to:
 
 # 28. Current project status
 
-**Updated 2026-09-05 (later still)** — TTL cleanup now built too; see section 32. This session's local `main` branch drift is also resolved — everything through section 31 is merged into `main` (this feature is on PR #2, not yet merged).
+**Updated 2026-09-05 (later still)** — CI now built too; see section 33. This session's local `main` branch drift is resolved — everything through section 32 (TTL cleanup, PR #2) is merged into `main`; this feature (PR #3) is open, not yet merged.
 
 ```text
 INGEST                  ██████████  COMPLETE (incl. anonymous sessions)
@@ -1460,7 +1460,9 @@ REDIS/RATE LIMITING     ██████████  COMPLETE — POST /inges
                                      since the start of this project. CAPTCHA (spec's other
                                      anonymous-abuse mitigation) still not implemented.
 PRODUCTION HARDENING    ███░░░░░░░  PARTIAL
-CI/CD/AZURE DEPLOY      ░░░░░░░░░░  NOT VERIFIED
+CI/CD (TEST)            ██████████  COMPLETE — .github/workflows/ci.yml runs the full pytest suite
+                                     on every push/PR, see section 33. Container builds + Azure
+                                     deploy still not implemented (no Azure credentials/target yet).
 ```
 
 Full pipeline (ingest → extraction → normalization → anonymization → scoring → LLM roast → render) verified working end-to-end against real infra on 2026-09-05, all the way to DONE with a real generated PNG card.
@@ -1589,3 +1591,19 @@ The reference component's sparkline/`longStat` trend graph has **no real data so
 **Testing note for future work here**: this codebase has no `pytest-asyncio` and no prior async-test pattern. `workers/cleanup/test_sweep.py` uses the same `asyncio.run()`-per-test pattern every manual e2e script this session already used, wrapped with an explicit `await engine.dispose()` between tests — `backend/src/db/session.py`'s `engine` is a module-level singleton whose connection pool binds to whichever event loop first touches it; without disposing it at the end of each test's own loop, the next test's `asyncio.run()` (a *different* loop) reuses orphaned connections and asyncpg raises `MissingGreenlet`/`InterfaceError`. Also: **never touch an ORM object's attributes after a commit on the same session handle without an explicit refresh** — `db.commit()` expires all tracked objects' attributes by default, and touching one afterward (e.g. `session.id`) triggers an implicit lazy-reload that SQLAlchemy's asyncio mode doesn't support outside an explicit `await`, also raising `MissingGreenlet`. Fix used throughout: capture `session_id = session.id` as a plain value immediately after creation, and re-fetch via `get_session(session_id=...)` for anything needed after a later commit, rather than reusing the original ORM object.
 
 **Verified against real infra**: `test_sweep.py`'s 6 tests backdate `created_at` directly (the only practical way to test a 24h/30d TTL without waiting) against real Postgres + real Azurite, confirming exactly the right things get deleted and the right things survive. Separately ran the actual deployable entrypoint (`run_sweep_once()`, not just the sweep functions directly) against a real backdated anonymous session end-to-end — row and blob both confirmed gone afterward.
+
+---
+
+# 33. CI (test half) — IMPLEMENTED (2026-09-05)
+
+`.github/workflows/ci.yml` — runs the full `pytest` suite on every push (all branches) and every PR into `main`. This is the *test* half of the original MVP's "GitHub Actions to build images and deploy" — container builds and Azure deployment are a separate, not-yet-started follow-up (no Azure credentials or target environment exist yet).
+
+**Also added `requirements.txt`** at the repo root (`pip freeze` from the working venv, 134 packages) — `backend/src/requirements.txt` was never a real installable file, just a single comment line listing package names (confirmed repeatedly this session); CI cannot install dependencies without a real one. `backend/src/requirements.txt` now has a note pointing at the real file instead of duplicating it.
+
+**What's actually in CI**: `postgres:16`, `bitnami/redis:latest`, and `mcr.microsoft.com/azure-storage/azurite:latest` as GitHub Actions service containers (same images as `backend/docker-compose.yml`), then `alembic upgrade head`, then `pytest`. **Deliberately not in CI**: Tika, the Service Bus emulator, or a real Gemini API key — confirmed by reading every one of the 111 checked-in tests that none of them call any of the three (only this session's throwaway manual e2e scripts exercised the full pipeline with real Tika/Service-Bus/Gemini calls, and those were never part of `pytest`). Standing up Service Bus's SQL-Edge-backed emulator in CI and paying for real LLM calls on every push are both scope decisions, not oversights. **No GitHub secrets are needed** — every credential the suite touches is a throwaway local-dev-emulator value (Azurite's storage key specifically is Microsoft's published well-known emulator key, identical everywhere, not a secret).
+
+**Real bug this caught** (verification method matters — see below): `backend/src/services/service_bus.py` raises `RuntimeError` at *import* time if `AZURE_SERVICE_BUS_CONNECTION_STRING`/`AZURE_SERVICE_BUS_QUEUE_NAME` are unset. That import happens transitively for *every single test* via `backend/src/__init__.py`'s import chain (`routes.injest` → `service_bus.py`), even though no test calls Service Bus directly. The first test file to trigger it fails with that `RuntimeError` — and every subsequent test file's import of anything under `backend.src.*` then fails with a confusing `KeyError: 'src'` (a partially-registered package left in `sys.modules` after the first import raised partway through). Fixed by setting a syntactically valid but non-functional connection string in the workflow — nothing needs to actually connect.
+
+**Verification method — this is the point of "test fully"**: installed `act` (nektos/act) and Docker were already available, so the workflow was *actually executed* locally against real Docker service containers before ever pushing — not just read as YAML. That's what caught the bug above; a YAML-only review would have missed it (the workflow file itself was syntactically fine — the bug was a runtime env var gap only a real run surfaces). After the fix: `act` reported `111 passed, ... job succeeded`. Separately confirmed on GitHub's own hosted runners too via this feature's own PR (#3) — both "test" checks (triggered once by the branch push, once by the PR) passed, log-verified to show `111 passed` on GitHub's infrastructure, not just locally.
+
+**Trigger note**: `on: push` (any branch) + `on: pull_request` (into `main`) means a PR from a pushed branch runs the suite twice (once per trigger) — a minor inefficiency, not a bug; left as-is rather than adding `concurrency`/path-filter tuning that wasn't asked for.
