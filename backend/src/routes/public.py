@@ -8,8 +8,11 @@ A session can only ever have a slug once it's DONE (the renderer worker
 generates it as the very last step), so slug-exists implies DONE -- no
 separate "not ready yet" branch needed.
 
-TTL: anonymous users' roasts expire after 30 days from session creation
-(per the original MVP spec's "roast metadata TTL 30 days for anonymous").
+TTL: anonymous users' roasts expire after ANONYMOUS_ROAST_TTL_DAYS (config.py,
+default 30) from session creation (per the original MVP spec's "roast
+metadata TTL 30 days for anonymous") -- this is the same constant
+workers/cleanup/sweep.py uses to actually delete the data, kept in one
+place so the "expired" check here and the real deletion never drift apart.
 Logged-in users: no expiry enforced yet -- spec says "configurable
 retention" but nothing configures it yet, so deliberately not inventing a
 number here.
@@ -23,10 +26,9 @@ from ..db.session import get_db_sqlalchemy
 from ..db.users import Users
 from ..services.session_service import get_session_by_slug
 from ..services.blob import read_blob
+from ..config import ANONYMOUS_ROAST_TTL_DAYS
 
 public_router = APIRouter()
-
-ANONYMOUS_ROAST_TTL_DAYS = 30
 
 
 @public_router.get("/r/{slug}")

@@ -5,6 +5,7 @@ from sqlalchemy.orm import relationship
 import uuid
 import enum
 from typing import Optional
+from datetime import datetime
 
 JOB_STATUSES = (
     "UPLOADED",
@@ -44,6 +45,7 @@ class Sessions(Base):
     render_blob_path: Optional[str] = Column(Text, nullable=True)
     composite_score: Optional[int] = Column(Integer, nullable=True)
     slug: Optional[str] = Column(String(16), unique=True, nullable=True, index=True)
+    raw_deleted_at: Optional[datetime] = Column(DateTime, nullable=True)
     error_code: Optional[str] = Column(String(50), nullable=True)
     error_message: Optional[str] = Column(Text, nullable=True)
     # expires_at = Column(DateTime, nullable=True)

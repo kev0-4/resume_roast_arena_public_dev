@@ -68,19 +68,47 @@ def upload_raw(session_id: str, filename: str, file_bytes: bytes) -> str:
     return blob_path
 
 
-def delete_raw(session_id: str) -> int:
-    container_client = _get_container_client()
-    prefix = f"{AZURE_CONTAINER_RAW_FOLDER_PREFIX}/{session_id}/"
-
-    blob_to_delete = list(container_client.list_blobs(name_starts_with=prefix))
+def _delete_prefix(container_client: ContainerClient, prefix: str) -> int:
+    blobs_to_delete = list(container_client.list_blobs(name_starts_with=prefix))
     delete_count = 0
-    for blob in blob_to_delete:
+    for blob in blobs_to_delete:
         blob_client = container_client.get_blob_client(blob.name)
         try:
             blob_client.delete_blob()
         except ResourceNotFoundError:
             pass
         delete_count += 1
+    return delete_count
+
+
+def delete_raw(session_id: str) -> int:
+    container_client = _get_container_client()
+    prefix = f"{AZURE_CONTAINER_RAW_FOLDER_PREFIX}/{session_id}/"
+    return _delete_prefix(container_client, prefix)
+
+
+# Every blob prefix a session can ever have data under (see the blob path
+# convention -- extraction through render). Not including AZURE_CONTAINER_RAW_
+# FOLDER_PREFIX by name here since delete_raw() already covers that one and
+# callers of delete_all_session_blobs() may have already run it separately.
+_ALL_SESSION_BLOB_PREFIXES = (
+    "extracted",
+    "normalized",
+    "anonymized",
+    "scored",
+    "prompt",
+    "roast",
+    "render",
+)
+
+
+def delete_all_session_blobs(session_id: str) -> int:
+    """Deletes every blob for a session across all pipeline stages, including raw."""
+    container_client = _get_container_client()
+    delete_count = delete_raw(session_id)
+    for prefix_name in _ALL_SESSION_BLOB_PREFIXES:
+        prefix = f"{prefix_name}/{session_id}/"
+        delete_count += _delete_prefix(container_client, prefix)
     return delete_count
 
 
