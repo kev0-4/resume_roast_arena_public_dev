@@ -13,13 +13,13 @@ export function ExampleRoastCard({
   stamp: string;
 }) {
   return (
-    <div className="flex aspect-[3/3.3] w-40 flex-col items-center justify-center rounded-[2rem] border border-ash-bg/20 bg-ink/75 p-5 shadow-2xl backdrop-blur-md md:w-52">
-      <div className="rounded-md border-2 border-ember px-3 py-1 font-display text-sm tracking-wide text-ember">
+    <div className="flex aspect-[3/3.3] w-40 flex-col items-center justify-center rounded-[2rem] border border-white/20 bg-black/70 p-5 shadow-2xl backdrop-blur-md md:w-52">
+      <div className="rounded-md border-2 border-brand-lime px-3 py-1 font-display text-sm tracking-wide text-brand-lime">
         {stamp}
       </div>
       <div className="mt-4 text-center">
-        <p className="font-mono text-[11px] font-medium text-ash-bg/70">{name}</p>
-        <p className="mt-1 font-display text-3xl text-ash-bg">{score}/100</p>
+        <p className="font-mono text-[11px] font-medium text-white/70">{name}</p>
+        <p className="mt-1 font-display text-3xl text-white">{score}/100</p>
       </div>
     </div>
   );

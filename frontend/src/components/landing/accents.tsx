@@ -1,12 +1,12 @@
 // Hand-drawn accent SVGs + the spinning CTA badge for the landing hero.
-// Re-colored from the ember/ash brand palette (see globals.css) rather
-// than a generic accent color, so these read as "roast/fire" marks, not
-// arbitrary decoration.
+// Colored to match the reference component's own palette (brand blue +
+// lime), the user's explicit preference over the roast card's ember/ash
+// scheme -- see globals.css for the note on that divergence.
 
-export const ArrowEmberLeft = () => (
+export const ArrowAccentLeft = () => (
   <svg
     viewBox="0 0 100 100"
-    className="h-full w-full overflow-visible stroke-ember"
+    className="h-full w-full overflow-visible stroke-brand-lime"
     fill="none"
     strokeWidth="6"
     strokeLinecap="round"
@@ -17,10 +17,10 @@ export const ArrowEmberLeft = () => (
   </svg>
 );
 
-export const ArrowEmberRight = () => (
+export const ArrowAccentRight = () => (
   <svg
     viewBox="0 0 100 100"
-    className="h-full w-full overflow-visible stroke-ember"
+    className="h-full w-full overflow-visible stroke-brand-lime"
     fill="none"
     strokeWidth="6"
     strokeLinecap="round"
@@ -31,10 +31,10 @@ export const ArrowEmberRight = () => (
   </svg>
 );
 
-export const ArrowInk = () => (
+export const ArrowDark = () => (
   <svg
     viewBox="0 0 100 100"
-    className="h-full w-full overflow-visible stroke-ink"
+    className="h-full w-full overflow-visible stroke-black"
     fill="none"
     strokeWidth="5"
     strokeLinecap="round"
@@ -46,7 +46,7 @@ export const ArrowInk = () => (
 );
 
 export const SpinningRoastBadge = () => (
-  <div className="relative h-28 w-28 rotate-12 cursor-pointer rounded-full border-[3px] border-black/10 bg-ember shadow-xl transition-transform hover:scale-105 md:h-36 md:w-36">
+  <div className="relative h-28 w-28 rotate-12 cursor-pointer rounded-full border-[3px] border-black/5 bg-brand-lime shadow-xl transition-transform hover:scale-105 md:h-36 md:w-36">
     <div className="absolute inset-1 animate-[spin_10s_linear_infinite]">
       <svg viewBox="0 0 100 100" className="h-full w-full">
         <path
@@ -56,7 +56,7 @@ export const SpinningRoastBadge = () => (
         />
         <text
           className="font-mono text-[11px] font-bold uppercase tracking-[0.18em]"
-          fill="#211C16"
+          fill="black"
         >
           <textPath href="#badgeCirclePath" startOffset="0%">
             UPLOAD YOUR RESUME • GET ROASTED •{" "}
@@ -67,7 +67,7 @@ export const SpinningRoastBadge = () => (
     <div className="absolute inset-0 flex items-center justify-center">
       <svg
         viewBox="0 0 100 100"
-        className="h-10 w-10 overflow-visible stroke-ink"
+        className="h-10 w-10 overflow-visible stroke-black"
         fill="none"
         strokeWidth="8"
         strokeLinecap="round"

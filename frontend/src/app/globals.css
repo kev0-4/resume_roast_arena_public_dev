@@ -1,28 +1,28 @@
 @import "tailwindcss";
 
 :root {
-  /* Brand palette -- matches workers/renderer/pipeline/templates/roast_card.html
-     so the landing page and the roast card itself read as one product. */
-  --ash-bg: #f6f1e7;
-  --paper: #f1e9d8;
-  --paper-line: #d8cbaa;
-  --ink: #211c16;
-  --smoke: #8c8474;
-  --ember-deep: #c1121f;
-  --ember: #ff6b35;
+  /* Landing page palette -- matches the reference component's own colors
+     (user's explicit preference over the roast card's ember/ash scheme).
+     NOTE: this means the landing page and the actual roast card
+     (workers/renderer/pipeline/templates/roast_card.html) currently use
+     two different palettes -- flagged as a follow-up to revisit, not
+     fixed here. */
+  --brand-blue: #0038ff;
+  --brand-blue-deep: #001a99;
+  --brand-lime: #ccff00;
+  --paper: #f8f9fa;
+  --smoke: #6b6b6b;
 
-  --background: var(--ash-bg);
-  --foreground: var(--ink);
+  --background: #ffffff;
+  --foreground: #000000;
 }
 
 @theme inline {
-  --color-ash-bg: var(--ash-bg);
+  --color-brand-blue: var(--brand-blue);
+  --color-brand-blue-deep: var(--brand-blue-deep);
+  --color-brand-lime: var(--brand-lime);
   --color-paper: var(--paper);
-  --color-paper-line: var(--paper-line);
-  --color-ink: var(--ink);
   --color-smoke: var(--smoke);
-  --color-ember-deep: var(--ember-deep);
-  --color-ember: var(--ember);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-display: var(--font-anton);
