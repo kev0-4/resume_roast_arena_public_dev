@@ -33,7 +33,7 @@ AZURE_SERVICE_BUS_SCORING_QUEUE_NAME = os.getenv("AZURE_SERVICE_BUS_SCORING_QUEU
 AZURE_SERVICE_BUS_LLM_QUEUE_NAME = os.getenv("AZURE_SERVICE_BUS_LLM_QUEUE_NAME")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_ROAST_MODEL = os.getenv("GEMINI_ROAST_MODEL", "gemini-3.8-flash")
+GEMINI_ROAST_MODEL = os.getenv("GEMINI_ROAST_MODEL", "gemini-3.5-flash-lite")
 
 if None in VALUES:
     print("Warning: one or more variables not found in environment variables.")

@@ -7,7 +7,8 @@ Security invariant: this module only ever receives the prompt string built
 from the anonymized artifact.  Raw or normalized resume content NEVER reaches
 this module or the Gemini API.
 
-Model: gemini-3.8-flash by default (configurable via GEMINI_ROAST_MODEL).
+Model: gemini-3.5-flash-lite by default (configurable via GEMINI_ROAST_MODEL) —
+chosen for its higher free-tier rate limits.
 Provider may change (e.g. to OpenAI) later — this module is the only place
 that needs to change.
 """
@@ -16,7 +17,7 @@ import os
 from google import genai
 from typing import Tuple
 
-_MODEL = os.getenv("GEMINI_ROAST_MODEL", "gemini-3.8-flash")
+_MODEL = os.getenv("GEMINI_ROAST_MODEL", "gemini-3.5-flash-lite")
 _MAX_OUTPUT_TOKENS = 1024
 
 _async_client: genai.Client | None = None

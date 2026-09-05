@@ -13,7 +13,7 @@ Flow:
       ↓
   load prompt.txt
       ↓
-  call Gemini API (gemini-3.8-flash)
+  call Gemini API (gemini-3.5-flash-lite)
       ↓
   parse VERDICT / ROAST / FIXES
       ↓
