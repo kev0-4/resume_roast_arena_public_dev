@@ -1217,7 +1217,7 @@ anonymous roast metadata → 30 days
 logged-in retention → configurable
 ```
 
-Still outstanding.
+**Update 2026-09-05: DONE** (raw + anonymous; logged-in retention still deliberately unconfigured, see section 32) — `workers/cleanup/`, see section 32.
 
 ---
 
@@ -1430,7 +1430,7 @@ When starting a new chat/model, give it this document and ask it to:
 
 # 28. Current project status
 
-**Updated 2026-09-05 (later still)** — rate limiting now built too; see section 31.
+**Updated 2026-09-05 (later still)** — TTL cleanup now built too; see section 32. This session's local `main` branch drift is also resolved — everything through section 31 is merged into `main` (this feature is on PR #2, not yet merged).
 
 ```text
 INGEST                  ██████████  COMPLETE (incl. anonymous sessions)
@@ -1451,9 +1451,10 @@ PUBLIC LINK             ██████████  COMPLETE — GET /r/{slu
                                      pipeline items remain unimplemented below.
 LEADERBOARD/GLOBAL CMP  ░░░░░░░░░░  NOT IMPLEMENTED — planned feature, composite_score is ready for
                                      it (stored + queryable), see section 29
-TTL/CLEANUP             ░░░░░░░░░░  NOT IMPLEMENTED — GET /r/{slug} enforces the 30-day anonymous
-                                     TTL at *read* time (410 Gone), but nothing actually deletes
-                                     expired blobs/rows yet — see section 30
+TTL/CLEANUP             ██████████  COMPLETE — workers/cleanup/, see section 32. Raw uploads deleted
+                                     after 24h, anonymous sessions (row + all blobs) after 30d.
+                                     Logged-in retention still deliberately unconfigured (spec says
+                                     "configurable," nothing configures it yet).
 REDIS/RATE LIMITING     ██████████  COMPLETE — POST /ingest only (5/hour, configurable), see section
                                      31. Redis finally used for something after being provisioned
                                      since the start of this project. CAPTCHA (spec's other
@@ -1567,3 +1568,24 @@ The reference component's sparkline/`longStat` trend graph has **no real data so
 **Verified against the real Redis container**: unit tests exercise the counter directly, including a real (not mocked) window-expiry wait; an end-to-end run against the actual FastAPI app confirmed 5 anonymous `POST /ingest` calls succeed and the 6th/7th both return `429` with a correct `Retry-After` value that counts down within the configured window.
 
 **Not done / explicitly deferred**: CAPTCHA (spec's other anonymous-abuse mitigation), rate limiting on any other route (only `/ingest` is expensive enough to warrant it in v1), a sliding-window or token-bucket algorithm (fixed-window is simpler and sufficient for this threshold).
+
+---
+
+# 32. TTL Cleanup — IMPLEMENTED (2026-09-05)
+
+`workers/cleanup/` — the actual deletion behind the retention policy `GET /r/{slug}` already enforced at *read* time (410 Gone for expired anonymous roasts). Before this, nothing ever deleted anything: raw resumes and full roast data lived in Blob/Postgres forever regardless of age.
+
+**Not a Service-Bus consumer** like every other worker — this is a periodic sweep, not message-driven. `main.py` loops on `CLEANUP_SWEEP_INTERVAL_SECONDS` (default 1 hour), running two independent sweeps each pass (`sweep.py`):
+
+1. `cleanup_raw_uploads`: deletes just the `raw/<id>/` blob for every session older than `RAW_UPLOAD_TTL_HOURS` (default 24), **regardless of status or owner** — matches spec literally ("Uploaded raw files auto-delete after 24 hours"), no carve-out.
+2. `cleanup_expired_anonymous_sessions`: deletes the whole `Sessions` row *and every blob prefix* (via the new `delete_all_session_blobs()` in `blob.py`) for sessions owned by an anonymous user (`Users.is_anonymous`) older than `ANONYMOUS_ROAST_TTL_DAYS` (default 30). Logged-in users are never touched by this sweep — spec says "configurable retention" for them, but nothing configures it yet, so no number was invented (same reasoning already used for the Public Link's 410 check, section 30).
+
+**Shared TTL constant fix**: `ANONYMOUS_ROAST_TTL_DAYS` used to be a hardcoded `30` local to `backend/src/routes/public.py`. Moved to `backend/src/config.py` (env-configurable) and imported by both the read-time 410 check and this sweep — otherwise the "says expired" and "actually deletes" logic could silently drift to different numbers.
+
+**Avoiding re-scanning forever**: new `Sessions.raw_deleted_at` column (real migration) — the raw-upload sweep query is `WHERE raw_deleted_at IS NULL AND created_at < cutoff`, so an already-cleaned session is never re-processed on every future pass. The anonymous-session sweep needs no such flag since it deletes the row entirely.
+
+**Deliberately not done**: the anonymous `Users` row itself is never deleted (a leftover anon user with no sessions is harmless orphan data — a users-cleanup sweep is a reasonable future addition, not required now); the spec's separate "deletion endpoints" (a user-facing right-to-erasure API, distinct from automatic TTL) — different, larger feature, not built here.
+
+**Testing note for future work here**: this codebase has no `pytest-asyncio` and no prior async-test pattern. `workers/cleanup/test_sweep.py` uses the same `asyncio.run()`-per-test pattern every manual e2e script this session already used, wrapped with an explicit `await engine.dispose()` between tests — `backend/src/db/session.py`'s `engine` is a module-level singleton whose connection pool binds to whichever event loop first touches it; without disposing it at the end of each test's own loop, the next test's `asyncio.run()` (a *different* loop) reuses orphaned connections and asyncpg raises `MissingGreenlet`/`InterfaceError`. Also: **never touch an ORM object's attributes after a commit on the same session handle without an explicit refresh** — `db.commit()` expires all tracked objects' attributes by default, and touching one afterward (e.g. `session.id`) triggers an implicit lazy-reload that SQLAlchemy's asyncio mode doesn't support outside an explicit `await`, also raising `MissingGreenlet`. Fix used throughout: capture `session_id = session.id` as a plain value immediately after creation, and re-fetch via `get_session(session_id=...)` for anything needed after a later commit, rather than reusing the original ORM object.
+
+**Verified against real infra**: `test_sweep.py`'s 6 tests backdate `created_at` directly (the only practical way to test a 24h/30d TTL without waiting) against real Postgres + real Azurite, confirming exactly the right things get deleted and the right things survive. Separately ran the actual deployable entrypoint (`run_sweep_once()`, not just the sweep functions directly) against a real backdated anonymous session end-to-end — row and blob both confirmed gone afterward.
