@@ -42,14 +42,11 @@ def setup_signal_handlers() -> None:
     signal.signal(signal.SIGINT, lambda *_: _handle_shutdown_signal())
 async def _handle_message(receiver, message: ServiceBusMessage) -> None:
     session_id = None
-    print("---------------------------------------------------------")
-    print("---------------------------")
-    print(message)
+    logger.debug("Received raw Service Bus message", extra={"message": str(message)})
     try:
         try:
-            print("entered nested try")
             payload = json.loads(str(message))
-            print(payload)
+            logger.debug("Parsed message payload", extra={"payload": payload})
             job = ExtractionJobMessage(**payload)
             session_id = job.session_id
         except Exception as e:

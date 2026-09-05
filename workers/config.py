@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv, dotenv_values
+from backend.src.utils.telemetry import emit_event
 load_dotenv()
 VALUES = config = dotenv_values(".env")
 SECRET_KEY = os.getenv("SECRET_KEY")
@@ -32,5 +33,10 @@ TIKA_SERVER_ENDPOINT=os.getenv("TIKA_SERVER_ENDPOINT")
 
 
 if None in VALUES:
-    print("Warning: one or more variables not found in environment variables.")
-    print(VALUES)  # comment out later
+    # Deliberately not logging VALUES itself -- it can contain secrets
+    # (SECRET_KEY, passwords), and emit_event persists to log_entry.json
+    # rather than a transient console print.
+    emit_event(
+        "worker_config.env_check_warning",
+        {"reason": "one or more expected variables not found in .env", "status": "WARNING"},
+    )

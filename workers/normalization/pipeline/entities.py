@@ -121,8 +121,6 @@ def extract_entities(*, raw_text: str) -> Dict[str, List[dict]]:
 
         start = match.start() + left_strip
         end = match.end() - right_strip  # anchor to match.end() instead
-        print("----------------------")
-        print(repr(original_value), match.start(), match.end())
 
         # Reject if span overlaps any URL
         if url_positions.intersection(range(start, end)):

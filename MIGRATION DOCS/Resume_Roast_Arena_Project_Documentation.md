@@ -1099,13 +1099,7 @@ Standardize timestamps later, preferably around timezone-aware UTC timestamps.
 
 ## D. Logging
 
-Some worker code still uses:
-
-```python
-print(...)
-```
-
-Replace with structured logging / `emit_event`.
+**Update 2026-09-05: DONE.** Every worker's `processor.py`, `workers/extraction/extractor/tika.py`, `workers/normalization/pipeline/segmenter.py`, and `workers/config.py` converted from `print()` to `emit_event()`. See section 34 for the full record. `workers/anonymization/pipeline/testAssembler.py`/`testRedactor.py` (manual console test-runner scripts) and `_DEPRECIATED_signals.py` (dead code) deliberately left untouched.
 
 The original MVP explicitly calls for observability hooks throughout the pipeline. fileciteturn4file4L1-L8
 
@@ -1430,7 +1424,7 @@ When starting a new chat/model, give it this document and ask it to:
 
 # 28. Current project status
 
-**Updated 2026-09-05 (later still)** — CI now built too; see section 33. This session's local `main` branch drift is resolved — everything through section 32 (TTL cleanup, PR #2) is merged into `main`; this feature (PR #3) is open, not yet merged.
+**Updated 2026-09-05 (later still)** — CI (section 33) and structured logging (section 34) both merged into `main` now, back to back (PR #3 then PR #4). PR #4 branched before PR #3 merged, so merging it produced the real git conflict predicted in an earlier revision of this section — resolved here by keeping both sections 33 and 34.
 
 ```text
 INGEST                  ██████████  COMPLETE (incl. anonymous sessions)
@@ -1459,7 +1453,8 @@ REDIS/RATE LIMITING     ██████████  COMPLETE — POST /inges
                                      31. Redis finally used for something after being provisioned
                                      since the start of this project. CAPTCHA (spec's other
                                      anonymous-abuse mitigation) still not implemented.
-PRODUCTION HARDENING    ███░░░░░░░  PARTIAL
+PRODUCTION HARDENING    ████░░░░░░  PARTIAL — structured logging (print() -> emit_event) done across
+                                     every worker, see section 34. Pydantic V2 warnings still open.
 CI/CD (TEST)            ██████████  COMPLETE — .github/workflows/ci.yml runs the full pytest suite
                                      on every push/PR, see section 33. Container builds + Azure
                                      deploy still not implemented (no Azure credentials/target yet).
@@ -1607,3 +1602,19 @@ The reference component's sparkline/`longStat` trend graph has **no real data so
 **Verification method — this is the point of "test fully"**: installed `act` (nektos/act) and Docker were already available, so the workflow was *actually executed* locally against real Docker service containers before ever pushing — not just read as YAML. That's what caught the bug above; a YAML-only review would have missed it (the workflow file itself was syntactically fine — the bug was a runtime env var gap only a real run surfaces). After the fix: `act` reported `111 passed, ... job succeeded`. Separately confirmed on GitHub's own hosted runners too via this feature's own PR (#3) — both "test" checks (triggered once by the branch push, once by the PR) passed, log-verified to show `111 passed` on GitHub's infrastructure, not just locally.
 
 **Trigger note**: `on: push` (any branch) + `on: pull_request` (into `main`) means a PR from a pushed branch runs the suite twice (once per trigger) — a minor inefficiency, not a bug; left as-is rather than adding `concurrency`/path-filter tuning that wasn't asked for.
+
+# 34. Structured Logging — IMPLEMENTED (2026-09-05)
+
+Every worker's `processor.py` (extraction, normalization, anonymization, scoring, llm, renderer) used plain `print()` for its entire debug trace. Converted to `emit_event()` (`backend/src/utils/telemetry.py`) — the structured-logging pattern already established elsewhere in this codebase (state.py files, `service_bus.py`, every `backend/src/routes/*` file) but never applied inside the processor orchestration files themselves. `workers/normalization/processor.py` had even already imported `emit_event` and never called it once.
+
+**Naming convention**: `<worker>.<step>`, dotted, matching what already existed (`session.status.marked_processing`, `servicebus.enqueue.success`) — e.g. `scoring.inputs_extracted`, `llm.response_received`, `render.slug_generated`. Every event carries `session_id` plus whatever contextual data is available at that point (counts, confidence scores, token usage, etc.) and a `status` level (`INFO`/`WARNING`/`ERROR`).
+
+**Judgment calls made, not blind 1:1 conversion**:
+- `workers/config.py`'s conversion deliberately does **not** log the raw `VALUES` dict the way the old `print(VALUES)` did — it can contain secrets (`SECRET_KEY`, DB/Redis passwords), and `emit_event` **persists** to `log_entry.json` rather than a transient console print, a materially different risk profile.
+- `workers/extraction/consumer.py` (like every `consumer.py` in this repo) already used Python's stdlib `logging.Logger` consistently for its own operational logging — its leftover debug prints were converted to `logger.debug(...)` to match *that file's own* established pattern, not forced into `emit_event`. Every worker's `consumer.py`/`main.py` already does this correctly; only the leftover raw prints inside `extraction/consumer.py`'s `_handle_message` needed fixing.
+- One debug print in `workers/normalization/pipeline/entities.py` (dumping `repr(original_value)` per phone-regex match candidate) was **removed**, not converted — it can fire many times per single resume, and a 1:1 `emit_event` conversion would have spammed the structured log with zero lasting informational value per entry.
+- `workers/extraction/extractor/tika.py` had two "before text"/"after text" prints bracketing a `.strip()` call with no real informational content — removed rather than manufacturing a meaningless event for each.
+
+**Deliberately not touched**: `workers/anonymization/pipeline/testAssembler.py` and `testRedactor.py` — manual console test-runner scripts (`if __name__ == "__main__":` style, ✓/✗ pass-fail output) meant for a human to read directly, not part of the live pipeline; converting their prints would make them useless for their actual purpose. `workers/normalization/pipeline/_DEPRECIATED_signals.py` — dead code (filename says so). Two prints inside `workers/normalization/consumer.py` — already inside a commented-out, disabled code block, not live.
+
+**Verified against real infra**: ran the full pipeline end-to-end (ingest → extraction → normalization → anonymization → scoring → LLM roast → render, reaching `DONE` with a real slug) and inspected the actual resulting `log_entry.json` directly — 62 structured entries, correctly ordered, `session_id` threaded through every single one, meaningful contextual data at each step (Tika confidence, block/entity/signal/metric counts, LLM token usage, composite score, generated slug). 111/111 tests still passing — this is a pure observability refactor, no behavior changes.

@@ -27,6 +27,7 @@ from backend.src.db.users import Users
 from backend.src.services.session_service import get_session, get_session_by_slug
 from backend.src.services.blob import upload_render
 from backend.src.utils.slug import generate_slug
+from backend.src.utils.telemetry import emit_event
 
 from .schemas import RenderJobMessage
 from .state import mark_rendering, mark_done, mark_failed
@@ -45,7 +46,7 @@ async def process_render_job(
 ) -> None:
     """Main orchestrator for the render stage."""
 
-    print("--entered process_render_job")
+    emit_event("render.job.started", {"session_id": str(message.session_id), "status": "INFO"})
     session_id = message.session_id
 
     # ----------------------------------------------------------------
@@ -53,24 +54,24 @@ async def process_render_job(
     # ----------------------------------------------------------------
     session: Sessions | None = await get_session(db=db, session_id=session_id)
     if session is None:
-        print(f"Returning: session not found, session_id: {session_id}")
+        emit_event("render.session.not_found", {"session_id": str(session_id), "status": "WARNING"})
         return
 
     # ----------------------------------------------------------------
     # 2. Idempotency guards
     # ----------------------------------------------------------------
     if session.status == JobStatusEnum.FAILED:
-        print(f"Returning: session is FAILED, session_id: {session_id}")
+        emit_event("render.guard.session_failed", {"session_id": str(session_id), "status": "INFO"})
         return
 
     if session.status == JobStatusEnum.DONE:
-        print(f"Returning: session already DONE, session_id: {session_id}")
+        emit_event("render.guard.already_done", {"session_id": str(session_id), "status": "INFO"})
         return
 
     if session.status != JobStatusEnum.ROASTED:
-        print(
-            f"Returning: session status is {session.status}, "
-            f"expected ROASTED, session_id: {session_id}"
+        emit_event(
+            "render.guard.not_roasted",
+            {"session_id": str(session_id), "current_status": session.status, "status": "WARNING"},
         )
         return
 
@@ -78,7 +79,7 @@ async def process_render_job(
     # 3. Mark RENDERING
     # ----------------------------------------------------------------
     session = await mark_rendering(db=db, session=session)
-    print("--marked RENDERING")
+    emit_event("render.marked_rendering", {"session_id": str(session_id), "status": "INFO"})
 
     try:
         # ------------------------------------------------------------
@@ -98,7 +99,7 @@ async def process_render_job(
             roast = load_roast(message.roast_blob_path)
         except Exception as e:
             raise TransientRenderError(f"Failed to load upstream artifacts: {e}")
-        print(f"DEBUG: Loaded scored.json + roast.json for session_id: {session_id}")
+        emit_event("render.artifacts_loaded", {"session_id": str(session_id), "status": "INFO"})
 
         # ------------------------------------------------------------
         # 6. Build card context
@@ -107,7 +108,10 @@ async def process_render_job(
             context = build_card_context(scored=scored, roast=roast, display_name=display_name)
         except Exception as e:
             raise PermanentRenderError(f"Failed to build card context: {e}")
-        print(f"DEBUG: Card context built. score={context['score']} stamp={context['stamp']}")
+        emit_event(
+            "render.context_built",
+            {"session_id": str(session_id), "score": context["score"], "stamp": context["stamp"], "status": "INFO"},
+        )
 
         # ------------------------------------------------------------
         # 7. Render HTML -> screenshot PNG
@@ -119,7 +123,10 @@ async def process_render_job(
             raise
         except PlaywrightError as e:
             raise TransientRenderError(f"Screenshot rendering failed: {e}")
-        print(f"DEBUG: Rendered card PNG ({len(png_bytes)} bytes) for session_id: {session_id}")
+        emit_event(
+            "render.screenshot_complete",
+            {"session_id": str(session_id), "byte_count": len(png_bytes), "status": "INFO"},
+        )
 
         # ------------------------------------------------------------
         # 8. Upload render.png
@@ -128,7 +135,7 @@ async def process_render_job(
             render_blob_path = upload_render(session_id=str(session_id), png_bytes=png_bytes)
         except Exception as e:
             raise TransientRenderError(f"Failed to upload render artifact: {e}")
-        print(f"DEBUG: render.png uploaded for session_id: {session_id}")
+        emit_event("render.png_uploaded", {"session_id": str(session_id), "status": "INFO"})
 
         # ------------------------------------------------------------
         # 8b. Generate a unique public slug
@@ -141,7 +148,7 @@ async def process_render_job(
                 break
         if slug is None:
             raise TransientRenderError("Failed to generate a unique slug after 5 attempts")
-        print(f"DEBUG: Generated slug {slug} for session_id: {session_id}")
+        emit_event("render.slug_generated", {"session_id": str(session_id), "slug": slug, "status": "INFO"})
 
         # ------------------------------------------------------------
         # 9. Mark DONE
@@ -154,7 +161,7 @@ async def process_render_job(
             slug=slug,
         )
         await db.commit()
-        print(f"DEBUG: Session marked DONE, session_id: {session_id}")
+        emit_event("render.marked_done", {"session_id": str(session_id), "status": "INFO"})
 
     # ----------------------------------------------------------------
     # Error handling
@@ -163,7 +170,10 @@ async def process_render_job(
         raise
 
     except PermanentRenderError as e:
-        print(f"DEBUG: Permanent render error: {e}, session_id: {session_id}")
+        emit_event(
+            "render.error.permanent",
+            {"session_id": str(session_id), "reason": str(e), "status": "ERROR"},
+        )
         await mark_failed(
             db=db,
             session=session,
@@ -173,5 +183,8 @@ async def process_render_job(
         await db.commit()
 
     except Exception as e:
-        print(f"DEBUG: Unexpected error in render processor: {e}, session_id: {session_id}")
+        emit_event(
+            "render.error.unexpected",
+            {"session_id": str(session_id), "reason": str(e), "status": "ERROR"},
+        )
         raise TransientRenderError(str(e))
