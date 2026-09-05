@@ -18,7 +18,7 @@ Pipeline:
 9. Mark ROASTED
 """
 
-import anthropic
+from google.genai import errors as genai_errors
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
@@ -94,14 +94,12 @@ async def process_llm_job(
         # ------------------------------------------------------------
         try:
             raw_text, usage, model_used = await call_roast_llm(prompt)
-        except anthropic.RateLimitError as e:
-            raise TransientLLMError(f"Anthropic rate limit: {e}")
-        except anthropic.APIConnectionError as e:
-            raise TransientLLMError(f"Anthropic connection error: {e}")
-        except anthropic.APIStatusError as e:
-            if e.status_code >= 500:
-                raise TransientLLMError(f"Anthropic server error ({e.status_code}): {e}")
-            raise PermanentLLMError(f"Anthropic client error ({e.status_code}): {e}")
+        except genai_errors.ServerError as e:
+            raise TransientLLMError(f"Gemini server error ({e.code}): {e}")
+        except genai_errors.ClientError as e:
+            if e.code == 429:
+                raise TransientLLMError(f"Gemini rate limit: {e}")
+            raise PermanentLLMError(f"Gemini client error ({e.code}): {e}")
         print(
             f"DEBUG: LLM responded. Model: {model_used}, "
             f"tokens in/out: {usage.get('input_tokens')}/{usage.get('output_tokens')}"

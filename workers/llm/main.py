@@ -13,7 +13,7 @@ Flow:
       ↓
   load prompt.txt
       ↓
-  call Anthropic API (claude-haiku-4-5)
+  call Gemini API (gemini-3.8-flash)
       ↓
   parse VERDICT / ROAST / FIXES
       ↓

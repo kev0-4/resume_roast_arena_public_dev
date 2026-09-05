@@ -1,59 +1,57 @@
 """
 workers/llm/pipeline/client.py
 
-LLM inference client — calls the Anthropic API to generate a resume roast.
+LLM inference client — calls the Gemini API to generate a resume roast.
 
 Security invariant: this module only ever receives the prompt string built
 from the anonymized artifact.  Raw or normalized resume content NEVER reaches
-this module or the Anthropic API.
+this module or the Gemini API.
 
-Model: claude-haiku-4-5 by default (configurable via ANTHROPIC_ROAST_MODEL).
-Upgrade to claude-opus-5 for higher-quality roasts at greater cost.
+Model: gemini-3.8-flash by default (configurable via GEMINI_ROAST_MODEL).
+Provider may change (e.g. to OpenAI) later — this module is the only place
+that needs to change.
 """
 
 import os
-import anthropic
+from google import genai
 from typing import Tuple
 
-_MODEL = os.getenv("ANTHROPIC_ROAST_MODEL", "claude-haiku-4-5")
-_MAX_TOKENS = 1024
+_MODEL = os.getenv("GEMINI_ROAST_MODEL", "gemini-3.8-flash")
+_MAX_OUTPUT_TOKENS = 1024
 
-_async_client: anthropic.AsyncAnthropic | None = None
+_async_client: genai.Client | None = None
 
 
-def _get_async_client() -> anthropic.AsyncAnthropic:
+def _get_client() -> genai.Client:
     global _async_client
     if _async_client is None:
-        _async_client = anthropic.AsyncAnthropic()
+        _async_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
     return _async_client
 
 
 async def call_roast_llm(prompt: str) -> Tuple[str, dict, str]:
     """
-    Call the Anthropic API and return (response_text, usage_dict, model_used).
+    Call the Gemini API and return (response_text, usage_dict, model_used).
 
     Raises:
-        anthropic.RateLimitError  → caller should wrap as TransientLLMError
-        anthropic.APIStatusError  → caller inspects status_code
-        anthropic.APIConnectionError → caller wraps as TransientLLMError
+        google.genai.errors.ServerError → caller should wrap as TransientLLMError
+        google.genai.errors.ClientError → caller inspects .code (429 vs other 4xx)
     """
-    client = _get_async_client()
+    client = _get_client()
 
-    async with client.messages.stream(
+    response = await client.aio.models.generate_content(
         model=_MODEL,
-        max_tokens=_MAX_TOKENS,
-        messages=[{"role": "user", "content": prompt}],
-    ) as stream:
-        message = await stream.get_final_message()
-
-    text = next(
-        (block.text for block in message.content if block.type == "text"),
-        "",
+        contents=prompt,
+        config=genai.types.GenerateContentConfig(
+            max_output_tokens=_MAX_OUTPUT_TOKENS,
+        ),
     )
+
+    text = response.text or ""
     usage = {
-        "input_tokens": message.usage.input_tokens,
-        "output_tokens": message.usage.output_tokens,
+        "input_tokens": response.usage_metadata.prompt_token_count,
+        "output_tokens": response.usage_metadata.candidates_token_count,
     }
-    model_used: str = message.model
+    model_used: str = response.model_version or _MODEL
 
     return text, usage, model_used
