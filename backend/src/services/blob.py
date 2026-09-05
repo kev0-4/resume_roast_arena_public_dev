@@ -49,9 +49,9 @@ def blob_exists(blob_path: str) -> bool:
         blob_client = get_blob_client(blob_path)
         blob_client.get_blob_properties()
         return True
-    except ResourceNotFoundError as e:
+    except ResourceNotFoundError:
         return False
-    except e:
+    except Exception:
         return False
 
 
@@ -91,11 +91,8 @@ def upload_extracted(
 ) -> str:
     blob_path = f"extracted/{session_id}/extracted.json"
     blob_client = get_blob_client(blob_path=blob_path)
-    try:
-        payload = json.dumps(data, ensure_ascii=True).encode("utf-8")
-        blob_client.upload_blob(payload, overwrite=True)
-    except Exception as e:
-        pass
+    payload = json.dumps(data, ensure_ascii=True).encode("utf-8")
+    blob_client.upload_blob(payload, overwrite=True)
     return blob_path
 
 
@@ -107,39 +104,45 @@ def read_blob(blob_path: str) -> bytes:
 def upload_normalized(session_id, data):
     blob_path = f"normalized/{session_id}/normalized.json"
     blob_client = get_blob_client(blob_path=blob_path)
-    try:
-        payload = json.dumps(data, ensure_ascii=True).encode("utf-8")
-        blob_client.upload_blob(payload, overwrite=True)
-    except Exception as e:
-        print("--Issue with upload_normalized")
-        pass
-    print("--uploaded normalized")
+    payload = json.dumps(data, ensure_ascii=True).encode("utf-8")
+    blob_client.upload_blob(payload, overwrite=True)
     return blob_path
 
 
 def upload_anonymized(session_id, data):
     blob_path = f"anonymized/{session_id}/anonymized.json"
     blob_client = get_blob_client(blob_path=blob_path)
-    try:
-        payload = json.dumps(data, ensure_ascii=True).encode("utf-8")
-        blob_client.upload_blob(payload, overwrite=True)
-    except Exception as e:
-        print(f"--Issue with upload_anonymized {e}")
-        pass
-    print("--uploaded anonymized")  
+    payload = json.dumps(data, ensure_ascii=True).encode("utf-8")
+    blob_client.upload_blob(payload, overwrite=True)
     return blob_path
+
 
 def upload_scored(session_id, data):
     blob_path = f"scored/{session_id}/scored.json"
     blob_client = get_blob_client(blob_path=blob_path)
-    try:
-        payload = json.dumps(data, ensure_ascii=True).encode("utf-8")
-        blob_client.upload_blob(payload, overwrite=True)
-    except Exception as e:
-        print(f"--Issue with upload_scored {e}")
-        pass
-    print("--uploaded scored")
+    payload = json.dumps(data, ensure_ascii=True).encode("utf-8")
+    blob_client.upload_blob(payload, overwrite=True)
     return blob_path
+
+def upload_prompt(session_id: str, prompt: str) -> str:
+    blob_path = f"prompt/{session_id}/prompt.txt"
+    blob_client = get_blob_client(blob_path=blob_path)
+    blob_client.upload_blob(prompt.encode("utf-8"), overwrite=True)
+    return blob_path
+
+
+def read_prompt(session_id: str) -> str:
+    blob_path = f"prompt/{session_id}/prompt.txt"
+    return read_blob(blob_path).decode("utf-8")
+
+
+def upload_roast(session_id: str, data: dict) -> str:
+    blob_path = f"roast/{session_id}/roast.json"
+    blob_client = get_blob_client(blob_path=blob_path)
+    payload = json.dumps(data, ensure_ascii=True).encode("utf-8")
+    blob_client.upload_blob(payload, overwrite=True)
+    return blob_path
+
 
 def initialize_blob_storage() -> None:
     # explicit initialization, jsut call once at fastapi

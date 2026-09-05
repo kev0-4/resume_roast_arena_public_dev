@@ -105,7 +105,6 @@ async def process_extraction_job(db: AsyncSession, message:ExtractionJobMessage)
         
 
         await mark_extracted(db=db,session=session)
-        db.commit()
         enqueue_normalization(
         session_id=str(session_id),
         extracted_blob_path=f"extracted/{session_id}/extracted.json"

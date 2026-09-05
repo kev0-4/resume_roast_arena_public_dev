@@ -27,7 +27,9 @@ class JobStatusEnum(str, enum.Enum):
     ANONYMIZED = "ANONYMIZED"
     SCORING = "SCORING"
     SCORED = "SCORED"
-    
+    ROASTING = "ROASTING"
+    ROASTED = "ROASTED"
+
 class Sessions(Base):
     __tablename__ = "Sessions"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

@@ -11,7 +11,8 @@ from datetime import datetime
 
 from backend.src.db.sessions import Sessions, JobStatusEnum
 from backend.src.services.session_service import get_session
-from backend.src.services.blob import upload_scored
+from backend.src.services.blob import upload_scored, upload_prompt
+from backend.src.services.service_bus import enqueue_llm
 
 from .schemas import ScoringJobMessage
 from .state import mark_scoring, mark_scored, mark_failed
@@ -23,6 +24,7 @@ from .errors import (
 from .pipeline.loader import load_anonymized
 from .pipeline.scorer import score_resume
 from .pipeline.assembler import assemble_scored
+from .pipeline.prompt_builder import build_roast_prompt
 
 
 async def process_scoring_job(
@@ -121,7 +123,7 @@ async def process_scoring_job(
         print("DEBUG: Scored payload assembled successfully")
 
         # --------------------------------------------------------
-        # 8. Upload artifact
+        # 8. Upload scored artifact
         # --------------------------------------------------------
         try:
             upload_scored(
@@ -133,6 +135,48 @@ async def process_scoring_job(
                 f"Failed to upload scored artifact: {e}"
             )
         print(f"DEBUG: Scored payload uploaded for session_id: {session_id}")
+
+        # --------------------------------------------------------
+        # 8b. Build LLM prompt (uses anonymized already in memory)
+        # --------------------------------------------------------
+        try:
+            prompt = build_roast_prompt(
+                anonymized=anonymized,
+                scoring_result=scoring_result,
+            )
+        except Exception as e:
+            raise PermanentScoringError(
+                f"Failed to build roast prompt: {e}"
+            )
+        print(f"DEBUG: Roast prompt built for session_id: {session_id}")
+
+        # --------------------------------------------------------
+        # 8c. Upload prompt artifact
+        # --------------------------------------------------------
+        try:
+            prompt_blob_path = upload_prompt(
+                session_id=str(session_id),
+                prompt=prompt,
+            )
+        except Exception as e:
+            raise TransientScoringError(
+                f"Failed to upload prompt artifact: {e}"
+            )
+        print(f"DEBUG: Prompt uploaded for session_id: {session_id}")
+
+        # --------------------------------------------------------
+        # 8d. Enqueue LLM roast job
+        # --------------------------------------------------------
+        try:
+            enqueue_llm(
+                session_id=str(session_id),
+                prompt_blob_path=prompt_blob_path,
+            )
+        except Exception as e:
+            raise TransientScoringError(
+                f"Failed to enqueue LLM roast job: {e}"
+            )
+        print(f"DEBUG: LLM roast job enqueued for session_id: {session_id}")
 
         # --------------------------------------------------------
         # 9. Mark success

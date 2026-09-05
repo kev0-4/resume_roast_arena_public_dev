@@ -7,7 +7,7 @@ from azure.servicebus import ServiceBusClient, ServiceBusMessage
 import json
 import logging
 from datetime import datetime
-from ..config import AZURE_SERVICE_BUS_CONNECTION_STRING, AZURE_SERVICE_BUS_QUEUE_NAME, AZURE_SERVICE_BUS_NORMALIZATION_QUEUE_NAME, AZURE_SERVICE_BUS_ANONYMIZATION_QUEUE_NAME, AZURE_SERVICE_BUS_SCORING_QUEUE_NAME
+from ..config import AZURE_SERVICE_BUS_CONNECTION_STRING, AZURE_SERVICE_BUS_QUEUE_NAME, AZURE_SERVICE_BUS_NORMALIZATION_QUEUE_NAME, AZURE_SERVICE_BUS_ANONYMIZATION_QUEUE_NAME, AZURE_SERVICE_BUS_SCORING_QUEUE_NAME, AZURE_SERVICE_BUS_LLM_QUEUE_NAME
 from ..utils.telemetry import emit_event
 
 
@@ -333,4 +333,81 @@ def enqueue_scoring(session_id: str, anonymized_blob_path: str) -> None:
 
         raise ServiceBusEnqueueError(
             f"Failed to enqueue scoring for session {session_id}"
+        ) from exc
+
+
+def enqueue_llm(session_id: str, prompt_blob_path: str) -> None:
+    payload = {
+        "version": "1.0",
+        "job_type": "LLMRoast",
+        "session_id": session_id,
+        "prompt_blob_path": prompt_blob_path,
+        "attempt": 1,
+        "created_at": datetime.utcnow().isoformat()
+    }
+
+    try:
+        message = ServiceBusMessage(
+            json.dumps(payload),
+            message_id=f"llm-{session_id}",
+            content_type="application/json"
+        )
+
+        emit_event(
+            "servicebus.message.created",
+            {
+                "session_id": session_id,
+                "blob_path": prompt_blob_path,
+                "queue_name": AZURE_SERVICE_BUS_LLM_QUEUE_NAME,
+                "attempt": 1,
+                "reason": "llm-roast message prepared",
+                "status": "INFO"
+            }
+        )
+
+        with _servicebus_client.get_queue_sender(
+            queue_name=AZURE_SERVICE_BUS_LLM_QUEUE_NAME
+        ) as sender:
+            sender.send_messages(message)
+
+        emit_event(
+            "servicebus.enqueue.success",
+            {
+                "session_id": session_id,
+                "blob_path": prompt_blob_path,
+                "queue_name": AZURE_SERVICE_BUS_LLM_QUEUE_NAME,
+                "message_id": message.message_id,
+                "reason": "llm-roast task enqueued",
+                "status": "INFO"
+            }
+        )
+
+        logging.info(
+            "Enqueued llm-roast task",
+            extra={
+                "session_id": session_id,
+                "queue": AZURE_SERVICE_BUS_LLM_QUEUE_NAME
+            }
+        )
+
+    except Exception as exc:
+        emit_event(
+            "servicebus.enqueue.failure",
+            {
+                "session_id": session_id,
+                "blob_path": prompt_blob_path,
+                "queue_name": AZURE_SERVICE_BUS_LLM_QUEUE_NAME,
+                "reason": f"failed to enqueue llm-roast task: {str(exc)}",
+                "error_type": type(exc).__name__,
+                "status": "ERROR"
+            }
+        )
+
+        logging.exception(
+            "Failed to enqueue llm-roast task",
+            extra={"session_id": session_id}
+        )
+
+        raise ServiceBusEnqueueError(
+            f"Failed to enqueue llm-roast for session {session_id}"
         ) from exc

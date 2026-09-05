@@ -72,7 +72,7 @@ async def mark_failed(
 
     session.status = JobStatusEnum.FAILED
     session.error_code = error_code
-    session.error_reason = error_reason
+    session.error_message = error_reason
     session.updated_at = datetime.utcnow()
 
     db.add(session)
