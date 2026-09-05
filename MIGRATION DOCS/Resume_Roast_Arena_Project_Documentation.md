@@ -1146,6 +1146,12 @@ The original brief specifically calls for an LLM roast generator using sanitized
 
 ---
 
+## LLM Roast Generator — Update 2026-09-05: DONE
+
+`workers/llm/` implemented and verified end-to-end against real infra. Provider is **Gemini** (`google-genai`, `gemini-3.5-flash-lite`), not Azure OpenAI as planned above — no Anthropic/OpenAI key was available, Gemini had free-tier credits; `workers/llm/pipeline/client.py` is the single seam to swap providers again later (OpenAI mentioned as a likely future move). Prompt sanitization requirement is met: the prompt builder only ever receives anonymized content, placeholders normalized `{{EMAIL_1}}` → `[EMAIL]`.
+
+---
+
 ## Composite scoring
 
 The original MVP calls for numeric:
@@ -1167,15 +1173,17 @@ severity
 summary
 ```
 
-So **numeric composite scoring is still outstanding**.
+So **numeric composite scoring (Clarity/Credibility/Signal-to-Noise) is still outstanding.**
 
-This distinction is important: the current “scoring worker” is an initial rule evaluator, not yet the complete scoring service described in the original MVP.
+This distinction is important: the current "scoring worker" is an initial rule evaluator, not yet the complete scoring service described in the original MVP.
+
+**Update 2026-09-05:** a *different*, simpler 0-100 composite score (not Clarity/Credibility/Signal-to-Noise) was designed for the roast card's stat display — see section 29. It's derived from `summary` (issue/strength counts), not a new scoring dimension, and doesn't replace this outstanding MVP item.
 
 ---
 
 ## Renderer
 
-Still outstanding:
+Still outstanding (implementation), but the visual design and the data it will use are now decided — see section 29.
 
 ```text
 HTML roast card
@@ -1194,6 +1202,8 @@ short slug
 → roast asset
 → TTL/public resolver
 ```
+
+**Planned follow-on (not yet designed):** a leaderboard / global comparison feature — ranking public roasts by the composite score (section 29), e.g. percentile stats like "better than 92% of resumes." Noted here 2026-09-05 so scoring/renderer decisions don't paint this into a corner (e.g. the composite score needs to stay a stored, comparable field, not just rendered text on the card).
 
 ---
 
@@ -1420,19 +1430,80 @@ When starting a new chat/model, give it this document and ask it to:
 
 # 28. Current project status
 
+**Updated 2026-09-05** — see section 29 for what changed since this table was first written; this replaces it.
+
 ```text
-INGEST                  ██████████  COMPLETE
+INGEST                  ██████████  COMPLETE (incl. anonymous sessions)
 EXTRACTION              ██████████  COMPLETE
 NORMALIZATION           ██████████  COMPLETE
 ANONYMIZATION           ██████████  COMPLETE
 DETERMINISTIC SCORING   ██████████  COMPLETE
-PROMPT BUILDER          ███░░░░░░░  STARTED
-LLM ROAST               ░░░░░░░░░░  NOT IMPLEMENTED
-COMPOSITE SCORE         ░░░░░░░░░░  NOT IMPLEMENTED
-RENDERER                ░░░░░░░░░░  NOT IMPLEMENTED
+PROMPT BUILDER          ██████████  COMPLETE
+LLM ROAST               ██████████  COMPLETE (Gemini, not the original OpenAI/Anthropic plan — see below)
+COMPOSITE SCORE (0-100) ░░░░░░░░░░  DESIGNED, NOT YET CODED — formula decided, see section 29. NOT
+                                     the same as the original MVP's Clarity/Credibility/Signal-to-
+                                     Noise numeric scores, which are separately still outstanding.
+RENDERER                ░░░░░░░░░░  NOT IMPLEMENTED — design decided, see section 29
 PUBLIC LINK             ░░░░░░░░░░  NOT IMPLEMENTED
+LEADERBOARD/GLOBAL CMP  ░░░░░░░░░░  NOT IMPLEMENTED — new planned feature, see section 29
 TTL/CLEANUP             ░░░░░░░░░░  NOT IMPLEMENTED
 REDIS/RATE LIMITING     ░░░░░░░░░░  NOT IMPLEMENTED
 PRODUCTION HARDENING    ███░░░░░░░  PARTIAL
 CI/CD/AZURE DEPLOY      ░░░░░░░░░░  NOT VERIFIED
 ```
+
+Full pipeline (ingest → extraction → normalization → anonymization → scoring → LLM roast) verified working end-to-end against real infra on 2026-09-05.
+
+---
+
+# 29. Roast Card & Leaderboard — Design Decisions (2026-09-05)
+
+Design pass for the Renderer feature (public shareable roast card, HTML → PNG). Decided in conversation from a reference React component the user supplied (`ResumeRoastCard`) plus explicit direction on defaults. **Nothing in this section is implemented yet** — it's the agreed design for whoever builds the Renderer next, written down so it survives a new chat or context compaction.
+
+## Design bar
+
+User's own words: "i dont want you to make some basic ahh ugly looking shit. i want something google/spotify level aesthetic... as this will be a public facing card it cannot be plain looking or ugly looking." Treat the roast card as the project's most visible surface (it's the thing people actually share) — not a place to default to plain framework styling. User is sourcing reference components (21st.dev and similar) before implementation starts.
+
+## Planned future feature this must not paint us into a corner on: Leaderboard / global comparison
+
+Not designed yet, but explicitly on the roadmap — ranking public roasts against each other (e.g. percentile stats like "better than 92% of resumes," matching the reference component's `longStat` idea). Implication for scoring/renderer work now: the composite score below needs to end up as a **stored, comparable field** (not just text baked into a rendered PNG), since a future leaderboard needs to query/rank it. Don't design the renderer in a way that only produces a flattened image with no queryable score behind it.
+
+## Decision 1 — the dynamic "stamp" (was hardcoded "ROASTED" in the reference)
+
+Compute deterministically from `scored.json.summary` (`critical_issues`, `high_issues`, `medium_issues`, `low_issues`, `total_strengths` — all already real fields, see section 16):
+
+```text
+critical_issues > 0  or  high_issues >= 2   → "ROASTED"
+total_issues == 0  and  total_strengths >= 3 → "SOLID" / "APPROVED"
+everything else                              → "MID" / "NEEDS WORK"
+```
+
+Deterministic, not LLM-driven — free, reliable, no extra roundtrip. Possible future upgrade: let the LLM pick the tag itself (it already writes `verdict` in `roast.json`) for tone-matched copy instead of fixed strings — deferred, not decided.
+
+## Decision 2 — stat display: composite 0-100 score is the DEFAULT
+
+Nothing in the current pipeline produces a 0-100 score or a "buzzwords found" count — the reference component's `94/100` and `17` were placeholders with no real data behind them. Real fields that exist today: `scored.json.summary.{total_issues,critical_issues,high_issues,medium_issues,low_issues,total_strengths}`, plus `metrics.{word_count,experience_block_count,avg_sentence_length,lexical_diversity,email_count,phone_count,url_count}` (section 8/16).
+
+**Decision:** compute a simple deterministic composite score and use it as the **default** stat shown on the card:
+
+```text
+score = clamp(100 − 20×critical_issues − 10×high_issues − 5×medium_issues − 2×low_issues, 0, 100)
+```
+
+Deterministic (no LLM cost), gives the punchy "X/100" chip, and — per the leaderboard note above — is the natural ranking unit for a future leaderboard (raw issue counts don't normalize across resumes of different lengths; a 0-100 score does).
+
+**Also keep raw counts available** (`total_issues` / `total_strengths` directly) as a second display mode. Once there's a frontend, let the user toggle between "score" and "raw counts" views — but the composite score is what ships first and is the default when only one is shown (e.g. on the rendered PNG card, which can't have an interactive toggle).
+
+This is a *different* number from the original MVP's Clarity/Credibility/Signal-to-Noise composite scoring (section 12/23), which is still a separate, unimplemented, larger piece of work — this is a lightweight display-layer score derived from existing rule-engine output, not a new scoring dimension.
+
+The reference component's sparkline/`longStat` trend graph has **no real data source** in the current pipeline (no per-line or per-bullet time series exists anywhere) — dropped from v1. A future version could repurpose that visual slot for per-section issue counts, but `Issue` doesn't carry a `section` field yet (`workers/scoring/schemas.py`), so that needs its own small pipeline change first — not decided, not scheduled.
+
+## Decision 3 — resume snippet at the top of the card
+
+**v1 ships with the reference component's hardcoded/stylized mock text as-is** (not real anonymized resume content) — simplest, safest, fastest to ship, and the user confirmed this explicitly.
+
+**Planned for later:** add a second mode using the real anonymized resume text (`content.blocks` from `anonymized.json`, redaction placeholders already normalized `{{EMAIL_1}}` → `[EMAIL]` the same way `prompt_builder.py` does it) in the same visual layout/typography — not a redesign, just swapping the text source. Two modes (hardcoded vs. real snippet) become a user-facing choice eventually, same pattern as decision 2's score-vs-counts toggle. Not implemented, not scheduled yet.
+
+## Status
+
+Design only. No code written against any of the above yet — next step is implementing the Renderer worker once the user supplies the reference components/rough layout for the visual build.
