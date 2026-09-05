@@ -41,6 +41,7 @@ from datetime import datetime
 from backend.src.db.sessions import Sessions, JobStatusEnum
 from backend.src.services.session_service import get_session
 from backend.src.services.blob import read_blob, upload_normalized, upload_extracted  # keep consistent style
+from backend.src.utils.telemetry import emit_event
 
 from .schemas import AnonymizationJobMessage
 from .state import mark_anonymizing, mark_anonymized, mark_failed
@@ -161,7 +162,7 @@ async def process_anonymization_job(
         await mark_anonymized(db=db, session=session)
 
         await db.commit()
-        print("----enqueing scoring")
+        emit_event("anonymization.enqueuing_scoring", {"session_id": str(session_id), "status": "INFO"})
         enqueue_scoring(
         session_id=str(session_id),
         anonymized_blob_path=f"anonymized/{session_id}/anonymized.json"

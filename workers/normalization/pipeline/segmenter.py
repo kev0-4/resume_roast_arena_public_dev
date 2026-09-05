@@ -22,6 +22,7 @@ expected output
 '''
 import re
 from typing import Dict, List
+from backend.src.utils.telemetry import emit_event
 
 SECTION_ORDER = [
     "summary",
@@ -107,12 +108,16 @@ def segment_text(raw_text: str) -> dict:
         ]
         dropped_count = original_count-len(blocks[section])
         if dropped_count > 0:
-            # TODO: REPLACE BOTH OF THESE PRINT STATEMENT WITH EMIT EVENT LATER
-            print(
-                f"[SEGMENTER] Dropped {dropped_count} empty block(s) from '{section}'")
+            emit_event(
+                "normalization.segmenter.empty_blocks_dropped",
+                {"section": section, "dropped_count": dropped_count, "status": "INFO"},
+            )
             total_dropped += dropped_count
     if total_dropped > 0:
-        print(f"[SEGMENTER] Total empty blocks removed: {total_dropped}")
+        emit_event(
+            "normalization.segmenter.empty_blocks_total",
+            {"total_dropped": total_dropped, "status": "INFO"},
+        )
     return blocks
 
 

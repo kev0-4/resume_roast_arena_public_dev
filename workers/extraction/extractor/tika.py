@@ -2,6 +2,7 @@ import requests
 from typing import Tuple
 from ..errors import TransientExtractionError,PermanentExtractionError
 from ...config import TIKA_SERVER_ENDPOINT
+from backend.src.utils.telemetry import emit_event
 from tika import parser
 import os
 os.environ['TIKA_SERVER_ENDPOINT'] = 'http://localhost:9998'
@@ -15,23 +16,25 @@ def extract_with_tika(raw_bytes: bytes):
         "Accept": "text/plain",
     }
 
-    try:        
+    try:
         response = parser.from_buffer(raw_bytes)
-        print(response.get('status'))
-        print("$$got response from parse tika server")
+        emit_event(
+            "extraction.tika.raw_response",
+            {"status_code": response.get('status'), "status": "INFO"},
+        )
     except requests.exceptions.Timeout as e:
         raise TransientExtractionError("Tika timeout") from e
-    
+
     except requests.exceptions.ConnectionError as e:
         raise TransientExtractionError("Tika connection error") from e
     except Exception as e:
         raise TransientExtractionError("Unexpected Tika error") from e
-    
+
     if int(response.get('status')) >= 500:
         raise TransientExtractionError(
             f"Tika server error: {response.get('status')}"
         )
-    
+
     if int(response.get('status')) == 415:
         raise PermanentExtractionError("Unsupported file type")
 
@@ -39,18 +42,19 @@ def extract_with_tika(raw_bytes: bytes):
         raise PermanentExtractionError(
             f"Tika failed with status {response.get('status')}"
         )
-    print("before text")
     text = response.get('content')
     text = text.strip()
-    print("after text")
     confidence = 90
     res = {
         "text": text,
         "confidence": confidence,
         "response_code": response.get('status')
     }
-    
-    print("exited extarct using tika")
+
+    emit_event(
+        "extraction.tika.complete",
+        {"confidence": confidence, "char_count": len(text), "status": "INFO"},
+    )
     return res
 
 
@@ -60,23 +64,25 @@ def extract_with_ocr(raw_bytes: bytes):
     "X-Tika-PDFOcrStrategy": "ocr_only"
     }
 
-    try:        
+    try:
         response = parser.from_buffer(raw_bytes,headers=headers)
-        print(response.get('status'))
-        print("$$got response from parse tika server")
+        emit_event(
+            "extraction.ocr.raw_response",
+            {"status_code": response.get('status'), "status": "INFO"},
+        )
     except requests.exceptions.Timeout as e:
         raise TransientExtractionError("Tika timeout") from e
-    
+
     except requests.exceptions.ConnectionError as e:
         raise TransientExtractionError("Tika connection error") from e
     except Exception as e:
         raise TransientExtractionError("Unexpected Tika error") from e
-    
+
     if int(response.get('status')) >= 500:
         raise TransientExtractionError(
             f"Tika server error: {response.get('status')}"
         )
-    
+
     if int(response.get('status')) == 415:
         raise PermanentExtractionError("Unsupported file type")
 
@@ -84,18 +90,19 @@ def extract_with_ocr(raw_bytes: bytes):
         raise PermanentExtractionError(
             f"Tika failed with status {response.get('status')}"
         )
-    print("before text")
     text = response.get('content')
     text = text.strip()
-    print("after text")
     confidence = 90
     res = {
         "text": text,
         "confidence": confidence,
         "response_code": response.get('status')
     }
-    
-    print("exited extarct using tika")
+
+    emit_event(
+        "extraction.ocr.complete",
+        {"confidence": confidence, "char_count": len(text), "status": "INFO"},
+    )
     return res
 
 

@@ -13,6 +13,7 @@ from backend.src.db.sessions import Sessions, JobStatusEnum
 from backend.src.services.session_service import get_session
 from backend.src.services.blob import upload_scored, upload_prompt
 from backend.src.services.service_bus import enqueue_llm
+from backend.src.utils.telemetry import emit_event
 
 from .schemas import ScoringJobMessage
 from .state import mark_scoring, mark_scored, mark_failed
@@ -36,7 +37,7 @@ async def process_scoring_job(
     Main orchestrator for scoring stage.
     """
 
-    print("--entered process_scoring_job")
+    emit_event("scoring.job.started", {"session_id": str(message.session_id), "status": "INFO"})
     session_id = message.session_id
 
     # ------------------------------------------------------------
@@ -48,22 +49,25 @@ async def process_scoring_job(
     )
 
     if session is None:
-        print(f"Returning: session is None, session_id: {session_id}")
+        emit_event("scoring.session.not_found", {"session_id": str(session_id), "status": "WARNING"})
         return
 
     # ------------------------------------------------------------
     # 2. Idempotency guards
     # ------------------------------------------------------------
     if session.status == JobStatusEnum.FAILED:
-        print(f"Returning: session status is FAILED, session_id: {session_id}")
+        emit_event("scoring.guard.session_failed", {"session_id": str(session_id), "status": "INFO"})
         return
 
     if session.status == JobStatusEnum.SCORED:
-        print(f"Returning: session status is SCORED, session_id: {session_id}")
+        emit_event("scoring.guard.already_scored", {"session_id": str(session_id), "status": "INFO"})
         return
 
     if session.status != JobStatusEnum.ANONYMIZED:
-        print(f"Returning: session status is {session.status}, session_id: {session_id} not ANONYMIZED")
+        emit_event(
+            "scoring.guard.not_anonymized",
+            {"session_id": str(session_id), "current_status": session.status, "status": "WARNING"},
+        )
         return
 
     # ------------------------------------------------------------
@@ -71,13 +75,16 @@ async def process_scoring_job(
     # ------------------------------------------------------------
     session = await mark_scoring(db=db, session=session)
     scoring_started_at = datetime.utcnow()
-    print("--entered process_scoring_job -> marked scoring")
+    emit_event("scoring.marked_scoring", {"session_id": str(session_id), "status": "INFO"})
 
     try:
         # --------------------------------------------------------
         # 4. Load anonymized artifact
         # --------------------------------------------------------
-        print(f"DEBUG: Loading anonymized artifact: {message.anonymized_blob_path}")
+        emit_event(
+            "scoring.loading_anonymized",
+            {"session_id": str(session_id), "blob_path": message.anonymized_blob_path, "status": "INFO"},
+        )
         try:
             anonymized = load_anonymized(
                 blob_path=message.anonymized_blob_path
@@ -86,7 +93,10 @@ async def process_scoring_job(
             raise TransientScoringError(
                 f"Failed to load anonymized artifact: {e}"
             )
-        print(f"DEBUG: Successfully loaded anonymized data. Keys: {list(anonymized.keys())}")
+        emit_event(
+            "scoring.anonymized_loaded",
+            {"session_id": str(session_id), "keys": list(anonymized.keys()), "status": "INFO"},
+        )
 
         # --------------------------------------------------------
         # 5. Extract inputs
@@ -99,7 +109,16 @@ async def process_scoring_job(
             raise PermanentScoringError(
                 f"Malformed anonymized payload: {e}"
             )
-        print(f"DEBUG: Inputs extracted. Signals: {len(signals)}, Metrics: {len(metrics)}, Blocks: {len(blocks)}")
+        emit_event(
+            "scoring.inputs_extracted",
+            {
+                "session_id": str(session_id),
+                "signal_count": len(signals),
+                "metric_count": len(metrics),
+                "block_count": len(blocks),
+                "status": "INFO",
+            },
+        )
 
         # --------------------------------------------------------
         # 6. Run scoring
@@ -109,7 +128,15 @@ async def process_scoring_job(
             metrics=metrics,
             blocks=blocks,
         )
-        print(f"DEBUG: Scoring complete. Issues: {len(scoring_result.issues)}, Strengths: {len(scoring_result.strengths)}")
+        emit_event(
+            "scoring.complete",
+            {
+                "session_id": str(session_id),
+                "issue_count": len(scoring_result.issues),
+                "strength_count": len(scoring_result.strengths),
+                "status": "INFO",
+            },
+        )
 
         # --------------------------------------------------------
         # 7. Assemble final artifact
@@ -120,7 +147,7 @@ async def process_scoring_job(
             scoring_result=scoring_result,
             scored_at=scoring_started_at,
         )
-        print("DEBUG: Scored payload assembled successfully")
+        emit_event("scoring.payload_assembled", {"session_id": str(session_id), "status": "INFO"})
 
         # --------------------------------------------------------
         # 8. Upload scored artifact
@@ -134,7 +161,7 @@ async def process_scoring_job(
             raise TransientScoringError(
                 f"Failed to upload scored artifact: {e}"
             )
-        print(f"DEBUG: Scored payload uploaded for session_id: {session_id}")
+        emit_event("scoring.payload_uploaded", {"session_id": str(session_id), "status": "INFO"})
 
         # --------------------------------------------------------
         # 8b. Build LLM prompt (uses anonymized already in memory)
@@ -148,7 +175,7 @@ async def process_scoring_job(
             raise PermanentScoringError(
                 f"Failed to build roast prompt: {e}"
             )
-        print(f"DEBUG: Roast prompt built for session_id: {session_id}")
+        emit_event("scoring.prompt_built", {"session_id": str(session_id), "status": "INFO"})
 
         # --------------------------------------------------------
         # 8c. Upload prompt artifact
@@ -162,7 +189,7 @@ async def process_scoring_job(
             raise TransientScoringError(
                 f"Failed to upload prompt artifact: {e}"
             )
-        print(f"DEBUG: Prompt uploaded for session_id: {session_id}")
+        emit_event("scoring.prompt_uploaded", {"session_id": str(session_id), "status": "INFO"})
 
         # --------------------------------------------------------
         # 8d. Enqueue LLM roast job
@@ -176,14 +203,14 @@ async def process_scoring_job(
             raise TransientScoringError(
                 f"Failed to enqueue LLM roast job: {e}"
             )
-        print(f"DEBUG: LLM roast job enqueued for session_id: {session_id}")
+        emit_event("scoring.llm_job_enqueued", {"session_id": str(session_id), "status": "INFO"})
 
         # --------------------------------------------------------
         # 9. Mark success
         # --------------------------------------------------------
         await mark_scored(db=db, session=session)
         await db.commit()
-        print(f"DEBUG: Session marked as SCORED in database, session_id: {session_id}")
+        emit_event("scoring.marked_scored", {"session_id": str(session_id), "status": "INFO"})
 
     # ------------------------------------------------------------
     # Error handling
@@ -192,7 +219,10 @@ async def process_scoring_job(
         raise
 
     except PermanentScoringError as e:
-        print(f"DEBUG: Permanent scoring error: {e}, session_id: {session_id}")
+        emit_event(
+            "scoring.error.permanent",
+            {"session_id": str(session_id), "reason": str(e), "status": "ERROR"},
+        )
         await mark_failed(
             db=db,
             session=session,
@@ -202,5 +232,8 @@ async def process_scoring_job(
         await db.commit()
 
     except Exception as e:
-        print(f"DEBUG: Unexpected error in scoring: {e}, session_id: {session_id}")
+        emit_event(
+            "scoring.error.unexpected",
+            {"session_id": str(session_id), "reason": str(e), "status": "ERROR"},
+        )
         raise TransientScoringError(str(e))
