@@ -1,17 +1,17 @@
 from fastapi import APIRouter, Response, status, Depends, Request, HTTPException, UploadFile, File, Header
 from sqlalchemy.ext.asyncio import AsyncSession
-from ..dependencies.auth import get_current_user
+from ..dependencies.auth import get_current_user_optional
 from ..utils.telemetry import emit_event, with_trace
 from ..services.blob import upload_raw, delete_raw, read_blob, blob_exists, initialize_blob_storage
 from ..services.service_bus import enqueue_extraction
 from ..services.session_service import create_sessions, get_session, update_session_status, update_session_raw_blob_path
 from ..services.idempotency_service import get_session_by_key, create_key_mapping
+from ..services.user_service import create_anonymous_user
 import logging
 import uuid
 from typing import Optional
 from ..db.session import get_db_sqlalchemy
 from ..db.sessions import JobStatusEnum
-from ..dependencies.auth import get_current_user
 from ..utils.file_validation import validate_upload
 
 injest_router = APIRouter()
@@ -20,9 +20,14 @@ injest_router = APIRouter()
 @injest_router.post("/ingest", status_code=status.HTTP_202_ACCEPTED)
 async def injest_resume(file: UploadFile = File(...),
                         db: AsyncSession = Depends(get_db_sqlalchemy),
-                        curr_user=Depends(get_current_user),
+                        curr_user=Depends(get_current_user_optional),
                         idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key")):
-    user_id: Optional[uuid.UUID] = (
+    # Scopes idempotency-key dedup: authenticated users dedup per-account,
+    # anonymous requests share one "no account" bucket (user_id=None) --
+    # this must NOT be the real per-session anon user created below, since
+    # a fresh anon user is minted on every unauthenticated request and would
+    # never match a prior request's user_id, breaking dedup entirely.
+    idempotency_user_id: Optional[uuid.UUID] = (
         curr_user.id if curr_user is not None else None
     )
 
@@ -33,7 +38,7 @@ async def injest_resume(file: UploadFile = File(...),
             {
                 "filename": file.filename,
                 "content_type": file.content_type,
-                "user_id": str(user_id) if user_id else None,
+                "user_id": str(idempotency_user_id) if idempotency_user_id else None,
                 "status": "INFO",
                 "route": "POST /v1/ingest"
             }
@@ -44,7 +49,7 @@ async def injest_resume(file: UploadFile = File(...),
             {
                 "filename": file.filename,
                 "content_type": file.content_type,
-                "user_id": str(user_id) if user_id else None,
+                "user_id": str(idempotency_user_id) if idempotency_user_id else None,
                 "reason": str(e),
                 "status": "WARNING",
                 "route": "POST /v1/ingest"
@@ -55,14 +60,14 @@ async def injest_resume(file: UploadFile = File(...),
         )
 
     if idempotency_key:
-        existing_session = await get_session_by_key(db=db, key=idempotency_key, user_id=user_id)
+        existing_session = await get_session_by_key(db=db, key=idempotency_key, user_id=idempotency_user_id)
         if existing_session:
             emit_event(
                 "ingest.idempotency.duplicate",
                 {
                     "session_id": str(existing_session.id),
                     "idempotency_key": idempotency_key,
-                    "user_id": str(user_id) if user_id else None,
+                    "user_id": str(idempotency_user_id) if idempotency_user_id else None,
                     "existing_status": existing_session.status,
                     "status": "INFO",
                     "route": "POST /v1/ingest"
@@ -75,6 +80,15 @@ async def injest_resume(file: UploadFile = File(...),
                     "session": f"api/v1/sessions/{existing_session.id}"
                 },
             }
+
+    # Sessions.user_id is NOT NULL: anonymous requests get a real, throwaway
+    # Users row (fun generated display name) rather than a null owner.
+    # Deliberately created only after the idempotency short-circuit above,
+    # so a retried/duplicate request doesn't mint a fresh anon user for
+    # nothing.
+    if curr_user is None:
+        curr_user = await create_anonymous_user(db)
+    user_id: uuid.UUID = curr_user.id
 
     session = await create_sessions(
         db=db, user_id=user_id
@@ -96,7 +110,7 @@ async def injest_resume(file: UploadFile = File(...),
         await create_key_mapping(
             db=db,
             key=idempotency_key,
-            user_id=user_id,
+            user_id=idempotency_user_id,
             session_id=session.id,
         )
 

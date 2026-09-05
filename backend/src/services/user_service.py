@@ -11,6 +11,7 @@ claims input eg
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
 from ..db.users import Users
+from ..utils.anon_identity import generate_anon_display_name, generate_anon_firebase_uid
 
 
 async def get_or_create_users_from_claims(claims, db: AsyncSession):
@@ -57,3 +58,24 @@ async def get_or_create_users_from_claims(claims, db: AsyncSession):
         print("---Exited services/get_or_Create_users_from_claims")
 
         return new_user
+
+
+async def create_anonymous_user(db: AsyncSession) -> Users:
+    """
+    Creates a throwaway Users row for an unauthenticated /ingest request, so
+    Sessions.user_id (NOT NULL) always has a real owner. Gets a fun generated
+    display name (e.g. 'SavageIntern4821') shown as the roast's byline instead
+    of nothing -- fits the product's tone, and a later signup can claim the
+    session by re-pointing Sessions.user_id at the real account.
+    """
+    new_user = Users(
+        firebase_uid=generate_anon_firebase_uid(),
+        display_name=generate_anon_display_name(),
+        is_anonymous=True,
+        user_metadata={"anonymous": True},
+    )
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
+    print(f"----Anonymous user created: {new_user.id} ({new_user.display_name})")
+    return new_user

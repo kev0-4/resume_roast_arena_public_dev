@@ -54,3 +54,16 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db_s
 
     return curr_user
 
+
+async def get_current_user_optional(request: Request, db: AsyncSession = Depends(get_db_sqlalchemy)):
+    """
+    Like get_current_user, but returns None instead of raising when no
+    Authorization header is present at all -- for routes (e.g. /ingest) that
+    support anonymous use. A *present but invalid* token still raises 401:
+    a bad token is a client bug, not intentional anonymous use.
+    """
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None
+    return await get_current_user(request, db)
+
