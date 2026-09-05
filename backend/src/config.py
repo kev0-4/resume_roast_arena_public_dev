@@ -36,6 +36,9 @@ AZURE_SERVICE_BUS_RENDER_QUEUE_NAME = os.getenv("AZURE_SERVICE_BUS_RENDER_QUEUE_
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_ROAST_MODEL = os.getenv("GEMINI_ROAST_MODEL", "gemini-3.5-flash-lite")
 
+INGEST_RATE_LIMIT_MAX = int(os.getenv("INGEST_RATE_LIMIT_MAX", "5"))
+INGEST_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("INGEST_RATE_LIMIT_WINDOW_SECONDS", "3600"))
+
 if None in VALUES:
     print("Warning: one or more variables not found in environment variables.")
     print(VALUES)  # comment out later

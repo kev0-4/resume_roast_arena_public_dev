@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Response, status, Depends, Request, HTTPException, UploadFile, File, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..dependencies.auth import get_current_user_optional
+from ..dependencies.rate_limit import check_ingest_rate_limit
 from ..utils.telemetry import emit_event, with_trace
 from ..services.blob import upload_raw, delete_raw, read_blob, blob_exists, initialize_blob_storage
 from ..services.service_bus import enqueue_extraction
@@ -21,7 +22,8 @@ injest_router = APIRouter()
 async def injest_resume(file: UploadFile = File(...),
                         db: AsyncSession = Depends(get_db_sqlalchemy),
                         curr_user=Depends(get_current_user_optional),
-                        idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key")):
+                        idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
+                        _rate_limit=Depends(check_ingest_rate_limit)):
     # Scopes idempotency-key dedup: authenticated users dedup per-account,
     # anonymous requests share one "no account" bucket (user_id=None) --
     # this must NOT be the real per-session anon user created below, since
