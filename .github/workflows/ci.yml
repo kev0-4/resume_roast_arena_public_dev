@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: devuser
+          POSTGRES_PASSWORD: devpassword
+          POSTGRES_DB: devdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U devuser -d devdb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: bitnami/redis:latest
+        env:
+          REDIS_PASSWORD: devpassword
+          ALLOW_EMPTY_PASSWORD: "no"
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli -a devpassword ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      azurite:
+        image: mcr.microsoft.com/azure-storage/azurite:latest
+        ports:
+          - 10000:10000
+          - 10001:10001
+          - 10002:10002
+
+    env:
+      # All values below are throwaway local-dev-emulator credentials, not
+      # real secrets -- the Azurite key specifically is Microsoft's published
+      # well-known emulator key, identical for every Azurite instance
+      # everywhere. Matches workers/.env exactly.
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: devdb
+      POSTGRES_USER: devuser
+      POSTGRES_PASSWORD: devpassword
+      DATABASE_URL: postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb
+
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: devpassword
+      REDIS_URL: redis://localhost:6379/0
+
+      AZURE_STORAGE_ACCOUNT: devstoreaccount1
+      AZURE_STORAGE_KEY: Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==
+      AZURE_BLOB_ENDPOINT: http://127.0.0.1:10000/devstoreaccount1
+      AZURE_STORAGE_CONNECTION_STRING: DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;TableEndpoint=http://127.0.0.1:10002/devstoreaccount1;
+      AZURE_CONTAINER_NAME: resume-roast-arena
+      AZURE_CONTAINER_RAW_FOLDER_PREFIX: raw
+
+      # No test calls Service Bus, but backend/src/services/service_bus.py
+      # raises RuntimeError at *import* time if these are unset -- and that
+      # import happens transitively (backend/src/__init__.py -> routes ->
+      # service_bus.py) just from importing anything under backend.src.*, so
+      # every test needs these set even though none of them touch a real
+      # queue. No emulator running in CI -- a syntactically valid connection
+      # string is enough since nothing actually sends/receives.
+      AZURE_SERVICE_BUS_CONNECTION_STRING: "Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
+      AZURE_SERVICE_BUS_QUEUE_NAME: myServiceBusQueue
+      AZURE_SERVICE_BUS_NORMALIZATION_QUEUE_NAME: resume-normalization
+      AZURE_SERVICE_BUS_ANONYMIZATION_QUEUE_NAME: resume-anonymization
+      AZURE_SERVICE_BUS_SCORING_QUEUE_NAME: resume-scoring
+      AZURE_SERVICE_BUS_LLM_QUEUE_NAME: resume-llm-roast
+      AZURE_SERVICE_BUS_RENDER_QUEUE_NAME: resume-render
+
+      # Gemini is intentionally unset -- nothing in the pytest suite calls it.
+
+      INGEST_RATE_LIMIT_MAX: 5
+      INGEST_RATE_LIMIT_WINDOW_SECONDS: 3600
+      RAW_UPLOAD_TTL_HOURS: 24
+      ANONYMOUS_ROAST_TTL_DAYS: 30
+      CLEANUP_SWEEP_INTERVAL_SECONDS: 3600
+
+      SECRET_KEY: ci-test-secret-key
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Wait for Azurite
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:10000/devstoreaccount1 -o /dev/null -w '%{http_code}' | grep -qE '^(400|403)$'; then
+              echo "Azurite is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Azurite did not become ready in time"
+          exit 1
+
+      - name: Run database migrations
+        working-directory: backend/src
+        run: python -m alembic upgrade head
+
+      - name: Run test suite
+        run: pytest -v
