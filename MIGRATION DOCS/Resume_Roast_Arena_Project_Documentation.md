@@ -1099,13 +1099,7 @@ Standardize timestamps later, preferably around timezone-aware UTC timestamps.
 
 ## D. Logging
 
-Some worker code still uses:
-
-```python
-print(...)
-```
-
-Replace with structured logging / `emit_event`.
+**Update 2026-09-05: DONE.** Every worker's `processor.py`, `workers/extraction/extractor/tika.py`, `workers/normalization/pipeline/segmenter.py`, and `workers/config.py` converted from `print()` to `emit_event()`. See section 34 for the full record. `workers/anonymization/pipeline/testAssembler.py`/`testRedactor.py` (manual console test-runner scripts) and `_DEPRECIATED_signals.py` (dead code) deliberately left untouched.
 
 The original MVP explicitly calls for observability hooks throughout the pipeline. fileciteturn4file4L1-L8
 
@@ -1430,7 +1424,7 @@ When starting a new chat/model, give it this document and ask it to:
 
 # 28. Current project status
 
-**Updated 2026-09-05 (later still)** — TTL cleanup now built too; see section 32. This session's local `main` branch drift is also resolved — everything through section 31 is merged into `main` (this feature is on PR #2, not yet merged).
+**Updated 2026-09-05 (later still)** — structured logging done too; see section 34. `main` now includes everything through section 32 (TTL cleanup, PR #2 — merged). **Two PRs open in parallel, both appending sections to this file**: PR #3 (CI, section 33, branched before this one — not yet merged as of this commit) and PR #4/this one (structured logging, section 34, branched from `main` before PR #3 merged). Whichever merges second will very likely hit a real git conflict in this file (both append at the end, both touch the status table) — that's expected, not a sign anything is wrong; resolve by keeping both sections 33 and 34 and renumbering if a later section needs to come after both.
 
 ```text
 INGEST                  ██████████  COMPLETE (incl. anonymous sessions)
@@ -1459,8 +1453,10 @@ REDIS/RATE LIMITING     ██████████  COMPLETE — POST /inges
                                      31. Redis finally used for something after being provisioned
                                      since the start of this project. CAPTCHA (spec's other
                                      anonymous-abuse mitigation) still not implemented.
-PRODUCTION HARDENING    ███░░░░░░░  PARTIAL
-CI/CD/AZURE DEPLOY      ░░░░░░░░░░  NOT VERIFIED
+PRODUCTION HARDENING    ████░░░░░░  PARTIAL — structured logging (print() -> emit_event) done across
+                                     every worker, see section 34. Pydantic V2 warnings still open.
+CI/CD/AZURE DEPLOY      ░░░░░░░░░░  NOT VERIFIED (test half done on PR #3, section 33 — not merged
+                                     as of this commit)
 ```
 
 Full pipeline (ingest → extraction → normalization → anonymization → scoring → LLM roast → render) verified working end-to-end against real infra on 2026-09-05, all the way to DONE with a real generated PNG card.
@@ -1589,3 +1585,21 @@ The reference component's sparkline/`longStat` trend graph has **no real data so
 **Testing note for future work here**: this codebase has no `pytest-asyncio` and no prior async-test pattern. `workers/cleanup/test_sweep.py` uses the same `asyncio.run()`-per-test pattern every manual e2e script this session already used, wrapped with an explicit `await engine.dispose()` between tests — `backend/src/db/session.py`'s `engine` is a module-level singleton whose connection pool binds to whichever event loop first touches it; without disposing it at the end of each test's own loop, the next test's `asyncio.run()` (a *different* loop) reuses orphaned connections and asyncpg raises `MissingGreenlet`/`InterfaceError`. Also: **never touch an ORM object's attributes after a commit on the same session handle without an explicit refresh** — `db.commit()` expires all tracked objects' attributes by default, and touching one afterward (e.g. `session.id`) triggers an implicit lazy-reload that SQLAlchemy's asyncio mode doesn't support outside an explicit `await`, also raising `MissingGreenlet`. Fix used throughout: capture `session_id = session.id` as a plain value immediately after creation, and re-fetch via `get_session(session_id=...)` for anything needed after a later commit, rather than reusing the original ORM object.
 
 **Verified against real infra**: `test_sweep.py`'s 6 tests backdate `created_at` directly (the only practical way to test a 24h/30d TTL without waiting) against real Postgres + real Azurite, confirming exactly the right things get deleted and the right things survive. Separately ran the actual deployable entrypoint (`run_sweep_once()`, not just the sweep functions directly) against a real backdated anonymous session end-to-end — row and blob both confirmed gone afterward.
+
+---
+
+# 34. Structured Logging — IMPLEMENTED (2026-09-05)
+
+Every worker's `processor.py` (extraction, normalization, anonymization, scoring, llm, renderer) used plain `print()` for its entire debug trace. Converted to `emit_event()` (`backend/src/utils/telemetry.py`) — the structured-logging pattern already established elsewhere in this codebase (state.py files, `service_bus.py`, every `backend/src/routes/*` file) but never applied inside the processor orchestration files themselves. `workers/normalization/processor.py` had even already imported `emit_event` and never called it once.
+
+**Naming convention**: `<worker>.<step>`, dotted, matching what already existed (`session.status.marked_processing`, `servicebus.enqueue.success`) — e.g. `scoring.inputs_extracted`, `llm.response_received`, `render.slug_generated`. Every event carries `session_id` plus whatever contextual data is available at that point (counts, confidence scores, token usage, etc.) and a `status` level (`INFO`/`WARNING`/`ERROR`).
+
+**Judgment calls made, not blind 1:1 conversion**:
+- `workers/config.py`'s conversion deliberately does **not** log the raw `VALUES` dict the way the old `print(VALUES)` did — it can contain secrets (`SECRET_KEY`, DB/Redis passwords), and `emit_event` **persists** to `log_entry.json` rather than a transient console print, a materially different risk profile.
+- `workers/extraction/consumer.py` (like every `consumer.py` in this repo) already used Python's stdlib `logging.Logger` consistently for its own operational logging — its leftover debug prints were converted to `logger.debug(...)` to match *that file's own* established pattern, not forced into `emit_event`. Every worker's `consumer.py`/`main.py` already does this correctly; only the leftover raw prints inside `extraction/consumer.py`'s `_handle_message` needed fixing.
+- One debug print in `workers/normalization/pipeline/entities.py` (dumping `repr(original_value)` per phone-regex match candidate) was **removed**, not converted — it can fire many times per single resume, and a 1:1 `emit_event` conversion would have spammed the structured log with zero lasting informational value per entry.
+- `workers/extraction/extractor/tika.py` had two "before text"/"after text" prints bracketing a `.strip()` call with no real informational content — removed rather than manufacturing a meaningless event for each.
+
+**Deliberately not touched**: `workers/anonymization/pipeline/testAssembler.py` and `testRedactor.py` — manual console test-runner scripts (`if __name__ == "__main__":` style, ✓/✗ pass-fail output) meant for a human to read directly, not part of the live pipeline; converting their prints would make them useless for their actual purpose. `workers/normalization/pipeline/_DEPRECIATED_signals.py` — dead code (filename says so). Two prints inside `workers/normalization/consumer.py` — already inside a commented-out, disabled code block, not live.
+
+**Verified against real infra**: ran the full pipeline end-to-end (ingest → extraction → normalization → anonymization → scoring → LLM roast → render, reaching `DONE` with a real slug) and inspected the actual resulting `log_entry.json` directly — 62 structured entries, correctly ordered, `session_id` threaded through every single one, meaningful contextual data at each step (Tika confidence, block/entity/signal/metric counts, LLM token usage, composite score, generated slug). 111/111 tests still passing — this is a pure observability refactor, no behavior changes.
