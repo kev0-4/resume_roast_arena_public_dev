@@ -1242,13 +1242,13 @@ Still outstanding.
 
 ## Rate limiting / CAPTCHA
 
-Still outstanding:
-
 ```text
 per-IP rate limiting
 per-session rate limiting
 CAPTCHA for high-frequency anonymous usage
 ```
+
+**Update 2026-09-05: per-IP/per-session rate limiting DONE** (POST /ingest only) — see section 31. **CAPTCHA still not implemented.**
 
 ---
 
@@ -1430,7 +1430,7 @@ When starting a new chat/model, give it this document and ask it to:
 
 # 28. Current project status
 
-**Updated 2026-09-05 (later still)** — Public Link Service now built too; see section 30.
+**Updated 2026-09-05 (later still)** — rate limiting now built too; see section 31.
 
 ```text
 INGEST                  ██████████  COMPLETE (incl. anonymous sessions)
@@ -1454,7 +1454,10 @@ LEADERBOARD/GLOBAL CMP  ░░░░░░░░░░  NOT IMPLEMENTED — plan
 TTL/CLEANUP             ░░░░░░░░░░  NOT IMPLEMENTED — GET /r/{slug} enforces the 30-day anonymous
                                      TTL at *read* time (410 Gone), but nothing actually deletes
                                      expired blobs/rows yet — see section 30
-REDIS/RATE LIMITING     ░░░░░░░░░░  NOT IMPLEMENTED
+REDIS/RATE LIMITING     ██████████  COMPLETE — POST /ingest only (5/hour, configurable), see section
+                                     31. Redis finally used for something after being provisioned
+                                     since the start of this project. CAPTCHA (spec's other
+                                     anonymous-abuse mitigation) still not implemented.
 PRODUCTION HARDENING    ███░░░░░░░  PARTIAL
 CI/CD/AZURE DEPLOY      ░░░░░░░░░░  NOT VERIFIED
 ```
@@ -1544,3 +1547,23 @@ The reference component's sparkline/`longStat` trend graph has **no real data so
 **Verified against real infra end-to-end**: a full session driven through the entire pipeline reached `DONE` with a slug, then `GET /r/{slug}` via the real FastAPI app returned `200`, `image/png`, and bytes identical to what's in blob storage; an unknown slug returned `404`.
 
 **Not done / explicitly deferred**: TTL cleanup (deletion job), rate limiting on this route (mentioned in the original MVP's Redis rate-limiting plan, not built anywhere yet), an HTML/OG-meta wrapper response, vanity slugs (`context/scale_prompt.txt`, paid-tier future feature — the `slug` column can carry them as-is, no schema change needed later).
+
+---
+
+# 31. Rate Limiting — IMPLEMENTED (2026-09-05)
+
+`POST /ingest` now rate-limited via Redis (`backend/src/dependencies/rate_limit.py`), the `redis_cache` container's first actual use in this project — it's been provisioned and configured since the start but nothing ever imported the `redis` package until now.
+
+**Algorithm**: fixed-window counter, `INCR` + `EXPIRE` on a Redis key. Default **5 requests / hour**, env-configurable (`INGEST_RATE_LIMIT_MAX`, `INGEST_RATE_LIMIT_WINDOW_SECONDS` in both `workers/.env` and `backend/src/.env` — see the note about these two separate `.env` files below).
+
+**Key strategy**: `user:{user_id}` for authenticated requests, `ip:{client_ip}` for anonymous ones. This split exists because there's no stable identity to rate-limit an anonymous *session* on across requests — every unauthenticated `/ingest` mints a brand-new generated anon user (`backend/src/utils/anon_identity.py`), so IP is the only thing that stays constant across an anonymous user's repeated requests. Client IP prefers the first hop of `X-Forwarded-For` (for when this eventually sits behind a real reverse proxy/CDN), falling back to `request.client.host` for direct connections — no proxy trust configuration exists yet, so `X-Forwarded-For` is trusted as-is for now; a production deploy behind a real proxy should ensure that header is stripped/overwritten at the edge, not passed through from the client unchecked.
+
+**Failure mode**: fails **open** (allows the request, logs a warning) if Redis is unreachable. Deliberate — this is abuse/cost control on a pipeline that calls a paid LLM API, not a security boundary, and a Redis blip taking down the entire ingest flow would be a worse outcome than briefly allowing unlimited requests.
+
+**Response**: `429 Too Many Requests` with a `Retry-After` header (seconds remaining in the current window, read from the Redis key's TTL).
+
+**Two separate, drifted `.env` files found**: `workers/.env` (used by all the worker scripts and every e2e test this session) and `backend/src/.env` (what `backend/src/config.py` actually loads when run with `backend/src/` as the working directory, e.g. `uvicorn` started from there) are **not the same file** and had already drifted apart before this session — `backend/src/.env` was missing the LLM/render Service Bus queue names and the Gemini config entirely. Not fully reconciled here (out of scope for this feature), but both got the two new rate-limit vars added for consistency. Worth a proper audit/merge before any deploy.
+
+**Verified against the real Redis container**: unit tests exercise the counter directly, including a real (not mocked) window-expiry wait; an end-to-end run against the actual FastAPI app confirmed 5 anonymous `POST /ingest` calls succeed and the 6th/7th both return `429` with a correct `Retry-After` value that counts down within the configured window.
+
+**Not done / explicitly deferred**: CAPTCHA (spec's other anonymous-abuse mitigation), rate limiting on any other route (only `/ingest` is expensive enough to warrant it in v1), a sliding-window or token-bucket algorithm (fixed-window is simpler and sufficient for this threshold).
