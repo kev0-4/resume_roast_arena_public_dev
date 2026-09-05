@@ -1430,7 +1430,7 @@ When starting a new chat/model, give it this document and ask it to:
 
 # 28. Current project status
 
-**Updated 2026-09-05** — see section 29 for what changed since this table was first written; this replaces it.
+**Updated 2026-09-05 (later same day)** — Renderer now built; see section 29 for the implementation notes appended below the original design decisions.
 
 ```text
 INGEST                  ██████████  COMPLETE (incl. anonymous sessions)
@@ -1440,19 +1440,22 @@ ANONYMIZATION           ██████████  COMPLETE
 DETERMINISTIC SCORING   ██████████  COMPLETE
 PROMPT BUILDER          ██████████  COMPLETE
 LLM ROAST               ██████████  COMPLETE (Gemini, not the original OpenAI/Anthropic plan — see below)
-COMPOSITE SCORE (0-100) ░░░░░░░░░░  DESIGNED, NOT YET CODED — formula decided, see section 29. NOT
-                                     the same as the original MVP's Clarity/Credibility/Signal-to-
-                                     Noise numeric scores, which are separately still outstanding.
-RENDERER                ░░░░░░░░░░  NOT IMPLEMENTED — design decided, see section 29
+COMPOSITE SCORE (0-100) ██████████  COMPLETE — Sessions.composite_score column (real migration), see
+                                     section 29. NOT the same as the original MVP's Clarity/
+                                     Credibility/Signal-to-Noise numeric scores, which are
+                                     separately still outstanding.
+RENDERER                ██████████  COMPLETE — workers/renderer/, ROASTED → RENDERING → DONE, see
+                                     section 29. Verified end-to-end with a real generated PNG card.
 PUBLIC LINK             ░░░░░░░░░░  NOT IMPLEMENTED
-LEADERBOARD/GLOBAL CMP  ░░░░░░░░░░  NOT IMPLEMENTED — new planned feature, see section 29
+LEADERBOARD/GLOBAL CMP  ░░░░░░░░░░  NOT IMPLEMENTED — planned feature, composite_score is ready for
+                                     it (stored + queryable), see section 29
 TTL/CLEANUP             ░░░░░░░░░░  NOT IMPLEMENTED
 REDIS/RATE LIMITING     ░░░░░░░░░░  NOT IMPLEMENTED
 PRODUCTION HARDENING    ███░░░░░░░  PARTIAL
 CI/CD/AZURE DEPLOY      ░░░░░░░░░░  NOT VERIFIED
 ```
 
-Full pipeline (ingest → extraction → normalization → anonymization → scoring → LLM roast) verified working end-to-end against real infra on 2026-09-05.
+Full pipeline (ingest → extraction → normalization → anonymization → scoring → LLM roast → render) verified working end-to-end against real infra on 2026-09-05, all the way to DONE with a real generated PNG card.
 
 ---
 
@@ -1506,4 +1509,16 @@ The reference component's sparkline/`longStat` trend graph has **no real data so
 
 ## Status
 
-Design only. No code written against any of the above yet — next step is implementing the Renderer worker once the user supplies the reference components/rough layout for the visual build.
+**Update 2026-09-05 (later same day): IMPLEMENTED.** `workers/renderer/` built, mirroring the `workers/llm/` package shape exactly (schemas/errors/state/processor/consumer/main + `pipeline/{loader,card_data,template,screenshot}`). Wired into the pipeline: `workers/llm/processor.py` now calls `enqueue_render(...)` right after uploading `roast.json`, before `mark_roasted`/commit. `ROASTED → RENDERING → DONE` reached in a real end-to-end run against real infra (Postgres/Azurite/Service Bus emulator/Tika/Gemini), producing a real generated PNG card with a real display name, real LLM verdict as punchline, and a real computed score/stamp.
+
+**Implementation notes for anyone touching this worker:**
+
+- **Rendering approach**: Jinja2 (already installed) renders `pipeline/templates/roast_card.html` — a hand-ported, static (non-animated) version of the reference React component, same colors/fonts/layout, `@keyframes` stripped to a fixed resting frame since it's a flattened PNG. Screenshotted via **Playwright's async API** (`playwright.async_api`, not sync) — sync API raises if called from a thread with a running asyncio loop, which `process_render_job` always is. One browser instance is lazily launched and reused across messages (cold start ~1-2s; not worth paying per message), guarded by an `asyncio.Lock()`. On a `PlaywrightError` (e.g. the browser process crashed) it relaunches once and retries before giving up as a `TransientRenderError`.
+- **Chrome, not bundled Chromium**: launches via `chromium.launch(channel="chrome")`, reusing the system's already-installed `google-chrome-stable` instead of the ~300MB `playwright install chromium` download. **This is a deliberate local-dev shortcut, not a final decision** — before containerizing/deploying to Azure, switch to a pinned `playwright install chromium` (matching the installed `playwright` pip version). `channel="chrome"` drifts independently via whatever the deploy image's package manager resolves at build time, which isn't reproducible, and a minimal Docker base image won't have Chrome preinstalled anyway. There's a comment to this effect directly in `pipeline/screenshot.py` — don't let it silently ship to production as-is.
+- **Font loading**: Google Fonts `@import` (Anton + JetBrains Mono, same as the reference) loads fine in practice — `page.set_content(html, wait_until="load")` followed by `await page.evaluate("document.fonts.ready")` was sufficient in testing (confirmed via an isolated Anton-vs-Arial-Bold rendered comparison — the two are visibly, unmistakably different, so the custom font really is applying). No `networkidle` wait needed.
+- **Sizing**: renders at the reference's native 420×525 viewport, exported via `device_scale_factor≈2.571` (1080/420) to hit Instagram's recommended 1080×1350 without hand-recalculating every CSS px value from the reference component.
+- **Layout deviation found during visual QA**: dropping the reference's fake sparkline (decision 2) left a large awkward empty gap between the stat chips and the footer when using the reference's original `justify-content: space-between` layout. Fixed by centering the punchline+stat-row block vertically in the bottom zone (`justify-content: center`) and pinning the footer independently via `position: absolute; bottom: 18px` rather than keeping it in the same flex flow — worth remembering if the sparkline slot ever gets a real replacement (decision 2's future per-section-issues idea), since that would change this spacing math again.
+- **Enqueue ordering**: `enqueue_render` was added *before* `mark_roasted`/commit in `workers/llm/processor.py`, deliberately mirroring the existing enqueue-before-commit pattern used at every other stage (e.g. scoring enqueues `llm` before `mark_scored`). This is a conscious choice to stay consistent with the rest of the codebase, not an oversight — section 22.A of this doc already flags that ordering as an unresolved, project-wide architectural caveat ("never enqueue downstream before the upstream state transition is durably successful"); this call site inherits that same already-documented risk rather than introducing a new one, and fixing the systemic pattern was explicitly out of scope for this feature.
+- **Migration**: `Sessions.composite_score` (`Integer`, nullable) added via a real Alembic migration (`backend/src/alembic/versions/6bca0908464c_add_composite_score_to_sessions.py`, `down_revision='fd4485ea5e78'`) — unlike the `RENDERING` enum value (no migration needed, `status` is a plain `String` column), a new column always needs one. Already applied to the local dev DB.
+
+**Not done / explicitly deferred**: the real-anonymized-snippet toggle (decision 3), the raw-counts toggle (decision 2), and per-section issue tagging for a future sparkline replacement — none of these were in scope for v1.
