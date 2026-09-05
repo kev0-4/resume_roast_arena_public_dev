@@ -1424,7 +1424,7 @@ When starting a new chat/model, give it this document and ask it to:
 
 # 28. Current project status
 
-**Updated 2026-09-05 (later still)** — CI (section 33) and structured logging (section 34) both merged into `main` now, back to back (PR #3 then PR #4). PR #4 branched before PR #3 merged, so merging it produced the real git conflict predicted in an earlier revision of this section — resolved here by keeping both sections 33 and 34.
+**Updated 2026-09-06** — Leaderboard (section 35) implemented: `GET /leaderboard`, real Postgres-backed ranking by `composite_score`, same eligibility rules as the Public Link Service. This was the last item on the original roadmap list from section 28's prior revision; only Pydantic V2 warnings, the CI/CD deploy half, and the original MVP's unimplemented Clarity/Credibility/Signal-to-Noise scoring dimension remain open below.
 
 ```text
 INGEST                  ██████████  COMPLETE (incl. anonymous sessions)
@@ -1443,8 +1443,10 @@ RENDERER                ██████████  COMPLETE — workers/ren
 PUBLIC LINK             ██████████  COMPLETE — GET /r/{slug}, see section 30. A roast can now
                                      actually be shared end-to-end. Only the original MVP's core
                                      pipeline items remain unimplemented below.
-LEADERBOARD/GLOBAL CMP  ░░░░░░░░░░  NOT IMPLEMENTED — planned feature, composite_score is ready for
-                                     it (stored + queryable), see section 29
+LEADERBOARD/GLOBAL CMP  ██████████  COMPLETE — GET /leaderboard, see section 35. Ranked by
+                                     composite_score, same eligibility as the Public Link Service.
+                                     Percentile framing and time-windowed boards deliberately not
+                                     built (v1 scope).
 TTL/CLEANUP             ██████████  COMPLETE — workers/cleanup/, see section 32. Raw uploads deleted
                                      after 24h, anonymous sessions (row + all blobs) after 30d.
                                      Logged-in retention still deliberately unconfigured (spec says
@@ -1618,3 +1620,23 @@ Every worker's `processor.py` (extraction, normalization, anonymization, scoring
 **Deliberately not touched**: `workers/anonymization/pipeline/testAssembler.py` and `testRedactor.py` — manual console test-runner scripts (`if __name__ == "__main__":` style, ✓/✗ pass-fail output) meant for a human to read directly, not part of the live pipeline; converting their prints would make them useless for their actual purpose. `workers/normalization/pipeline/_DEPRECIATED_signals.py` — dead code (filename says so). Two prints inside `workers/normalization/consumer.py` — already inside a commented-out, disabled code block, not live.
 
 **Verified against real infra**: ran the full pipeline end-to-end (ingest → extraction → normalization → anonymization → scoring → LLM roast → render, reaching `DONE` with a real slug) and inspected the actual resulting `log_entry.json` directly — 62 structured entries, correctly ordered, `session_id` threaded through every single one, meaningful contextual data at each step (Tika confidence, block/entity/signal/metric counts, LLM token usage, composite score, generated slug). 111/111 tests still passing — this is a pure observability refactor, no behavior changes.
+
+---
+
+# 35. Leaderboard / Global Comparison — IMPLEMENTED (2026-09-06)
+
+The feature flagged back in section 29 as "planned, not designed yet" when `Sessions.composite_score` was first made a stored/queryable column specifically to support it. `GET /leaderboard` — public, unauthenticated (no `/api/v1` prefix, registered the same way as `public_router`), returns roasts ranked by `composite_score` descending.
+
+**Scope decision — same population as the Public Link Service**: eligibility is `slug IS NOT NULL AND composite_score IS NOT NULL`, plus the same anonymous-TTL exclusion `public.py`'s `GET /r/{slug}` already enforces (`ANONYMOUS_ROAST_TTL_DAYS`, shared `config.py` constant). Since a slug is only ever generated once a session reaches `DONE` (the renderer's last step), this is naturally "every roast that's currently a live, shareable public link" — a leaderboard entry and that same roast's `/r/{slug}` card can never disagree about whether it's still visible. Logged-in users are never excluded by age (no retention limit configured yet, matching `public.py`).
+
+**Ranking**: `composite_score DESC`, tiebroken by `created_at ASC` (earlier submission ranks higher on a tie) — deterministic, no random ordering on ties.
+
+**Response shape** (`backend/src/schemas/leaderboard_schemas.py`): `{total, limit, offset, entries: [{rank, slug, display_name, composite_score, created_at}]}`. `limit`/`offset` are query params (`limit` 1-100, default 20; `offset` ≥0, default 0) — `total` lets a caller compute total pages. `display_name` reuses `Users.display_name` exactly as the renderer already does for the roast card itself (`workers/renderer/processor.py`) — for an anonymous session that's the generated fun name (e.g. "OverqualifiedGoblin6248"), for a logged-in user it's their real Firebase display name (already the case on the shareable card today; the leaderboard isn't introducing a new privacy surface, just reusing the existing one). Falls back to `"Anonymous Applicant"` if somehow null.
+
+**No frontend** — same as the rest of this backend (the roast card itself is a server-rendered PNG, not a page this API builds). This is the JSON data endpoint a future frontend would consume; not in scope here.
+
+**Deliberately not built**: the reference component's percentile framing ("better than 92% of resumes," mentioned as a `longStat` idea back in section 29) — not implemented, `total` + `rank` in the response is enough for a caller to compute it client-side if wanted (`1 - rank/total`), didn't seem worth a second endpoint or extra DB round-trip for v1. No time-windowed leaderboards (weekly/monthly) — all-time only.
+
+**Real bug caught during implementation**: `get_leaderboard`'s first draft selected whole `SessionModel` ORM instances via the join query, then a caller touched `.id`/`.composite_score` on them in a list comprehension. Because the objects were already tracked (and expired by an earlier `db.commit()`) in the same `AsyncSession`'s identity map, SQLAlchemy's async ORM raised `MissingGreenlet` on that attribute access — the same class of gotcha already documented in this codebase's tests (`workers/cleanup/test_sweep.py`'s docstring: "never touch ORM object attributes after a commit without an explicit refresh"), but this time triggered by the *service function's own return value* rather than a test bypassing it. Fixed by selecting individual scalar columns (`SessionModel.id`, `.slug`, `.composite_score`, `.created_at`, `Users.display_name`) instead of full ORM rows, and returning plain dicts — sidesteps the whole footgun class rather than requiring every future caller to remember to re-fetch.
+
+**Verified against real infra**: 7 new tests against real Postgres (`backend/src/routes/test_leaderboard.py`) — score ordering, tiebreak-by-`created_at`, slug-required exclusion, anonymous-TTL exclusion, logged-in-never-expires, pagination, and one `TestClient`-driven route test confirming the full FastAPI wiring (query params → service → Pydantic response). Also ran the query directly against this session's real accumulated Postgres data (43 eligible sessions from earlier feature work this session, e.g. real anonymous display names like "OverqualifiedGoblin6248" and "PublicLinkTestUser" from the public-link-service tests) and confirmed correct descending order — not just synthetic fixture data. 118/118 tests passing (111 prior + 7 new).
