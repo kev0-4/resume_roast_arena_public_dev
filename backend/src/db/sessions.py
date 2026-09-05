@@ -29,6 +29,7 @@ class JobStatusEnum(str, enum.Enum):
     SCORED = "SCORED"
     ROASTING = "ROASTING"
     ROASTED = "ROASTED"
+    RENDERING = "RENDERING"
 
 class Sessions(Base):
     __tablename__ = "Sessions"
@@ -41,6 +42,7 @@ class Sessions(Base):
     user = relationship("Users", backref="Sessions")
     # sanitized_blob_path = Column(Text, nullable=True)
     render_blob_path: Optional[str] = Column(Text, nullable=True)
+    composite_score: Optional[int] = Column(Integer, nullable=True)
     error_code: Optional[str] = Column(String(50), nullable=True)
     error_message: Optional[str] = Column(Text, nullable=True)
     # expires_at = Column(DateTime, nullable=True)

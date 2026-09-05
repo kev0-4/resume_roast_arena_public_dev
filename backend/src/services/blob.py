@@ -4,7 +4,7 @@ utility functions to check_blob,upload_raw, delete_raw,read_blob
 
 '''
 import json
-from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
+from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient, ContentSettings
 from azure.core.exceptions import ResourceNotFoundError
 from typing import Optional
 from datetime import datetime, timezone
@@ -141,6 +141,13 @@ def upload_roast(session_id: str, data: dict) -> str:
     blob_client = get_blob_client(blob_path=blob_path)
     payload = json.dumps(data, ensure_ascii=True).encode("utf-8")
     blob_client.upload_blob(payload, overwrite=True)
+    return blob_path
+
+
+def upload_render(session_id: str, png_bytes: bytes) -> str:
+    blob_path = f"render/{session_id}/render.png"
+    blob_client = get_blob_client(blob_path=blob_path)
+    blob_client.upload_blob(png_bytes, overwrite=True, content_settings=ContentSettings(content_type="image/png"))
     return blob_path
 
 

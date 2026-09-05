@@ -15,6 +15,7 @@ Pipeline:
 6. Parse + validate output
 7. Assemble roast artifact
 8. Upload roast.json
+8b. Enqueue render job
 9. Mark ROASTED
 """
 
@@ -25,6 +26,7 @@ from datetime import datetime
 from backend.src.db.sessions import Sessions, JobStatusEnum
 from backend.src.services.session_service import get_session
 from backend.src.services.blob import upload_roast
+from backend.src.services.service_bus import enqueue_render
 
 from .schemas import LLMJobMessage
 from .state import mark_roasting, mark_roasted, mark_failed
@@ -130,10 +132,23 @@ async def process_llm_job(
         # 8. Upload roast.json
         # ------------------------------------------------------------
         try:
-            upload_roast(session_id=str(session_id), data=roast_payload)
+            roast_blob_path = upload_roast(session_id=str(session_id), data=roast_payload)
         except Exception as e:
             raise TransientLLMError(f"Failed to upload roast artifact: {e}")
         print(f"DEBUG: roast.json uploaded for session_id: {session_id}")
+
+        # ------------------------------------------------------------
+        # 8b. Enqueue render job
+        # ------------------------------------------------------------
+        try:
+            enqueue_render(
+                session_id=str(session_id),
+                scored_blob_path=f"scored/{session_id}/scored.json",
+                roast_blob_path=roast_blob_path,
+            )
+        except Exception as e:
+            raise TransientLLMError(f"Failed to enqueue render job: {e}")
+        print(f"DEBUG: render job enqueued for session_id: {session_id}")
 
         # ------------------------------------------------------------
         # 9. Mark ROASTED

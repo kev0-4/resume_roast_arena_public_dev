@@ -1,0 +1,229 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Anton&family=JetBrains+Mono:wght@500;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 420px;
+    height: 525px;
+    background: #F6F1E7; /* ashBg -- matches card root so no seam behind rounded corners */
+    font-family: system-ui, sans-serif;
+  }
+
+  .card {
+    width: 420px;
+    height: 525px;
+    position: relative;
+    border-radius: 18px;
+    overflow: hidden;
+    background: #F6F1E7; /* ashBg */
+  }
+
+  /* ---- top zone: resume mock, fading into char ---- */
+  .paper-zone {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 46%;
+    background: #F1E9D8; /* paper */
+  }
+
+  .paper-lines { position: absolute; inset: 0; opacity: 0.5; }
+  .paper-line {
+    position: absolute;
+    left: 0; right: 0;
+    height: 1px;
+    background: #D8CBAA; /* paperLine */
+  }
+
+  .resume-text { position: relative; padding: 22px 26px 0; }
+
+  .candidate-name {
+    font-family: 'Anton', system-ui, sans-serif;
+    font-size: 15px;
+    letter-spacing: 0.02em;
+    color: #211C16; /* ink */
+    margin-bottom: 14px;
+  }
+
+  .resume-line {
+    font-size: 11.5px;
+    line-height: 20px;
+  }
+  .resume-line.section-label {
+    color: #8C8474; /* smoke */
+    font-weight: 700;
+    letter-spacing: 0.08em;
+  }
+  .resume-line.body-line {
+    color: #211C16; /* ink */
+    font-weight: 400;
+  }
+
+  .stamp {
+    position: absolute;
+    top: 26px; right: 20px;
+    transform: rotate(9deg);
+    border: 3px solid #C1121F; /* emberDeep */
+    border-radius: 6px;
+    padding: 4px 10px;
+    color: #C1121F;
+    font-family: 'Anton', system-ui, sans-serif;
+    font-size: 15px;
+    letter-spacing: 0.06em;
+    opacity: 0.9;
+    box-shadow: 0 0 0 1px #C1121F inset;
+  }
+
+  /* char/burn gradient eating the bottom of the paper */
+  .burn-gradient {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 58%;
+    background: linear-gradient(to bottom, rgba(138,115,96,0) 0%, rgba(138,115,96,0.4) 55%, #F6F1E7 100%);
+  }
+
+  /* ember line at the burn edge -- static (no flicker animation in a still image) */
+  .ember-line {
+    position: absolute;
+    left: 0; right: 0; bottom: 42%;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, #FF6B35, transparent);
+    filter: blur(1px);
+  }
+
+  /* floating embers -- fixed resting positions, no drift animation */
+  .ember {
+    position: absolute;
+    bottom: 40%;
+    border-radius: 50%;
+    background: #FF6B35; /* ember */
+    box-shadow: 0 0 6px 2px #FF6B35;
+    opacity: 0.85;
+  }
+  .ember-1 { left: 22%; width: 4px; height: 4px; }
+  .ember-2 { left: 48%; width: 3px; height: 3px; }
+  .ember-3 { left: 68%; width: 5px; height: 5px; }
+  .ember-4 { left: 82%; width: 3px; height: 3px; }
+
+  /* ---- bottom zone: punchline, stats, cta ---- */
+  .bottom-zone {
+    position: absolute;
+    top: 46%; left: 0; right: 0; bottom: 0;
+    background: #F6F1E7; /* ashBg */
+    padding: 20px 26px 64px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .punchline {
+    font-family: 'Anton', system-ui, sans-serif;
+    color: #211C16; /* ink */
+    font-size: 21px;
+    line-height: 1.16;
+    letter-spacing: 0.01em;
+  }
+
+  .stat-row { display: flex; gap: 12px; margin: 14px 0 0; }
+
+  .stat-chip {
+    flex: 1;
+    border: 1px solid rgba(255,107,53,0.35);
+    background: rgba(255,107,53,0.08);
+    border-radius: 10px;
+    padding: 9px 12px;
+  }
+  .stat-value {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 18px;
+    font-weight: 700;
+    color: #FF6B35;
+    line-height: 1.1;
+  }
+  .stat-label {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    color: rgba(33,28,22,0.58);
+    margin-top: 3px;
+    letter-spacing: 0.02em;
+  }
+
+  .footer {
+    position: absolute;
+    left: 26px; right: 26px; bottom: 18px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .footer-rule { flex: 1; height: 1px; background: rgba(33,28,22,0.16); }
+  .footer-text {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    color: rgba(33,28,22,0.62);
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+
+    <div class="paper-zone">
+      <div class="paper-lines">
+        {% for i in range(14) %}
+        <div class="paper-line" style="top: {{ 18 + i * 20 }}px;"></div>
+        {% endfor %}
+      </div>
+
+      <div class="resume-text">
+        <div class="candidate-name">{{ candidate_name }}</div>
+        {% for line in resume_lines %}
+          {% if line == "" %}
+            <div style="height: 10px;"></div>
+          {% elif line == line.upper() %}
+            <div class="resume-line section-label" style="opacity: {{ 1 - loop.index0 * 0.045 }};">{{ line }}</div>
+          {% else %}
+            <div class="resume-line body-line" style="opacity: {{ 1 - loop.index0 * 0.045 }};">{{ line }}</div>
+          {% endif %}
+        {% endfor %}
+      </div>
+
+      <div class="stamp">{{ stamp }}</div>
+
+      <div class="burn-gradient"></div>
+      <div class="ember-line"></div>
+
+      <div class="ember ember-1"></div>
+      <div class="ember ember-2"></div>
+      <div class="ember ember-3"></div>
+      <div class="ember ember-4"></div>
+    </div>
+
+    <div class="bottom-zone">
+      <p class="punchline">{{ punchline }}</p>
+
+      <div class="stat-row">
+        <div class="stat-chip">
+          <div class="stat-value">{{ score }}/100</div>
+          <div class="stat-label">Roast Score</div>
+        </div>
+        <div class="stat-chip">
+          <div class="stat-value">{{ stat2_value }}</div>
+          <div class="stat-label">{{ stat2_label }}</div>
+        </div>
+      </div>
+
+      <div class="footer">
+        <div class="footer-rule"></div>
+        <span class="footer-text">check yours &rarr; {{ cta_text }}</span>
+        <div class="footer-rule"></div>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>
