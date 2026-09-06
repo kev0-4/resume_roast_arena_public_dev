@@ -6,6 +6,7 @@ import {
   signInWithPopup,
   signOut as firebaseSignOut,
   type User as FirebaseUser,
+  type AuthError,
 } from "firebase/auth";
 import { auth, googleProvider, githubProvider } from "./firebase";
 import { syncFirebaseAuth, type BackendUser } from "./api";
@@ -14,10 +15,31 @@ interface AuthContextValue {
   firebaseUser: FirebaseUser | null;
   backendUser: BackendUser | null;
   loading: boolean;
+  authError: string | null;
+  clearAuthError: () => void;
   signInWithGoogle: () => Promise<void>;
   signInWithGithub: () => Promise<void>;
   signOutUser: () => Promise<void>;
   getIdToken: () => Promise<string | null>;
+}
+
+// Codes a user triggers themselves just by closing the popup or clicking
+// too fast -- not real failures, showing an error for these would be
+// noise for completely normal behavior.
+const BENIGN_AUTH_ERROR_CODES = new Set([
+  "auth/popup-closed-by-user",
+  "auth/cancelled-popup-request",
+]);
+
+function describeAuthError(err: unknown): string | null {
+  const code = (err as AuthError)?.code;
+  if (!code || BENIGN_AUTH_ERROR_CODES.has(code)) return null;
+  if (code === "auth/popup-blocked") return "Your browser blocked the sign-in popup -- allow popups for this site and try again.";
+  if (code === "auth/account-exists-with-different-credential") {
+    return "That email is already linked to a different sign-in method -- try the other provider.";
+  }
+  if (code === "auth/network-request-failed") return "Network error -- check your connection and try again.";
+  return "Sign-in didn't go through -- try again.";
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -26,6 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [backendUser, setBackendUser] = useState<BackendUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
     // Firebase's own listener -- fires on sign-in, sign-out, and on page
@@ -54,11 +77,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signInWithGoogle = async () => {
-    await signInWithPopup(auth, googleProvider);
+    setAuthError(null);
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (err) {
+      setAuthError(describeAuthError(err));
+    }
   };
 
   const signInWithGithub = async () => {
-    await signInWithPopup(auth, githubProvider);
+    setAuthError(null);
+    try {
+      await signInWithPopup(auth, githubProvider);
+    } catch (err) {
+      setAuthError(describeAuthError(err));
+    }
   };
 
   const signOutUser = async () => {
@@ -72,7 +105,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ firebaseUser, backendUser, loading, signInWithGoogle, signInWithGithub, signOutUser, getIdToken }}
+      value={{
+        firebaseUser,
+        backendUser,
+        loading,
+        authError,
+        clearAuthError: () => setAuthError(null),
+        signInWithGoogle,
+        signInWithGithub,
+        signOutUser,
+        getIdToken,
+      }}
     >
       {children}
     </AuthContext.Provider>

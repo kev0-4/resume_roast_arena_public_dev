@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { GitHubLogo, GoogleLogo } from "@/components/icons/social-icons";
 
@@ -24,7 +25,8 @@ function useCloseOnOutsideClick(open: boolean, onClose: () => void) {
 }
 
 export function AuthMenu() {
-  const { firebaseUser, backendUser, loading, signInWithGoogle, signInWithGithub, signOutUser } = useAuth();
+  const { firebaseUser, backendUser, loading, authError, clearAuthError, signInWithGoogle, signInWithGithub, signOutUser } =
+    useAuth();
   const [open, setOpen] = useState(false);
   const [photoFailed, setPhotoFailed] = useState(false);
   const menuRef = useCloseOnOutsideClick(open, () => setOpen(false));
@@ -63,6 +65,19 @@ export function AuthMenu() {
             >
               <GitHubLogo size={16} />
               Continue with GitHub
+            </button>
+          </div>
+        )}
+        {/* The dropdown above closes the instant a provider button is
+            clicked (setOpen(false) fires before the popup even resolves),
+            so a failure has nowhere left to show inside it -- this floats
+            below the Sign in button itself instead, independent of
+            whether the dropdown is still open. */}
+        {authError && (
+          <div className="absolute right-0 top-full z-30 mt-2 flex w-64 items-start gap-2 rounded-xl border border-black/10 bg-white p-3 text-left shadow-xl">
+            <p className="flex-1 font-mono text-xs text-black/70">{authError}</p>
+            <button onClick={clearAuthError} aria-label="Dismiss" className="flex-shrink-0 text-black/40 hover:text-black">
+              <X size={14} />
             </button>
           </div>
         )}

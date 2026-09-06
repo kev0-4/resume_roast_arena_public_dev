@@ -31,7 +31,7 @@ function formatFileSize(bytes: number): string {
 
 export default function RoastPage() {
   const router = useRouter();
-  const { firebaseUser, backendUser, signInWithGoogle, signInWithGithub, signOutUser, getIdToken } = useAuth();
+  const { firebaseUser, backendUser, authError, signInWithGoogle, signInWithGithub, signOutUser, getIdToken } = useAuth();
   const [file, setFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [showSignInOptions, setShowSignInOptions] = useState(false);
@@ -229,27 +229,30 @@ export default function RoastPage() {
                 </button>
               </div>
             ) : showSignInOptions ? (
-              <div className="flex items-center gap-2 rounded-full border border-white/25 bg-white/10 p-1">
-                <button
-                  onClick={signInWithGoogle}
-                  className="flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-brand-blue transition-colors hover:brightness-95"
-                >
-                  <GoogleLogo size={12} />
-                  Google
-                </button>
-                <button
-                  onClick={signInWithGithub}
-                  className="flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-brand-blue transition-colors hover:brightness-95"
-                >
-                  <GitHubLogo size={12} />
-                  GitHub
-                </button>
-                <button
-                  onClick={() => setShowSignInOptions(false)}
-                  className="px-2 text-xs font-bold text-white/60 transition-colors hover:text-white"
-                >
-                  Cancel
-                </button>
+              <div className="flex flex-col items-center gap-2">
+                <div className="flex items-center gap-2 rounded-full border border-white/25 bg-white/10 p-1">
+                  <button
+                    onClick={signInWithGoogle}
+                    className="flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-brand-blue transition-colors hover:brightness-95"
+                  >
+                    <GoogleLogo size={12} />
+                    Google
+                  </button>
+                  <button
+                    onClick={signInWithGithub}
+                    className="flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-brand-blue transition-colors hover:brightness-95"
+                  >
+                    <GitHubLogo size={12} />
+                    GitHub
+                  </button>
+                  <button
+                    onClick={() => setShowSignInOptions(false)}
+                    className="px-2 text-xs font-bold text-white/60 transition-colors hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                {authError && <p className="max-w-xs text-center font-mono text-xs font-semibold text-brand-lime">{authError}</p>}
               </div>
             ) : (
               <div className="flex items-center gap-1 rounded-full border border-white/25 bg-white/10 p-1">
