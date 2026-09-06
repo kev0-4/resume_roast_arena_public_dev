@@ -5,7 +5,7 @@ Run with:  python -m pytest workers/llm/pipeline/test_validator.py -v
 """
 
 import pytest
-from .validator import parse_roast_output, _split_sections, _parse_fixes
+from .validator import parse_roast_output, _split_sections, _parse_fixes, _parse_highlights
 from ..schemas import RoastResult
 
 
@@ -200,3 +200,103 @@ class TestParseRoastOutput:
         assert "Roast with indentation." in result.roast
         assert "Fix A" in result.fixes
         assert "Fix B" in result.fixes
+
+
+# ---------------------------------------------------------------------------
+# _parse_highlights (grounding check)
+# ---------------------------------------------------------------------------
+
+SOURCE_TEXT = """\
+[SUMMARY]
+Results-driven synergy enthusiast with a passion for leveraging cross-functional paradigms.
+
+[EXPERIENCE]
+Led cross-functional initiatives to drive stakeholder alignment.
+Managed a team of 3 engineers on the checkout redesign project.
+"""
+
+
+class TestParseHighlights:
+    def test_grounded_quote_is_kept(self):
+        text = '"Results-driven synergy enthusiast" :: A thesaurus had a seizure here.'
+        highlights = _parse_highlights(text, SOURCE_TEXT)
+        assert len(highlights) == 1
+        assert highlights[0].quote == "Results-driven synergy enthusiast"
+        assert "thesaurus" in highlights[0].comment
+
+    def test_hallucinated_quote_is_dropped(self):
+        text = '"Invented Cold Fusion in my garage" :: Bold claim, zero evidence.'
+        highlights = _parse_highlights(text, SOURCE_TEXT)
+        assert highlights == []
+
+    def test_mix_of_grounded_and_hallucinated(self):
+        text = (
+            '"Results-driven synergy enthusiast" :: Real, and rough.\n'
+            '"Invented Cold Fusion" :: Not real -- should be dropped.\n'
+            '"Managed a team of 3 engineers" :: At least this one is concrete.'
+        )
+        highlights = _parse_highlights(text, SOURCE_TEXT)
+        quotes = [h.quote for h in highlights]
+        assert "Results-driven synergy enthusiast" in quotes
+        assert "Managed a team of 3 engineers" in quotes
+        assert "Invented Cold Fusion" not in quotes
+        assert len(highlights) == 2
+
+    def test_grounding_skipped_when_no_source_text(self):
+        text = '"Anything at all" :: no source to check against.'
+        highlights = _parse_highlights(text, "")
+        assert len(highlights) == 1
+        assert highlights[0].quote == "Anything at all"
+
+    def test_whitespace_differences_still_match(self):
+        # Quote spans what was two lines in the source, collapsed to one
+        # line in the LLM's output -- still a real substring once
+        # whitespace is normalized on both sides.
+        text = '"Led cross-functional initiatives to drive stakeholder alignment" :: Buzzword soup.'
+        highlights = _parse_highlights(text, SOURCE_TEXT)
+        assert len(highlights) == 1
+
+    def test_malformed_line_skipped_not_raised(self):
+        text = "This line has no quote marks or :: delimiter at all."
+        highlights = _parse_highlights(text, SOURCE_TEXT)
+        assert highlights == []
+
+    def test_empty_highlights_text_returns_empty_list(self):
+        assert _parse_highlights("", SOURCE_TEXT) == []
+
+    def test_blank_quote_or_comment_skipped(self):
+        text = '"" :: empty quote should be skipped\n"Results-driven synergy enthusiast" :: '
+        highlights = _parse_highlights(text, SOURCE_TEXT)
+        assert highlights == []
+
+
+class TestParseRoastOutputWithHighlights:
+    def test_highlights_included_when_grounded(self):
+        text = (
+            "VERDICT: Fine.\nROAST:\nBody.\nFIXES:\n- Fix.\n"
+            'HIGHLIGHTS:\n"Results-driven synergy enthusiast" :: Buzzword soup.\n'
+        )
+        result = parse_roast_output(text, source_text=SOURCE_TEXT)
+        assert len(result.highlights) == 1
+        assert result.highlights[0].quote == "Results-driven synergy enthusiast"
+
+    def test_hallucinated_highlight_dropped_but_roast_still_parses(self):
+        text = (
+            "VERDICT: Fine.\nROAST:\nBody.\nFIXES:\n- Fix.\n"
+            'HIGHLIGHTS:\n"Made up quote that is not in the resume" :: fabricated.\n'
+        )
+        result = parse_roast_output(text, source_text=SOURCE_TEXT)
+        assert result.highlights == []
+        assert result.verdict == "Fine."
+
+    def test_missing_highlights_section_does_not_raise(self):
+        result = parse_roast_output(MINIMAL_OUTPUT, source_text=SOURCE_TEXT)
+        assert result.highlights == []
+
+    def test_default_source_text_keeps_backward_compatible_signature(self):
+        # Every pre-existing call site (and every other test in this file)
+        # calls parse_roast_output(text) with one argument -- confirms
+        # that still works exactly as before.
+        result = parse_roast_output(GOOD_OUTPUT)
+        assert isinstance(result, RoastResult)
+        assert result.highlights == []

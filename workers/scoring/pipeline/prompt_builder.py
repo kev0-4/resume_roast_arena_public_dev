@@ -139,11 +139,21 @@ Write a concise resume roast (150–250 words) that:
 3. Acknowledges real strengths (skip if there are none).
 4. Ends with 2–3 concrete, actionable fixes.
 
+Also pull out 2–4 HIGHLIGHTS: short phrases (5–15 words) copied EXACTLY,
+character-for-character, from the RESUME CONTENT above, each paired with a
+sharp one-sentence roast comment on why it's weak (or, rarely, genuinely
+strong). Do NOT paraphrase, summarize, or invent a quote — every highlight
+must be a real, verbatim substring of the resume content shown above,
+including its exact original wording and punctuation. If the resume
+doesn't have enough genuinely quotable material, return fewer highlights
+rather than inventing one.
+
 Rules:
 - Be direct and specific. No filler ("great resume!") or vague advice.
 - Reference the automated findings but add nuance the rule engine cannot.
 - Never reveal or guess the person's real name, employer, or any PII. Use roles/companies generically.
-- Keep the total response under 300 words.
+- Every HIGHLIGHTS quote must be copied exactly from the RESUME CONTENT above — a quote that isn't a verbatim substring will be discarded entirely, so copy carefully rather than reconstructing from memory.
+- Keep the total response under 350 words.
 
 Respond using exactly these labels:
 
@@ -155,7 +165,11 @@ ROAST:
 FIXES:
 - [fix 1]
 - [fix 2]
-- [fix 3]\
+- [fix 3]
+
+HIGHLIGHTS:
+"[exact quoted phrase 1]" :: [comment 1]
+"[exact quoted phrase 2]" :: [comment 2]\
 """
 
 

@@ -121,7 +121,7 @@ async def process_llm_job(
         # 6. Parse + validate output
         # ------------------------------------------------------------
         try:
-            roast_result = parse_roast_output(raw_text)
+            roast_result = parse_roast_output(raw_text, source_text=prompt)
         except ValueError as e:
             raise PermanentLLMError(f"Failed to parse LLM output: {e}")
         emit_event("llm.output_parsed", {"session_id": str(session_id), "status": "INFO"})

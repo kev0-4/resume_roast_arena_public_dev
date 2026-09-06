@@ -18,7 +18,10 @@ from google import genai
 from typing import Tuple
 
 _MODEL = os.getenv("GEMINI_ROAST_MODEL", "gemini-3.5-flash-lite")
-_MAX_OUTPUT_TOKENS = 1024
+# Bumped from 1024 -- the HIGHLIGHTS section (2-4 quoted excerpts + comments)
+# added real headroom pressure on top of verdict/roast/fixes; 1024 was
+# already close to the response's natural length before this addition.
+_MAX_OUTPUT_TOKENS = 1536
 
 _async_client: genai.Client | None = None
 
