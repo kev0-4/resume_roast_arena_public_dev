@@ -4,6 +4,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { ArrowAccentLeft, ArrowAccentRight, ArrowDark, SpinningRoastBadge } from "@/components/landing/accents";
 import { ExampleRoastCard } from "@/components/landing/example-card";
+import { FlameDoodle, SkullDoodle, TrashDoodle } from "@/components/landing/doodles";
 import { Navbar } from "@/components/site/navbar";
 import { stackedShadow } from "@/lib/text-shadow";
 
@@ -48,38 +49,54 @@ export default function Home() {
               </h1>
             </div>
           </div>
+        </div>
 
-          <div className="pointer-events-none absolute inset-0 h-full w-full">
-            <motion.div
-              animate={{ y: [0, -15, 0] }}
-              transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
-              className="pointer-events-auto absolute bottom-[8%] left-[2%] z-30 rotate-[-10deg] transition-transform duration-500 hover:rotate-0 md:left-[16%]"
-            >
-              <ExampleRoastCard name="OverqualifiedGoblin6248" score={91} stamp="SOLID" />
-            </motion.div>
+        {/* Positioned relative to the full-width `main`, not the narrow
+            centered headline block -- gives the floating cards and doodles
+            the page's side margins to sit in instead of fighting the text
+            for space. */}
+        <div className="pointer-events-none absolute inset-0 h-full w-full">
+          <motion.div
+            animate={{ y: [0, -15, 0] }}
+            transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+            className="pointer-events-auto absolute bottom-[10%] left-[-2%] z-30 rotate-[-10deg] transition-transform duration-500 hover:rotate-0 md:left-[2%]"
+          >
+            <ExampleRoastCard name="OverqualifiedGoblin6248" score={91} stamp="SOLID" />
+          </motion.div>
 
-            <motion.div
-              animate={{ y: [0, -20, 0] }}
-              transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: 1 }}
-              className="pointer-events-auto absolute right-[2%] top-[10%] z-30 rotate-[10deg] transition-transform duration-500 hover:rotate-0 md:right-[18%]"
-            >
-              <ExampleRoastCard name="UnhingedRecruiter2116" score={64} stamp="MID" />
-            </motion.div>
+          <motion.div
+            animate={{ y: [0, -20, 0] }}
+            transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: 1 }}
+            className="pointer-events-auto absolute right-[-2%] top-[8%] z-30 rotate-[10deg] transition-transform duration-500 hover:rotate-0 md:right-[2%]"
+          >
+            <ExampleRoastCard name="UnhingedRecruiter2116" score={64} stamp="MID" />
+          </motion.div>
 
-            <div className="absolute bottom-[0%] left-[0%] z-20 h-24 w-24 md:left-[8%] md:h-32 md:w-32">
-              <ArrowAccentLeft />
-            </div>
-            <div className="absolute right-[0%] top-[2%] z-20 h-24 w-24 md:right-[8%] md:h-32 md:w-32">
-              <ArrowAccentRight />
-            </div>
-
-            <Link
-              href="/roast"
-              className="pointer-events-auto absolute bottom-[-8%] right-[2%] z-40 block md:right-[14%]"
-            >
-              <SpinningRoastBadge />
-            </Link>
+          <div className="absolute bottom-[6%] left-[0%] z-20 h-24 w-24 md:left-[6%] md:h-28 md:w-28">
+            <ArrowAccentLeft />
           </div>
+          <div className="absolute right-[0%] top-[4%] z-20 h-24 w-24 md:right-[6%] md:h-28 md:w-28">
+            <ArrowAccentRight />
+          </div>
+
+          {/* Extra hand-drawn doodles -- resume/roast themed, tucked into
+              whatever margin space the headline and cards leave open. */}
+          <div className="absolute left-[1%] top-[0%] z-10 h-14 w-14 opacity-90 md:left-[6%] md:top-[2%] md:h-20 md:w-20">
+            <FlameDoodle />
+          </div>
+          <div className="absolute bottom-[26%] right-[4%] z-10 h-12 w-12 -rotate-6 opacity-90 md:bottom-[24%] md:right-[10%] md:h-16 md:w-16">
+            <SkullDoodle />
+          </div>
+          <div className="absolute bottom-[2%] left-[16%] z-10 h-12 w-12 rotate-6 opacity-90 md:left-[22%] md:h-16 md:w-16">
+            <TrashDoodle />
+          </div>
+
+          <Link
+            href="/roast"
+            className="pointer-events-auto absolute bottom-[-6%] right-[6%] z-40 block md:right-[16%]"
+          >
+            <SpinningRoastBadge />
+          </Link>
         </div>
 
         <p className="relative z-10 max-w-xl px-4 text-center font-mono text-sm text-white/80 md:text-base">
