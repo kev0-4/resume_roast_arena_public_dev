@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navbar } from "@/components/site/navbar";
-import { Podium } from "@/components/leaderboard/podium";
+import { HeroPanel } from "@/components/leaderboard/hero-panel";
 import { LeaderboardList } from "@/components/leaderboard/leaderboard-list";
 import { YourRankBanner } from "@/components/leaderboard/your-rank-banner";
+import { SearchBox } from "@/components/leaderboard/search-box";
 import { ApiError, getLeaderboard, type LeaderboardEntry } from "@/lib/api";
 
 const PAGE_SIZE = 15;
@@ -20,6 +21,7 @@ export default function LeaderboardPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   const loadPage = useCallback(async (offset: number) => {
     const limit = Math.min(PAGE_SIZE, MAX_ENTRIES - offset);
@@ -53,72 +55,72 @@ export default function LeaderboardPage() {
   };
 
   const rest = entries.slice(3);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? rest.filter((e) => e.display_name.toLowerCase().includes(q)) : rest;
+  }, [query, rest]);
   const atCap = entries.length >= MAX_ENTRIES;
   const hasMore = !atCap && total !== null && entries.length < total;
 
   return (
-    <div className="relative flex min-h-screen w-full flex-col overflow-hidden bg-brand-blue font-mono selection:bg-brand-lime selection:text-brand-blue">
+    <div className="relative min-h-screen w-full overflow-hidden bg-brand-blue font-mono selection:bg-brand-lime selection:text-brand-blue">
       <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(to_right,#ffffff15_1px,transparent_1px),linear-gradient(to_bottom,#ffffff15_1px,transparent_1px)] bg-[size:4rem_4rem]" />
 
-      <Navbar />
+      <div className="relative z-10">
+        <Navbar />
 
-      <main className="relative z-10 mx-auto flex w-full max-w-[1440px] flex-1 flex-col items-center gap-8 px-4 pb-16 pt-4 md:px-10">
-        <div className="flex flex-col items-center text-center">
-          <h1 className="font-display text-[clamp(2.2rem,6vw,3.6rem)] uppercase leading-[0.95] tracking-tighter text-white">
-            The <span className="text-brand-lime">leaderboard</span>
-          </h1>
-          <p className="mt-2 max-w-md font-mono text-xs text-white/60 md:text-sm">
-            Every roast that made the cut, ranked by score.
-            {total !== null && <> {total} resumes roasted and counting.</>}
-          </p>
-        </div>
-
+        <main className="mx-auto flex w-full max-w-2xl flex-col gap-5 px-4 pb-16">
         {loading ? (
           <LeaderboardSkeleton />
         ) : error ? (
-          <p className="font-mono text-sm text-brand-lime">{error}</p>
+          <p className="py-16 text-center font-mono text-sm text-brand-lime">{error}</p>
         ) : entries.length === 0 ? (
-          <p className="font-mono text-sm text-white/60">No roasts on the board yet -- be the first.</p>
+          <p className="py-16 text-center font-mono text-sm text-white/60">No roasts on the board yet -- be the first.</p>
         ) : (
           <>
+            <HeroPanel entries={entries} total={total} />
             <YourRankBanner />
-            <Podium entries={entries} />
+
+            {rest.length > 0 && (
+              <>
+                <SearchBox value={query} onChange={setQuery} />
+
+                {filtered.length > 0 ? (
+                  <LeaderboardList entries={filtered} />
+                ) : (
+                  <p className="rounded-2xl border-[3px] border-black bg-white px-4 py-8 text-center font-mono text-sm font-semibold text-black/40 shadow-[5px_5px_0_#000]">
+                    No one by that name got roasted (yet).
+                  </p>
+                )}
+
+                {hasMore && !query && (
+                  <button
+                    onClick={handleLoadMore}
+                    disabled={loadingMore}
+                    className="mx-auto rounded-full border-2 border-black bg-brand-lime px-6 py-2.5 font-display text-xs uppercase tracking-wide text-black shadow-[3px_3px_0_#000] transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_#000] disabled:opacity-40"
+                  >
+                    {loadingMore ? "Loading..." : "Load more"}
+                  </button>
+                )}
+                {atCap && !query && (
+                  <p className="text-center font-mono text-[11px] text-white/40">Showing the top {MAX_ENTRIES} roasts.</p>
+                )}
+              </>
+            )}
           </>
         )}
-      </main>
-
-      {!loading && !error && rest.length > 0 && (
-        <section className="relative z-20 mt-auto w-full rounded-t-[2.5rem] bg-paper px-6 py-12 text-black shadow-[0_-20px_50px_rgba(0,0,0,0.2)] md:rounded-t-[3.5rem] md:px-10 md:py-16">
-          <div className="mx-auto flex max-w-2xl flex-col gap-6">
-            <LeaderboardList entries={rest} />
-
-            {hasMore && (
-              <button
-                onClick={handleLoadMore}
-                disabled={loadingMore}
-                className="mx-auto rounded-full border-2 border-black px-6 py-2 font-display text-xs uppercase tracking-wide text-black transition-colors hover:bg-black hover:text-white disabled:opacity-40"
-              >
-                {loadingMore ? "Loading..." : "Load more"}
-              </button>
-            )}
-            {atCap && (
-              <p className="text-center font-mono text-[11px] text-black/40">
-                Showing the top {MAX_ENTRIES} roasts.
-              </p>
-            )}
-          </div>
-        </section>
-      )}
+        </main>
+      </div>
     </div>
   );
 }
 
 function LeaderboardSkeleton() {
   return (
-    <div className="grid w-full max-w-3xl grid-cols-1 gap-4 md:grid-cols-3">
-      {[0, 1, 2].map((i) => (
-        <div key={i} className="h-56 animate-pulse rounded-[2rem] border border-white/10 bg-white/5" />
-      ))}
+    <div className="flex flex-col gap-5 pt-6">
+      <div className="h-[26rem] animate-pulse rounded-[1.75rem] border-[3px] border-black/10 bg-white/5" />
+      <div className="h-14 animate-pulse rounded-2xl border-[3px] border-black/10 bg-white/5" />
+      <div className="h-64 animate-pulse rounded-2xl border-[3px] border-black/10 bg-white/5" />
     </div>
   );
 }
