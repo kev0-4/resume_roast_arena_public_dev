@@ -1,3 +1,4 @@
+import os
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
@@ -23,7 +24,13 @@ from db.users import Base
 import db.sessions
 import db.xIdempotencyKey
 target_metadata = Base.metadata
-config.set_main_option('sqlalchemy.url', 'postgresql://devuser:devpassword@localhost:5432/devdb')
+# Alembic needs a sync driver (psycopg), unlike the app's asyncpg engine --
+# ALEMBIC_DATABASE_URL lets deploy environments point migrations at the real
+# DB without touching the app's own DATABASE_URL. Falls back to local dev.
+config.set_main_option(
+    'sqlalchemy.url',
+    os.getenv('ALEMBIC_DATABASE_URL', 'postgresql://devuser:devpassword@localhost:5432/devdb'),
+)
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
