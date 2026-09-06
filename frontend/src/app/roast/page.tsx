@@ -1,14 +1,25 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { ArrowRight, FileText, LogIn, RefreshCcw, UploadCloud, X } from "lucide-react";
 import { ArrowAccentLeft, ArrowDarkDown } from "@/components/landing/accents";
 import { Navbar } from "@/components/site/navbar";
 import { stackedShadow } from "@/lib/text-shadow";
+import { ApiError, ingestResume } from "@/lib/api";
 
 const HEADLINE_SHADOW = stackedShadow(10, "#001A99");
 
-const ACCEPTED_EXTENSIONS = /\.(pdf|docx?)$/i;
+// Matches backend/src/utils/file_validation.py's ALLOWED_MIME_TYPES exactly
+// -- no point accepting a file client-side that the server will reject.
+const ACCEPTED_MIME_TYPES = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "image/png",
+  "image/jpeg",
+]);
+const ACCEPTED_EXTENSIONS = /\.(pdf|docx|png|jpe?g)$/i;
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -17,15 +28,26 @@ function formatFileSize(bytes: number): string {
 }
 
 export default function RoastPage() {
+  const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [mode, setMode] = useState<"anonymous" | "signin">("anonymous");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const acceptFile = useCallback((candidate: File | null | undefined) => {
     if (!candidate) return;
-    const okType = candidate.type === "application/pdf" || ACCEPTED_EXTENSIONS.test(candidate.name);
-    if (!okType) return;
+    setSubmitError(null);
+    const okType = ACCEPTED_MIME_TYPES.has(candidate.type) || ACCEPTED_EXTENSIONS.test(candidate.name);
+    if (!okType) {
+      setSubmitError("Unsupported file type -- use PDF, DOCX, PNG, or JPEG.");
+      return;
+    }
+    if (candidate.size > MAX_FILE_SIZE_BYTES) {
+      setSubmitError("File is too large -- max 10MB.");
+      return;
+    }
     setFile(candidate);
   }, []);
 
@@ -33,6 +55,30 @@ export default function RoastPage() {
     e.preventDefault();
     setDragActive(false);
     acceptFile(e.dataTransfer.files?.[0]);
+  };
+
+  const handleSubmit = async () => {
+    if (!file || submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      // `mode` (anonymous vs. sign-in) has no effect on the request yet --
+      // Firebase auth isn't wired into the frontend yet (later phase), so
+      // every submission goes through as anonymous regardless of the
+      // toggle. The backend already supports both paths either way.
+      const result = await ingestResume(file);
+      router.push(`/roast/${result.session_id}`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 429) {
+        const wait = err.retryAfterSeconds ? ` Try again in ${Math.ceil(err.retryAfterSeconds / 60)} min.` : "";
+        setSubmitError(`You've hit the upload limit.${wait}`);
+      } else if (err instanceof ApiError) {
+        setSubmitError(err.message);
+      } else {
+        setSubmitError("Something went wrong -- try again.");
+      }
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -80,7 +126,7 @@ export default function RoastPage() {
             <input
               ref={inputRef}
               type="file"
-              accept=".pdf,.doc,.docx"
+              accept=".pdf,.docx,.png,.jpg,.jpeg"
               className="hidden"
               onChange={(e) => acceptFile(e.target.files?.[0])}
             />
@@ -99,7 +145,7 @@ export default function RoastPage() {
                   {dragActive ? "Drop it like it's hot" : "Drag & drop your resume"}
                 </p>
                 <p className="mt-2 font-mono text-xs font-semibold text-black/50 md:text-sm">
-                  or click to browse · PDF, DOC, DOCX up to 10MB
+                  or click to browse · PDF, DOCX, PNG, JPEG up to 10MB
                 </p>
               </>
             ) : (
@@ -117,7 +163,8 @@ export default function RoastPage() {
                       e.stopPropagation();
                       inputRef.current?.click();
                     }}
-                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-white/15 transition-colors hover:bg-white/25"
+                    disabled={submitting}
+                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-white/15 transition-colors hover:bg-white/25 disabled:opacity-40"
                     aria-label="Replace file"
                   >
                     <RefreshCcw size={14} />
@@ -126,15 +173,17 @@ export default function RoastPage() {
                     onClick={(e) => {
                       e.stopPropagation();
                       setFile(null);
+                      setSubmitError(null);
                     }}
-                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-brand-lime transition-colors hover:brightness-95"
+                    disabled={submitting}
+                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-brand-lime transition-colors hover:brightness-95 disabled:opacity-40"
                     aria-label="Remove file"
                   >
                     <X size={14} className="text-black" />
                   </button>
                 </div>
                 <p className="mt-4 font-mono text-[10px] font-semibold uppercase tracking-wide text-black/40 md:text-xs">
-                  Ready to roast
+                  {submitting ? "Uploading..." : "Ready to roast"}
                 </p>
               </div>
             )}
@@ -146,17 +195,22 @@ export default function RoastPage() {
 
           <div className="mt-8 flex flex-col items-center gap-4 md:mt-10">
             <button
-              disabled={!file}
+              disabled={!file || submitting}
+              onClick={handleSubmit}
               className={[
                 "flex items-center gap-2 rounded-full px-8 py-4 font-display text-sm uppercase tracking-wide transition-all md:text-base",
-                file
+                file && !submitting
                   ? "bg-brand-lime text-black shadow-[4px_4px_0_#000] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0_#000]"
                   : "cursor-not-allowed bg-white/20 text-white/50",
               ].join(" ")}
             >
-              Roast me
+              {submitting ? "Roasting..." : "Roast me"}
               <ArrowRight size={18} strokeWidth={2.5} />
             </button>
+
+            {submitError && (
+              <p className="max-w-sm text-center font-mono text-xs font-semibold text-brand-lime">{submitError}</p>
+            )}
 
             <div className="flex items-center gap-1 rounded-full border border-white/25 bg-white/10 p-1">
               <button
