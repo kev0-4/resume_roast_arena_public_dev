@@ -1424,7 +1424,7 @@ When starting a new chat/model, give it this document and ask it to:
 
 # 28. Current project status
 
-**Updated 2026-09-06 (later still)** — Frontend build-out (section 36): this project's first-ever frontend now exists (Next.js), 4 pages built and wired to the real backend (landing → upload → processing → result), plus two backend additions to support it (CORS, `GET /r/{slug}/data`). Share buttons on the result page real-device-verified on both Android and iOS. Only auth (Google + GitHub decided, not yet built), Pydantic V2 warnings, the CI/CD deploy half, a dedicated frontend leaderboard page, and the original MVP's unimplemented Clarity/Credibility/Signal-to-Noise scoring dimension remain open below.
+**Updated 2026-09-06 (later still)** — Auth (section 37): Firebase Google + GitHub sign-in wired into the frontend, verified via real Playwright runs (zero Firebase config errors, real OAuth popup opens against the correct project) with the actual sign-in round-trip left for the user to confirm on their own account. Only Pydantic V2 warnings, the CI/CD deploy half, a dedicated frontend leaderboard page, a history/dashboard page, and the original MVP's unimplemented Clarity/Credibility/Signal-to-Noise scoring dimension remain open below.
 
 ```text
 INGEST                  ██████████  COMPLETE (incl. anonymous sessions)
@@ -1460,11 +1460,13 @@ PRODUCTION HARDENING    ████░░░░░░  PARTIAL — structured l
 CI/CD (TEST)            ██████████  COMPLETE — .github/workflows/ci.yml runs the full pytest suite
                                      on every push/PR, see section 33. Container builds + Azure
                                      deploy still not implemented (no Azure credentials/target yet).
-FRONTEND                ███████░░░  IN PROGRESS — Next.js, see section 36. Landing/upload/processing/
-                                     result pages built and wired to the real backend, share buttons
-                                     verified on real Android + iOS devices. Auth (Google + GitHub),
-                                     a dedicated leaderboard page, and a history/dashboard page still
-                                     not built.
+FRONTEND                ████████░░  IN PROGRESS — Next.js, see sections 36-37. Landing/upload/
+                                     processing/result pages built and wired to the real backend,
+                                     share buttons verified on real Android + iOS devices. Firebase
+                                     Google + GitHub auth wired and verified (config/popup level; real
+                                     sign-in round-trip pending the user's own confirmation). A
+                                     dedicated leaderboard page and a history/dashboard page still not
+                                     built.
 ```
 
 Full pipeline (ingest → extraction → normalization → anonymization → scoring → LLM roast → render) verified working end-to-end against real infra on 2026-09-05, all the way to DONE with a real generated PNG card.
@@ -1689,6 +1691,34 @@ Went through several real rounds based on the user's own live device testing, no
   3. Still failed on the user's real Samsung (Android) phone even after that fix. Real root cause: the whole `instagram-stories://` + clipboard mechanism is **iOS-only** — Meta's documented "Stories from your app" trick relies on a private Instagram pasteboard data type only reachable from native Swift code; Android's actual equivalent is a native Android `Intent` (`com.instagram.share.ADD_TO_STORY` with a `content://` URI extra) that a website's JavaScript cannot construct at all. The deep link was being attempted unconditionally on every mobile device, Android included, silently doing nothing and burning the timeout window every time. Fixed by actually splitting the code path by OS: iOS still attempts the deep link, Android goes straight to the Web Share API (`navigator.share` with the image as a file) — Android's real, working mechanism for this. **User confirmed working on both a real Android phone and a real iPhone after this fix.**
 - Verification method worth remembering: real Cloudflare quick tunnels (`cloudflared tunnel --url http://localhost:PORT`) were used to get real public HTTPS URLs, since none of this (OG tag crawling by real bots, mobile share intents opening real apps) is testable from `localhost`. This required adding `allowedDevOrigins` to `next.config.ts` (read from a `NEXT_DEV_ALLOWED_ORIGIN` env var) — this Next.js version blocks cross-origin requests to internal dev endpoints (HMR's WebSocket included) by default, which looked like "the buttons do nothing" before the real cause (dev-origin blocking, found by reading Next's own source directly in `node_modules` rather than guessing) was identified. Proved the OG image mechanism itself works by curling a public tunnel URL with a `Twitterbot/1.0` User-Agent and fetching the real image it returned — a real 1080×1350 PNG, the same sequence Twitter's own crawler performs.
 
-## Not yet built
+## Not yet built (as of section 36; auth landed in section 37)
 
-Auth (Firebase sign-in — Google + GitHub decided, no email/password to avoid needing an OTP/email-verification flow this project has no infrastructure for yet), a dedicated frontend leaderboard page (the backend endpoint has existed since section 35), and a dashboard/history page (would need a new backend list-sessions endpoint, treated as optional/stretch from the start).
+A dedicated frontend leaderboard page (the backend endpoint has existed since section 35), and a dashboard/history page (would need a new backend list-sessions endpoint, treated as optional/stretch from the start).
+
+# 37. Frontend Auth — Firebase Google + GitHub sign-in (2026-09-06)
+
+The backend side of this (`firebase_admin` init, `verify_id_token()`, `get_current_user`/`get_current_user_optional` dependencies, `POST /api/v1/auth/firebase`) already existed from earlier backend work and needed no changes. This section is the frontend wiring plus one real credentials incident worth recording.
+
+**Decision — Google + GitHub only, no email/password**: explicitly discussed with the user rather than assumed. Email/password would mean owning an OTP/reset-flow and email-delivery pipeline this project has no infrastructure for; anonymous use stays the default path regardless (the whole point of the product is "roast me, no signup required"), so the two OAuth providers cover the "I want my roasts tied to an account" case without that cost.
+
+**Firebase project-ID mismatch caught before any code was built against it**: the user's first-pasted web config had `projectId: "resume-roast-arena67"`, which does not match the backend's actual service account (`project_id: "resume-roast-arena"`, from `backend/src/services/service-account.json`). Flagged immediately, before wiring anything — an ID-token signed by one Firebase project will never verify against a different project's Admin SDK, which would have failed silently/confusingly at sign-in time rather than at setup time. User corrected with the right config on the second attempt; all `NEXT_PUBLIC_FIREBASE_*` values in `frontend/.env.local`/`.env.example` are the corrected ones.
+
+**What's public vs. secret here, and why each was handled differently**:
+- `service-account.json` (backend) — real secret, gitignored, never printed.
+- Firebase web config (`NEXT_PUBLIC_FIREBASE_*`) — meant to be public by Firebase's own design (it's shipped in every client bundle); still went in `.env.local`/`.env.example` for consistency with the rest of the project's env-var conventions, not because it's sensitive.
+- An Instagram App Secret the user pasted earlier (unrelated to auth, from the Instagram share-button work in section 36) was explicitly never used or stored anywhere — verified via a repo-wide grep — since the Stories deep-link feature only ever needed the App *ID*, not the secret. User was told to consider rotating it since it was shared in chat.
+
+**Build**:
+- `frontend/src/lib/firebase.ts` — client SDK init, `GoogleAuthProvider`/`GithubAuthProvider`.
+- `frontend/src/lib/auth-context.tsx` — `AuthProvider`/`useAuth()`; `onAuthStateChanged` calls the backend's `/auth/firebase` (`syncFirebaseAuth()` in `api.ts`) on every sign-in so `backendUser` (display_name, photo_url, role) is available, not just the raw Firebase user.
+- `frontend/src/components/site/auth-menu.tsx` — navbar sign-in dropdown (Google/GitHub) / signed-in avatar+signout menu, rendered from `navbar.tsx` on every page.
+- `frontend/src/app/roast/page.tsx` — upload flow now calls `getIdToken()` and attaches it as `Authorization: Bearer` on `POST /ingest` when signed in; when `null` (not signed in), the request goes through exactly as it did before auth existed — the backend already resolves the user from that header itself via `get_current_user_optional`, so this page needed no branching logic beyond "pass the token if there is one."
+- `social-icons.tsx` moved from `components/result/` to `components/icons/` (no longer result-page-specific) with `GoogleLogo`/`GitHubLogo` added alongside the existing brand marks.
+
+**Verified with real Playwright runs against the local dev servers** (not just build/lint passing):
+- Firebase SDK initializes with zero console errors or warnings against the real `resume-roast-arena` project config — rules out `auth/invalid-api-key` and any other config-mismatch class of failure.
+- All three `/roast` auth states screenshotted and confirmed correct: anonymous default ("Continue anonymously" / "Sign in for extra features"), the inline Google/GitHub picker, and (from the navbar) the signed-in avatar menu.
+- Clicking "Continue with Google" opens a real popup at `resume-roast-arena.firebaseapp.com/__/auth/handler` with the correct `apiKey`/`providerId` — confirms the client config resolves to the same Firebase project as the backend's service account end-to-end. Completing an actual OAuth round-trip needs a real Google/GitHub account and was left for the user to confirm themselves, the same way real-device confirmation was needed (and given) for the Instagram share flow in section 36.
+- Backend suite: 139 passed, no regressions (no backend code changed this phase besides the service-account file already existing in the worktree). Frontend `build` and `lint` both clean.
+
+**Status**: shipped, pushed to `worktree-frontend-landing`. Not yet done: the user has not completed a real end-to-end sign-in themselves to confirm the OAuth popup completes and a real session round-trips through `/auth/firebase` — recommended next step before calling this fully closed.
