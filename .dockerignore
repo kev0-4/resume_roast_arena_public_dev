@@ -1,0 +1,16 @@
+frontend/
+.git/
+.github/
+context/
+MIGRATION DOCS/
+*.md
+.env
+.env.*
+backend/src/.env
+workers/.env
+backend/src/services/service-account.json
+backend/venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+log_entry.json
