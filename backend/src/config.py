@@ -15,6 +15,9 @@ REDIS_HOST = os.getenv("REDIS_HOST")
 REDIS_PORT = os.getenv("REDIS_PORT")
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
 REDIS_URL = os.getenv("REDIS_URL")
+# Local docker-compose Redis has no TLS; managed providers (Upstash, Azure
+# Cache for Redis) require it. Off by default so local dev is unaffected.
+REDIS_SSL = os.getenv("REDIS_SSL", "false").lower() == "true"
 
 
 AZURE_STORAGE_ACCOUNT = os.getenv("AZURE_STORAGE_ACCOUNT")

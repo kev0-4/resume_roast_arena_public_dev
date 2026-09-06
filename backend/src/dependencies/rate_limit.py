@@ -21,6 +21,7 @@ from ..config import (
     REDIS_HOST,
     REDIS_PORT,
     REDIS_PASSWORD,
+    REDIS_SSL,
     INGEST_RATE_LIMIT_MAX,
     INGEST_RATE_LIMIT_WINDOW_SECONDS,
 )
@@ -46,6 +47,7 @@ def _get_redis_client() -> redis.Redis:
             decode_responses=True,
             socket_connect_timeout=1,
             socket_timeout=1,
+            ssl=REDIS_SSL,
         )
     return _redis_client
 
