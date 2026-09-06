@@ -231,6 +231,9 @@ async def get_injest_resume(session_id: uuid.UUID | str, db=Depends(get_db_sqlal
         "status": session.status,
         "created_at": session.created_at,
         "updated_at": session.updated_at,
+        "slug": session.slug,
+        "error_code": session.error_code,
+        "error_message": session.error_message,
     }
 
 

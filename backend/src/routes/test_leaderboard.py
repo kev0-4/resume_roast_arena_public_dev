@@ -14,6 +14,10 @@ pipeline's intermediate statuses) the same way _backdate in test_sweep.py
 bypasses it to set created_at directly. This is fine for these tests: the
 leaderboard query only cares about the final columns (slug,
 composite_score, created_at, user), not how a session got there.
+
+The one route test below uses `with TestClient(app) as client:` (not a
+bare `TestClient(app)`) -- required, not stylistic. See
+test_sessions_status.py's module docstring for why.
 """
 
 import asyncio
@@ -76,7 +80,14 @@ def test_ranks_by_score_descending():
             high = await _make_public_session(db, user_id, score=95)
             mid = await _make_public_session(db, user_id, score=70)
 
-            rows, total = await get_leaderboard(db=db, limit=100, offset=0)
+            # limit=1000, not 100 -- this suite has run against the same
+            # real dev Postgres many times over, and a low score (40) can
+            # get crowded out of a top-100 window by now-accumulated rows
+            # from earlier runs. This test only cares about relative
+            # order, not pagination, so a generous limit is the right fix
+            # (not deleting historical rows, which other tests may still
+            # reference).
+            rows, total = await get_leaderboard(db=db, limit=1000, offset=0)
             ids_in_order = [r["id"] for r in rows]
 
             assert ids_in_order.index(high) < ids_in_order.index(mid) < ids_in_order.index(low)
@@ -192,8 +203,8 @@ def test_route_returns_ranked_entries_with_display_names():
     _run(setup)
 
     app = create_app()
-    client = TestClient(app)
-    resp = client.get("/leaderboard", params={"limit": 100, "offset": 0})
+    with TestClient(app) as client:
+        resp = client.get("/leaderboard", params={"limit": 100, "offset": 0})
 
     assert resp.status_code == 200
     body = resp.json()
