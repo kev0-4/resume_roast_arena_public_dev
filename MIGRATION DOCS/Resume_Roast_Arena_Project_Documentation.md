@@ -1424,7 +1424,7 @@ When starting a new chat/model, give it this document and ask it to:
 
 # 28. Current project status
 
-**Updated 2026-09-06 (later still)** — Auth (section 37): Firebase Google + GitHub sign-in wired into the frontend, verified via real Playwright runs (zero Firebase config errors, real OAuth popup opens against the correct project) with the actual sign-in round-trip left for the user to confirm on their own account. Only Pydantic V2 warnings, the CI/CD deploy half, a dedicated frontend leaderboard page, a history/dashboard page, and the original MVP's unimplemented Clarity/Credibility/Signal-to-Noise scoring dimension remain open below.
+**Updated 2026-09-06 (later still)** — Auth (section 37): Firebase Google + GitHub sign-in wired into the frontend, user-confirmed working end-to-end on a real account (one real quirk found and fixed: navbar avatar now falls back to initials if the photo CDN is blocked browser-side). Only Pydantic V2 warnings, the CI/CD deploy half, a dedicated frontend leaderboard page, a history/dashboard page, and the original MVP's unimplemented Clarity/Credibility/Signal-to-Noise scoring dimension remain open below.
 
 ```text
 INGEST                  ██████████  COMPLETE (incl. anonymous sessions)
@@ -1463,10 +1463,9 @@ CI/CD (TEST)            ██████████  COMPLETE — .github/wor
 FRONTEND                ████████░░  IN PROGRESS — Next.js, see sections 36-37. Landing/upload/
                                      processing/result pages built and wired to the real backend,
                                      share buttons verified on real Android + iOS devices. Firebase
-                                     Google + GitHub auth wired and verified (config/popup level; real
-                                     sign-in round-trip pending the user's own confirmation). A
-                                     dedicated leaderboard page and a history/dashboard page still not
-                                     built.
+                                     Google + GitHub auth wired and user-confirmed working end-to-end
+                                     on a real account. A dedicated leaderboard page and a
+                                     history/dashboard page still not built.
 ```
 
 Full pipeline (ingest → extraction → normalization → anonymization → scoring → LLM roast → render) verified working end-to-end against real infra on 2026-09-05, all the way to DONE with a real generated PNG card.
@@ -1721,4 +1720,8 @@ The backend side of this (`firebase_admin` init, `verify_id_token()`, `get_curre
 - Clicking "Continue with Google" opens a real popup at `resume-roast-arena.firebaseapp.com/__/auth/handler` with the correct `apiKey`/`providerId` — confirms the client config resolves to the same Firebase project as the backend's service account end-to-end. Completing an actual OAuth round-trip needs a real Google/GitHub account and was left for the user to confirm themselves, the same way real-device confirmation was needed (and given) for the Instagram share flow in section 36.
 - Backend suite: 139 passed, no regressions (no backend code changed this phase besides the service-account file already existing in the worktree). Frontend `build` and `lint` both clean.
 
-**Status**: shipped, pushed to `worktree-frontend-landing`. Not yet done: the user has not completed a real end-to-end sign-in themselves to confirm the OAuth popup completes and a real session round-trips through `/auth/firebase` — recommended next step before calling this fully closed.
+**User-confirmed working** (2026-09-06): real Google sign-in completed successfully end-to-end — display name, session, and backend sync via `/auth/firebase` all correct. One real quirk reported: the navbar profile photo showed broken after signing in.
+
+**Broken-avatar fix**: traced the actual stored value first rather than guessing — the Users row's `photo_url` in Postgres (a real pre-existing row for this Google account, matched by `firebase_uid`) is a valid, currently-live `lh3.googleusercontent.com` URL (curled directly, got a real 200 `image/jpeg`). Reproduced the exact signed-in state in a clean headless browser using a Firebase custom token minted for the same real uid (sidesteps needing a live OAuth popup) — it rendered correctly there too, ruling out a data or config bug. Root cause is environment-dependent on the user's actual browser (ad-blockers/privacy extensions commonly blocklist Google's avatar CDN since it's Google-associated) — not something fixable from this codebase. What *was* a real gap: `auth-menu.tsx`'s `<Image>` had no `onError` handler, so a blocked/failed request left a permanent broken-image icon instead of the initials-avatar fallback the component already had code for when there's no `photoUrl` at all. Added `onError` → `photoFailed` state → same fallback. Verified both paths with Playwright: unblocked renders the real photo, and with the CDN request forced to abort (simulating an ad-blocker), it now cleanly shows the initials avatar. `build`/`lint` clean, hooks-order lint error caught and fixed along the way (the new `useState` had to move above an early `return` in the component). Committed and pushed separately from the initial auth commit.
+
+**Status**: shipped and user-confirmed, pushed to `worktree-frontend-landing`, not yet merged to `main`.
