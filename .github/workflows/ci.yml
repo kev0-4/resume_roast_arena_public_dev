@@ -121,3 +121,80 @@ jobs:
 
       - name: Run test suite
         run: pytest -v
+
+  # Builds and pushes both images to GHCR, then rolls every affected Azure
+  # Container App to a new revision -- only on a real push to main (not PRs),
+  # which also matches the only branch the Azure OIDC federated credential
+  # trusts (repo:kev0-4/resume_roast_arena_public_dev:ref:refs/heads/main),
+  # so a misconfigured `if:` here can't accidentally deploy from anywhere else.
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend/workers image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ghcr.io/kev0-4/rra-backend:latest
+            ghcr.io/kev0-4/rra-backend:${{ github.sha }}
+
+      - name: Build and push renderer image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.renderer
+          push: true
+          tags: |
+            ghcr.io/kev0-4/rra-renderer:latest
+            ghcr.io/kev0-4/rra-renderer:${{ github.sha }}
+
+      # No stored Azure secret -- GitHub's own OIDC token proves this
+      # workflow's identity directly to the federated credential set up on
+      # the gha-deploy-resume-roast-arena app registration (Contributor,
+      # scoped to just rg-resume-roast-arena).
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Roll backend/workers apps to the new image
+        run: |
+          set -e
+          for app in ca-backend ca-worker-extraction ca-worker-normalization ca-worker-anonymization ca-worker-scoring ca-worker-llm ca-worker-cleanup; do
+            echo "Updating $app..."
+            az containerapp update \
+              --resource-group rg-resume-roast-arena \
+              --name "$app" \
+              --image "ghcr.io/kev0-4/rra-backend:${{ github.sha }}" \
+              --revision-suffix "gha${{ github.run_number }}"
+          done
+
+      - name: Roll renderer app to the new image
+        run: |
+          az containerapp update \
+            --resource-group rg-resume-roast-arena \
+            --name ca-worker-renderer \
+            --image "ghcr.io/kev0-4/rra-renderer:${{ github.sha }}" \
+            --revision-suffix "gha${{ github.run_number }}"
