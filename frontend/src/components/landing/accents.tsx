@@ -45,6 +45,20 @@ export const ArrowDark = () => (
   </svg>
 );
 
+export const ArrowDarkDown = () => (
+  <svg
+    viewBox="0 0 100 100"
+    className="h-full w-full overflow-visible stroke-black"
+    fill="none"
+    strokeWidth="5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M50,10 Q 60,50 45,80" />
+    <path d="M25,65 L45,80 L60,60" />
+  </svg>
+);
+
 export const SpinningRoastBadge = () => (
   <div className="relative h-28 w-28 rotate-12 cursor-pointer rounded-full border-[3px] border-black/5 bg-brand-lime shadow-xl transition-transform hover:scale-105 md:h-36 md:w-36">
     <div className="absolute inset-1 animate-[spin_10s_linear_infinite]">

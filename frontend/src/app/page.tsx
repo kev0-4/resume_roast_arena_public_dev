@@ -1,17 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { motion } from "framer-motion";
 import { ArrowAccentLeft, ArrowAccentRight, ArrowDark, SpinningRoastBadge } from "@/components/landing/accents";
 import { ExampleRoastCard } from "@/components/landing/example-card";
+import { Navbar } from "@/components/site/navbar";
+import { stackedShadow } from "@/lib/text-shadow";
 
-// Layered drop-shadow that "extrudes" the huge display headline off the
-// blue background -- same technique as the reference: many offset
-// shadows of a darker shade of the background color itself, giving a
-// recessed/embossed look without clashing with the headline color.
-const HEADLINE_SHADOW = Array.from(
-  { length: 14 },
-  (_, i) => `${i + 1}px ${i + 1}px 0 #001A99`,
-).join(", ");
+const HEADLINE_SHADOW = stackedShadow(14, "#001A99");
 
 export default function Home() {
   return (
@@ -19,33 +15,7 @@ export default function Home() {
       {/* faint grid backdrop */}
       <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(to_right,#ffffff15_1px,transparent_1px),linear-gradient(to_bottom,#ffffff15_1px,transparent_1px)] bg-[size:4rem_4rem]" />
 
-      {/* Navbar */}
-      <nav className="relative z-20 mx-auto flex w-full max-w-[1440px] items-center justify-between px-6 py-6 md:px-10 md:py-8">
-        <div className="flex items-center gap-1">
-          <div className="rounded-2xl rounded-bl-sm bg-white px-3 py-1.5 font-display text-xs tracking-tight text-black shadow-sm md:text-sm">
-            RESUME
-          </div>
-          <div className="rounded-full border-[1.5px] border-white bg-brand-lime px-3 py-1.5 font-display text-xs tracking-tight text-black shadow-sm md:text-sm">
-            ROAST
-          </div>
-        </div>
-
-        <div className="hidden items-center space-x-2 md:flex">
-          {["Leaderboard", "How it works", "Examples"].map((item) => (
-            <a
-              key={item}
-              href="#"
-              className="rounded-full border border-white/30 px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-white/10"
-            >
-              {item}
-            </a>
-          ))}
-        </div>
-
-        <button className="rounded-full border border-white px-6 py-2 text-xs font-semibold text-white transition-colors hover:bg-white hover:text-brand-blue md:text-sm">
-          Sign in
-        </button>
-      </nav>
+      <Navbar />
 
       {/* Hero */}
       <main className="relative z-10 mx-auto flex w-full max-w-[1440px] flex-1 flex-col items-center justify-center px-4 pb-32 pt-8 md:pb-48 md:pt-12">
@@ -103,9 +73,12 @@ export default function Home() {
               <ArrowAccentRight />
             </div>
 
-            <div className="pointer-events-auto absolute bottom-[-8%] right-[2%] z-40 md:right-[14%]">
+            <Link
+              href="/roast"
+              className="pointer-events-auto absolute bottom-[-8%] right-[2%] z-40 block md:right-[14%]"
+            >
               <SpinningRoastBadge />
-            </div>
+            </Link>
           </div>
         </div>
 
