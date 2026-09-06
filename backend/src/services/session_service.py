@@ -41,6 +41,20 @@ async def get_session(session_id : uuid.UUID | str, db: AsyncSession) ->SessionM
     return session
 
 
+def _leaderboard_eligible_clause(cutoff: datetime.datetime) -> tuple:
+    """
+    Shared eligibility rule for both the leaderboard and a single
+    session's rank (get_session_rank below) -- kept in one place so the
+    two can never drift apart on what counts as "rankable." See
+    get_leaderboard's docstring for the reasoning behind each condition.
+    """
+    return (
+        SessionModel.slug.isnot(None),
+        SessionModel.composite_score.isnot(None),
+        or_(Users.is_anonymous.is_(False), SessionModel.created_at >= cutoff),
+    )
+
+
 async def get_leaderboard(
     db: AsyncSession, limit: int = 20, offset: int = 0
 ) -> tuple[list[dict], int]:
@@ -64,11 +78,7 @@ async def get_leaderboard(
     sidestep that entirely.
     """
     cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=ANONYMOUS_ROAST_TTL_DAYS)
-    eligible = (
-        SessionModel.slug.isnot(None),
-        SessionModel.composite_score.isnot(None),
-        or_(Users.is_anonymous.is_(False), SessionModel.created_at >= cutoff),
-    )
+    eligible = _leaderboard_eligible_clause(cutoff)
 
     count_stmt = (
         select(func.count())
@@ -104,6 +114,45 @@ async def get_leaderboard(
         for row in result.all()
     ]
     return rows, total
+
+
+async def get_session_rank(
+    db: AsyncSession, *, composite_score: int, created_at: datetime.datetime
+) -> tuple[int, int]:
+    """
+    Rank of a single session within the leaderboard, without scanning or
+    paginating the whole thing -- returns (rank, total_ranked), 1-indexed.
+
+    Computed as "1 + count of eligible sessions that sort ahead of this
+    one", using the exact same tiebreak as get_leaderboard (composite_score
+    DESC, then created_at ASC): a session sorts ahead if its score is
+    strictly higher, or tied with an earlier created_at. This is the
+    standard count-based rank pattern -- cheap regardless of how deep the
+    rank is (unlike walking a paginated list to find where a session
+    falls) -- and it's answerable from the same partial index
+    (ix_sessions_leaderboard, see the leaderboard-perf migration) that
+    already backs the leaderboard's own ORDER BY, so it stays fast as the
+    table grows exactly the way that index was built to guarantee.
+    """
+    cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=ANONYMOUS_ROAST_TTL_DAYS)
+    eligible = _leaderboard_eligible_clause(cutoff)
+
+    sorts_ahead = or_(
+        SessionModel.composite_score > composite_score,
+        (SessionModel.composite_score == composite_score) & (SessionModel.created_at < created_at),
+    )
+
+    total_stmt = (
+        select(func.count())
+        .select_from(SessionModel)
+        .join(Users, SessionModel.user_id == Users.id)
+        .where(*eligible)
+    )
+    ahead_stmt = total_stmt.where(sorts_ahead)
+
+    total = (await db.execute(total_stmt)).scalar_one()
+    ahead = (await db.execute(ahead_stmt)).scalar_one()
+    return ahead + 1, total
 
 
 async def get_session_by_slug(db: AsyncSession, slug: str) -> SessionModel | None:

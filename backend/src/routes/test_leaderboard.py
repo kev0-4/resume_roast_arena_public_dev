@@ -105,7 +105,11 @@ def test_ties_broken_by_created_at_ascending():
             earlier = await _make_public_session(db, user_id, score=77, created_at=now - timedelta(minutes=5))
             later = await _make_public_session(db, user_id, score=77, created_at=now)
 
-            rows, _ = await get_leaderboard(db=db, limit=100, offset=0)
+            # limit=1000, not 100 -- see test_ranks_by_score_descending's
+            # comment above; this suite has run against the same real dev
+            # Postgres so many times that a mid-range score (77) can get
+            # crowded out of a top-100 window by now-accumulated rows.
+            rows, _ = await get_leaderboard(db=db, limit=1000, offset=0)
             ids_in_order = [r["id"] for r in rows]
 
             assert ids_in_order.index(earlier) < ids_in_order.index(later)
