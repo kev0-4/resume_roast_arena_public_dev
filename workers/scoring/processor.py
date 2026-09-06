@@ -192,7 +192,22 @@ async def process_scoring_job(
         emit_event("scoring.prompt_uploaded", {"session_id": str(session_id), "status": "INFO"})
 
         # --------------------------------------------------------
-        # 8d. Enqueue LLM roast job
+        # 8d. Mark success -- BEFORE enqueueing, not after. The LLM worker
+        # is a separate process with its own DB connection; it re-reads
+        # this session's status as an idempotency guard the moment it
+        # receives the message. If the message went out first and this
+        # commit landed after, a fast consumer (routine on a local
+        # Service Bus emulator) can read the still-SCORING status,
+        # silently guard-return, and the message gets marked complete
+        # anyway -- the job is dropped with no error anywhere. Real bug,
+        # found via a live end-to-end upload sticking at SCORED forever.
+        # --------------------------------------------------------
+        await mark_scored(db=db, session=session)
+        await db.commit()
+        emit_event("scoring.marked_scored", {"session_id": str(session_id), "status": "INFO"})
+
+        # --------------------------------------------------------
+        # 9. Enqueue LLM roast job
         # --------------------------------------------------------
         try:
             enqueue_llm(
@@ -204,13 +219,6 @@ async def process_scoring_job(
                 f"Failed to enqueue LLM roast job: {e}"
             )
         emit_event("scoring.llm_job_enqueued", {"session_id": str(session_id), "status": "INFO"})
-
-        # --------------------------------------------------------
-        # 9. Mark success
-        # --------------------------------------------------------
-        await mark_scored(db=db, session=session)
-        await db.commit()
-        emit_event("scoring.marked_scored", {"session_id": str(session_id), "status": "INFO"})
 
     # ------------------------------------------------------------
     # Error handling
