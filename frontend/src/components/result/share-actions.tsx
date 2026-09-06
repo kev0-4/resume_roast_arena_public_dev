@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Download, Link2 } from "lucide-react";
 import { publicRoastCardUrl } from "@/lib/api";
 import { InstagramLogo, LinkedInLogo, WhatsAppLogo, XLogo } from "./social-icons";
@@ -47,6 +47,22 @@ function waitForAppSwitch(timeoutMs: number): Promise<boolean> {
 export function ShareActions({ slug }: { slug: string }) {
   const [copied, setCopied] = useState(false);
   const [instagramStatus, setInstagramStatus] = useState<"idle" | "downloaded">("idle");
+  // Prefetched on mount, not on click -- see tryInstagramStoriesDeepLink's
+  // comment below for why this matters (it's the actual fix for the deep
+  // link never firing on a real device).
+  const cardBlobRef = useRef<Blob | null>(null);
+
+  useEffect(() => {
+    fetch(publicRoastCardUrl(slug))
+      .then((r) => r.blob())
+      .then((b) => {
+        cardBlobRef.current = b;
+      })
+      .catch(() => {
+        // best-effort prefetch -- every caller below still fetches on
+        // demand if this hasn't landed (or failed) by click time
+      });
+  }, [slug]);
 
   const shareUrl = () => `${window.location.origin}/r/${slug}`;
 
@@ -91,6 +107,18 @@ export function ShareActions({ slug }: { slug: string }) {
   // it's the best a web app can do, so it's only attempted on mobile
   // (the scheme means nothing on desktop) and always has a real fallback
   // if the app never opens.
+  //
+  // Critical ordering constraint (found from real-device testing, not
+  // simulated): navigator.clipboard.write must be *called* with no
+  // `await` between the click and that call, or Safari on iOS silently
+  // rejects it as "not associated with a user gesture" -- browsers only
+  // keep a click's "user activation" alive for a very short window, and
+  // an awaited network request is enough to lose it. This is exactly why
+  // this needs the prefetched blob (cardBlobRef, fetched on mount) rather
+  // than fetching the image on click -- an `await fetch()` right before
+  // this call was silently breaking it on every real device even though
+  // automated (Chromium-based) testing never caught it, since Chrome is
+  // much more lenient here than Safari.
   const tryInstagramStoriesDeepLink = async (blob: Blob): Promise<boolean> => {
     if (!INSTAGRAM_APP_ID || !isMobileDevice()) return false;
 
@@ -106,15 +134,24 @@ export function ShareActions({ slug }: { slug: string }) {
   };
 
   const shareToInstagram = async () => {
-    let blob: Blob;
-    try {
-      const resp = await fetch(publicRoastCardUrl(slug));
-      blob = await resp.blob();
-    } catch {
-      return; // network/CORS failure -- nothing sensible to fall back to
+    // Try the prefetched blob FIRST, synchronously relative to the click
+    // (see the big comment above) -- only fetch on demand as a fallback
+    // if the mount-time prefetch hasn't landed yet, in which case the
+    // deep link is already off the table for this click and we go
+    // straight to the download/share-sheet path below anyway.
+    if (cardBlobRef.current) {
+      if (await tryInstagramStoriesDeepLink(cardBlobRef.current)) return;
     }
 
-    if (await tryInstagramStoriesDeepLink(blob)) return;
+    let blob: Blob | null = cardBlobRef.current;
+    if (!blob) {
+      try {
+        const resp = await fetch(publicRoastCardUrl(slug));
+        blob = await resp.blob();
+      } catch {
+        return; // network/CORS failure -- nothing sensible to fall back to
+      }
+    }
 
     const file = new File([blob], "roast-card.png", { type: "image/png" });
     if (navigator.canShare?.({ files: [file] })) {
