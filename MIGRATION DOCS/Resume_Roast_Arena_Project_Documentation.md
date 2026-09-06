@@ -1865,3 +1865,19 @@ Direct feedback after confirming the site works end-to-end: "the buttons on land
 **Verified**: build/lint clean, Playwright screenshot of the live page confirms all four steps render with zero console errors, and all four nav links resolve correctly (`RESUME`→`/`, `ROAST`→`/roast`, `Leaderboard`→`/leaderboard`, `How it works`→`/how-it-works`).
 
 **Status**: shipped, pushed to `worktree-frontend-landing`, not yet merged to `main`.
+
+# 43. Error-States Polish Pass (2026-09-06)
+
+Requested directly once the page-build-out plan was fully closed out: "update error pages and stuff." Also asked in-conversation whether the `RESUME` nav item needed relabeling — the real fix turned out to be styling, not copy.
+
+**Wordmark**: `RESUME` was a same-weight bordered pill sitting next to the real `ROAST` CTA, reading as a second button that just happened to do nothing interesting. Dropped the pill styling entirely (still a real `Link` to `/`, just plain text) — the one actual button in that pair is now visually unambiguous, no new copy needed.
+
+**Two real site-wide gaps, both previously completely missing**:
+- `frontend/src/app/not-found.tsx` — didn't exist. Any bad or typo'd URL fell back to Next.js's plain default 404, breaking the site's visual identity at the exact moment someone's already lost. Added, matching `expired-view.tsx`'s established template (headline, subtext, CTA).
+- `frontend/src/app/error.tsx` — didn't exist either. Any uncaught render-time error anywhere in the app fell back to Next's default error screen. Added a themed client-component boundary with a real "Try again" (calls Next's provided `reset()`, which re-renders the segment rather than a full reload) and a "Go home" link. Verified against an actual thrown error via a temporary throwaway route (created, triggered, screenshotted, deleted) rather than trusting the framework contract on faith — caught a real mistake in the process: a route folder prefixed with `__` is treated by Next's App Router as a private, unrouted folder, so the first verification attempt silently 404'd instead of reaching the error boundary at all.
+
+**Real bug**: `signInWithGoogle`/`signInWithGithub` (`auth-context.tsx`) had zero error handling — a blocked popup, a real network failure, or any other genuine Firebase auth error rejected as a silent unhandled promise rejection, with no feedback anywhere, at either of the two places that call them (the navbar dropdown, the `/roast` page's inline picker). Added an `authError` state to the auth context: catches real failures with a specific readable message per case (popup blocked / account-exists-with-different-credential / network error / generic fallback), while explicitly treating `auth/popup-closed-by-user` and `auth/cancelled-popup-request` as benign — a user just closing the popup or double-clicking isn't an error, and showing one for that would be its own bug. The navbar's error surface floats independently of the dropdown, since that dropdown already closes itself the instant a provider button is clicked, before the popup's outcome is even known.
+
+**Verified with Playwright against the live dev stack, not code review alone**: blocked Google's identity endpoints to force a *real* network failure and confirmed the exact right message renders and is dismissible; separately confirmed a user-closed popup shows nothing at all, proving the benign-code filter works in both directions, not just suppressing everything.
+
+**Status**: shipped, pushed to `worktree-frontend-landing`, not yet merged to `main`.
