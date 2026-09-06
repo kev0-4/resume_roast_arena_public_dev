@@ -49,12 +49,31 @@ export default function Home() {
               </h1>
             </div>
           </div>
+
+          {/* Arrows + badge stay relative to the original narrow headline
+              block -- their position was already right, only the cards
+              needed to move. */}
+          <div className="pointer-events-none absolute inset-0 h-full w-full">
+            <div className="absolute bottom-[0%] left-[0%] z-20 h-24 w-24 md:left-[8%] md:h-32 md:w-32">
+              <ArrowAccentLeft />
+            </div>
+            <div className="absolute right-[0%] top-[2%] z-20 h-24 w-24 md:right-[8%] md:h-32 md:w-32">
+              <ArrowAccentRight />
+            </div>
+
+            <Link
+              href="/roast"
+              className="pointer-events-auto absolute bottom-[-8%] right-[2%] z-40 block md:right-[14%]"
+            >
+              <SpinningRoastBadge />
+            </Link>
+          </div>
         </div>
 
-        {/* Positioned relative to the full-width `main`, not the narrow
-            centered headline block -- gives the floating cards and doodles
-            the page's side margins to sit in instead of fighting the text
-            for space. */}
+        {/* Cards (and the new doodles) are positioned relative to the
+            full-width `main`, not the narrow centered headline block --
+            gives them the page's side margins to sit in instead of
+            fighting the text for space. */}
         <div className="pointer-events-none absolute inset-0 h-full w-full">
           <motion.div
             animate={{ y: [0, -15, 0] }}
@@ -72,13 +91,6 @@ export default function Home() {
             <ExampleRoastCard name="UnhingedRecruiter2116" score={64} stamp="MID" />
           </motion.div>
 
-          <div className="absolute bottom-[6%] left-[0%] z-20 h-24 w-24 md:left-[6%] md:h-28 md:w-28">
-            <ArrowAccentLeft />
-          </div>
-          <div className="absolute right-[0%] top-[4%] z-20 h-24 w-24 md:right-[6%] md:h-28 md:w-28">
-            <ArrowAccentRight />
-          </div>
-
           {/* Extra hand-drawn doodles -- resume/roast themed, tucked into
               whatever margin space the headline and cards leave open. */}
           <div className="absolute left-[1%] top-[0%] z-10 h-14 w-14 opacity-90 md:left-[6%] md:top-[2%] md:h-20 md:w-20">
@@ -90,13 +102,6 @@ export default function Home() {
           <div className="absolute bottom-[2%] left-[16%] z-10 h-12 w-12 rotate-6 opacity-90 md:left-[22%] md:h-16 md:w-16">
             <TrashDoodle />
           </div>
-
-          <Link
-            href="/roast"
-            className="pointer-events-auto absolute bottom-[-6%] right-[6%] z-40 block md:right-[16%]"
-          >
-            <SpinningRoastBadge />
-          </Link>
         </div>
 
         <p className="relative z-10 max-w-xl px-4 text-center font-mono text-sm text-white/80 md:text-base">
