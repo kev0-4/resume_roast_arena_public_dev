@@ -1424,7 +1424,7 @@ When starting a new chat/model, give it this document and ask it to:
 
 # 28. Current project status
 
-**Updated 2026-09-06 (later still)** — Leaderboard frontend page (section 38): podium + ranked list + your-rank banner, built on top of the `GET /leaderboard` endpoint that already existed. Only Pydantic V2 warnings, the CI/CD deploy half, a history/dashboard page, and the original MVP's unimplemented Clarity/Credibility/Signal-to-Noise scoring dimension remain open below.
+**Updated 2026-09-06 (later still)** — Leaderboard frontend page (section 38, through two rounds of direct user feedback: visual redesign, then a full layout rewrite to a single background color) and a radar chart of real per-category subscores on the result page (section 39). Only Pydantic V2 warnings, the CI/CD deploy half, a history/dashboard page, and the original MVP's unimplemented Clarity/Credibility/Signal-to-Noise scoring dimension remain open below.
 
 ```text
 INGEST                  ██████████  COMPLETE (incl. anonymous sessions)
@@ -1768,4 +1768,31 @@ The first pass above landed but the user's reaction was "looks bland" — three 
 
 Verified: 12/12 leaderboard tests, 144/144 full backend suite (real Postgres). Frontend build/lint clean. Redesign visually confirmed via Playwright against the live dev stack using throwaway SOLID/MID/ROASTED sessions inserted directly in Postgres (the real accumulated dev data all predates the `stamp` column and is uniformly null, so it couldn't show the tier-color differentiation on its own), screenshotted, then deleted.
 
-**Noted, not built**: a radar/spider chart for per-category subscores on the result page (`/r/[slug]`) — reference component supplied, explicitly deprioritized by the user ("not a priority task, first fix leaderboard"). Would need real per-axis subscores (clarity/impact/formatting/etc.) that don't currently exist anywhere in the scoring pipeline — only the aggregate `composite_score` and the severity summary counts (critical/high/medium/low issues, strengths) that `severity-chart.tsx` already uses. Needs scoping (does per-category scoring exist anywhere latent in `workers/scoring/`, or would this need new scoring logic) before implementation.
+**Noted, not built (at the time)**: a radar/spider chart for per-category subscores on the result page — deprioritized until the leaderboard was fixed. Built in the next follow-up below, once the layout complaint was addressed.
+
+## Follow-up 2 (2026-09-06): layout rewrite + your-rank always visible
+
+The redesign above still didn't land — user's next reaction: "the blue and white segregation is not working here... too much empty space... the blue hero block is sized way bigger than its content." Root cause was structural, not cosmetic: the page was `flex-1` main content plus a separate `mt-auto` white section stacked below it, so the blue area stretched to fill whatever vertical space the (short) podium didn't use, then abruptly switched to white for the list. Rebuilt per another reference component the user supplied:
+
+- Single `bg-brand-blue` for the entire page, no separate section/color transition.
+- `hero-panel.tsx` — title + tagline + podium now live inside one bordered, hard-shadowed card sized to its own content (`podium.tsx` simplified back down to just the podium blocks, hero-panel.tsx owns the surrounding card).
+- `search-box.tsx` — client-side filter over the already-loaded ranked-list entries (not a new backend search endpoint). Filters ranks 4+ only, with a real empty state.
+- Deliberately **not** added despite being in the reference: period tabs (Weekly/Monthly/All-time — real time-windowed backend filtering, already flagged out of v1 scope above) and rank-delta arrows (needs historical rank tracking that doesn't exist anywhere in the schema). Flagged as separate future asks, not part of a layout fix.
+
+Separately, the same feedback round caught a real UX regression: the "your rank" banner (added in the first pass) returned `null` entirely whenever a signed-in user had no eligible leaderboard position — user: *"where did you remove your rank tab bro? even if no resume is submited show a '--' or Null rank or something."* A card that's just gone reads as broken, not intentional. Fixed: the card now always renders once signed in — a real position shows the actual rank/stamp/score, no position shows a "--" placeholder that doubles as a CTA linking to `/roast`. Still fully hidden while signed out (no identity to show a rank for).
+
+Verified with Playwright against the live dev stack: zero console errors, search filters and empty-states correctly, full-page screenshot confirms no dead blue space. Your-rank's both states (placeholder / real) re-verified with the same real-account + Firebase-custom-token + throwaway-session technique used earlier in this session. Build/lint clean.
+
+# 39. Radar Chart — Per-Category Subscores on the Result Page (2026-09-06)
+
+The deferred item from section 38's first follow-up, picked back up once the leaderboard layout was fixed, per the user's own sequencing ("once this is done add the radar chart").
+
+**Real investigation before building anything**: checked whether per-axis subscores (clarity/impact/formatting/etc.) already existed anywhere in the scoring pipeline — they didn't, `RoastAnalysisResponse` only ever exposed the aggregate `composite_score` and severity summary counts. But `workers/scoring/pipeline/rules.py`'s full rule output (`issues`/`strengths`, each with a `code`) was already being read into `scored.json` and already loaded server-side by `GET /r/{slug}/data` for the `summary` field — just never exposed at that granularity. That's real, existing, groundable data; building the radar chart meant deriving from it, not inventing new scoring logic or a second LLM call.
+
+**`_compute_subscores` (`backend/src/routes/public.py`)**: every issue code in `rules.py` partitioned into exactly one of 6 axes — Structure, Contact, Experience, Clarity, Conciseness (all deduction-based: start at 100, lose severity-weighted points per issue in that category, floor at 0), and Skills (a special case — `rules.py` has no "missing skills" issue to deduct from, only the `HAS_SKILLS` strength, so it's scored 100 if present else a flat 55, deliberately not 0 since that would claim a penalty the rule engine doesn't actually detect). Wired into the existing `/r/{slug}/data` response as a new `subscores` field — no new blob reads, the issues/strengths list was already being loaded.
+
+**`radar-chart.tsx`**: plain SVG (no charting library — one hand-sized chart doesn't justify the dependency), reskinned from a reference component (which itself was rebuilt off visx internally) to this project's real theme tokens and real data shape. One real bug caught during verification: the "Contact & Links" label clipped past the SVG's edge — fixed by shortening to "Contact" (a backend-side rename, since it's the label text itself) and widening the chart's margin generally for headroom.
+
+**Verified**: 4 new/updated backend tests (category-compounding, floor-at-zero clamping, both Skills branches) plus the existing route test extended with real subscore assertions — 148/148 full suite against real Postgres. Frontend build/lint clean. Playwright screenshot of a real `/r/{slug}` page (backed by real blob data, not the lightweight DB-only fixtures used elsewhere this session) confirms all 6 axis labels render without clipping and the polygon reflects the real per-category numbers from a real backend response.
+
+**Status**: shipped, pushed to `worktree-frontend-landing`, not yet merged to `main`.
