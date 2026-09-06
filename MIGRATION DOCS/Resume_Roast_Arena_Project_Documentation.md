@@ -1424,7 +1424,7 @@ When starting a new chat/model, give it this document and ask it to:
 
 # 28. Current project status
 
-**Updated 2026-09-06 (later still)** — Leaderboard frontend page (section 38, through two rounds of direct user feedback: visual redesign, then a full layout rewrite to a single background color) and a radar chart of real per-category subscores on the result page (section 39). Only Pydantic V2 warnings, the CI/CD deploy half, a history/dashboard page, and the original MVP's unimplemented Clarity/Credibility/Signal-to-Noise scoring dimension remain open below.
+**Updated 2026-09-06 (later still)** — Dashboard/history page (section 40) closes out the original frontend page-build-order plan (section 36): landing, upload, processing, result, auth, leaderboard, radar chart, and dashboard are all built. Only Pydantic V2 warnings, the CI/CD deploy half, an error-states/polish pass, and the original MVP's unimplemented Clarity/Credibility/Signal-to-Noise scoring dimension remain open below.
 
 ```text
 INGEST                  ██████████  COMPLETE (incl. anonymous sessions)
@@ -1461,12 +1461,13 @@ PRODUCTION HARDENING    ████░░░░░░  PARTIAL — structured l
 CI/CD (TEST)            ██████████  COMPLETE — .github/workflows/ci.yml runs the full pytest suite
                                      on every push/PR, see section 33. Container builds + Azure
                                      deploy still not implemented (no Azure credentials/target yet).
-FRONTEND                █████████░  IN PROGRESS — Next.js, see sections 36-38. Landing/upload/
-                                     processing/result/leaderboard pages built and wired to the real
-                                     backend, share buttons verified on real Android + iOS devices,
-                                     Firebase Google + GitHub auth wired and user-confirmed working
-                                     end-to-end. Only a history/dashboard page (stretch/optional) and
-                                     an error-states/polish pass remain unbuilt.
+FRONTEND                ██████████  COMPLETE (page-build-out) — Next.js, see sections 36-40. Every
+                                     planned page built and wired to the real backend: landing,
+                                     upload, processing, result (incl. radar chart), leaderboard,
+                                     dashboard/history. Firebase Google + GitHub auth user-confirmed
+                                     working end-to-end, share buttons verified on real Android + iOS
+                                     devices. Only an error-states/polish pass remains -- no new pages
+                                     planned.
 ```
 
 Full pipeline (ingest → extraction → normalization → anonymization → scoring → LLM roast → render) verified working end-to-end against real infra on 2026-09-05, all the way to DONE with a real generated PNG card.
@@ -1795,4 +1796,18 @@ The deferred item from section 38's first follow-up, picked back up once the lea
 
 **Verified**: 4 new/updated backend tests (category-compounding, floor-at-zero clamping, both Skills branches) plus the existing route test extended with real subscore assertions — 148/148 full suite against real Postgres. Frontend build/lint clean. Playwright screenshot of a real `/r/{slug}` page (backed by real blob data, not the lightweight DB-only fixtures used elsewhere this session) confirms all 6 axis labels render without clipping and the polygon reflects the real per-category numbers from a real backend response.
 
-**Status**: shipped, pushed to `worktree-frontend-landing`, not yet merged to `main`.
+**Status (section 39)**: shipped, pushed to `worktree-frontend-landing`, not yet merged to `main`.
+
+# 40. Dashboard — User Roast History Page (2026-09-06)
+
+The stretch/optional item from the original frontend page-build-order plan (section 36), picked as "next feature" once the leaderboard and radar chart were both done — needed the one piece of backend it was always flagged as blocked on: a list-sessions endpoint.
+
+**`GET /api/v1/sessions/me`** (`backend/src/routes/injest.py`, auth required, paginated) — a signed-in user's own sessions, most recent first, *regardless of status*. Deliberately not scoped to the leaderboard-eligible subset `get_leaderboard`/`get_user_leaderboard_position` use: a history page is exactly where a user should be able to see an in-progress or `FAILED` session too, not just the ones that made it all the way to a public roast card. Registered **above** `GET /sessions/{session_id}` in the same file on purpose — Starlette matches routes in registration order, and `{session_id}` is typed loosely enough (`uuid.UUID | str`) that `"me"` would otherwise match it as a literal session id and never reach this route at all.
+
+**`/dashboard`** — single `bg-brand-blue` background top to bottom from the very first draft, applying the leaderboard's own layout lesson (section 38's second follow-up) proactively rather than repeating the empty-hero-block mistake. Each row buckets the 15 possible `SessionStatus` values down to 3 (done/failed/processing): done rows show score+stamp and link to `/r/{slug}`, processing rows link back to `/roast/{session_id}` so a user can jump back to an in-progress upload, failed rows show the real stored error message inline. Real signed-out and empty states (not just a blank list), each with a CTA to `/roast`. Linked from the navbar's signed-in dropdown as "My Roasts" — not the public top nav, since the page is meaningless when signed out.
+
+**Real bug caught writing the backend tests**: accessing a just-created session's `.id` *after* a later commit on the same db session (e.g. creating the next fixture session in the same test) raised `MissingGreenlet`. Async SQLAlchemy expires every instance in a session's identity map on any commit, not just the object being committed, and unlike sync SQLAlchemy there's no implicit lazy-load bridge for accessing an expired attribute outside an awaited call — it raises instead of silently blocking. Same underlying class of bug as the `DetachedInstanceError` gotcha documented in section 38 (leaderboard tests), caught one step earlier in the object lifecycle here. Fixed by capturing each id immediately after its own commit rather than batching captures at the end of a multi-session test setup.
+
+**Verified**: 4 new backend tests (auth required; status bucketing + most-recent-first ordering across done/failed/in-progress; a user never sees another user's sessions; pagination) — 152/152 full suite against real Postgres. Frontend build/lint clean (two `set-state-in-effect`/unescaped-entity lint errors caught and fixed along the way). Playwright-verified against the live dev stack: a real account's actual `UPLOADED`-status history (from months-old real test data still sitting in the dev DB) renders correctly bucketed as "Processing," and two throwaway `DONE`/`FAILED` sessions were inserted directly in Postgres to exercise the other two row treatments, screenshotted, then deleted — confirmed the `DONE` row's link resolves to the correct real `/r/{slug}` and the navbar's "My Roasts" link lands on the page end-to-end.
+
+**Status**: shipped, pushed to `worktree-frontend-landing`, not yet merged to `main`. This closes out the original frontend page-build-order plan from section 36 — landing, upload, processing, result, auth, leaderboard, radar chart, and now dashboard are all built. Remaining frontend work is polish (error states pass) rather than new pages.
