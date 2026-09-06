@@ -6,6 +6,37 @@ import { publicRoastCardUrl } from "@/lib/api";
 import { InstagramLogo, LinkedInLogo, WhatsAppLogo, XLogo } from "./social-icons";
 
 const SHARE_TEXT = "I just got my resume roasted. It did not go well.";
+const INSTAGRAM_APP_ID = process.env.NEXT_PUBLIC_INSTAGRAM_APP_ID;
+
+function isMobileDevice(): boolean {
+  return /iphone|ipad|ipod|android/i.test(navigator.userAgent);
+}
+
+// Waits to see whether the browser actually switched away to a native app
+// (the tab going `hidden` is the closest signal a website gets for "the
+// instagram-stories:// deep link just worked") -- resolves true if that
+// happens within `timeoutMs`, false otherwise (no Instagram app installed,
+// desktop browser that ignores the scheme, etc.), so the caller knows
+// whether to fall back.
+function waitForAppSwitch(timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        cleanup();
+        resolve(true);
+      }
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve(false);
+    }, timeoutMs);
+    const cleanup = () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+  });
+}
 
 // No stored/effect-derived "shareUrl" state anywhere here on purpose --
 // window.location is only ever read inside click handlers, computed fresh
@@ -46,11 +77,34 @@ export function ShareActions({ slug }: { slug: string }) {
   };
 
   // Instagram has no web share-intent URL (deliberately, on Instagram's
-  // side) -- the two real options are the OS-level share sheet (Web Share
-  // API, which lets a user pick Instagram directly with the image
-  // attached, where the browser/device supports sharing files) or, as a
-  // fallback everywhere else, downloading the card image with the caption
-  // copied to the clipboard so the user can post it themselves.
+  // side). What Spotify Wrapped-style apps do (open Stories with the
+  // image already loaded) is a *native app* capability -- they write to
+  // the OS pasteboard using a private Instagram-specific data type
+  // (com.instagram.sharedSticker.backgroundImage) via native Swift/Kotlin
+  // code, which a website's JavaScript cannot do. This is the closest
+  // real equivalent from a website: write the image to the *general*
+  // clipboard via the standard Clipboard API, then trigger Instagram's
+  // documented Stories deep link (instagram-stories://share) with our
+  // Meta App ID as source_application. On some iOS/Instagram versions
+  // the Stories composer picks up a plain image already on the general
+  // pasteboard -- this isn't guaranteed the way the native-only trick is,
+  // it's the best a web app can do, so it's only attempted on mobile
+  // (the scheme means nothing on desktop) and always has a real fallback
+  // if the app never opens.
+  const tryInstagramStoriesDeepLink = async (blob: Blob): Promise<boolean> => {
+    if (!INSTAGRAM_APP_ID || !isMobileDevice()) return false;
+
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    } catch {
+      return false; // can't write images to the clipboard here -- skip straight to fallback
+    }
+
+    const switched = waitForAppSwitch(1500);
+    window.location.href = `instagram-stories://share?source_application=${INSTAGRAM_APP_ID}`;
+    return switched;
+  };
+
   const shareToInstagram = async () => {
     let blob: Blob;
     try {
@@ -59,6 +113,8 @@ export function ShareActions({ slug }: { slug: string }) {
     } catch {
       return; // network/CORS failure -- nothing sensible to fall back to
     }
+
+    if (await tryInstagramStoriesDeepLink(blob)) return;
 
     const file = new File([blob], "roast-card.png", { type: "image/png" });
     if (navigator.canShare?.({ files: [file] })) {
