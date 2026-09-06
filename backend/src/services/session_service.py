@@ -93,6 +93,7 @@ async def get_leaderboard(
             SessionModel.id,
             SessionModel.slug,
             SessionModel.composite_score,
+            SessionModel.stamp,
             SessionModel.created_at,
             Users.display_name,
         )
@@ -108,6 +109,7 @@ async def get_leaderboard(
             "id": row.id,
             "slug": row.slug,
             "composite_score": row.composite_score,
+            "stamp": row.stamp,
             "created_at": row.created_at,
             "display_name": row.display_name,
         }
@@ -153,6 +155,51 @@ async def get_session_rank(
     total = (await db.execute(total_stmt)).scalar_one()
     ahead = (await db.execute(ahead_stmt)).scalar_one()
     return ahead + 1, total
+
+
+async def get_user_leaderboard_position(
+    db: AsyncSession, *, user_id: str | uuid.UUID
+) -> Optional[dict]:
+    """
+    A signed-in user's own leaderboard standing, for the "your rank"
+    banner on the leaderboard page -- distinct from get_session_rank,
+    which ranks one *specific* session the caller already knows about.
+    Here the caller only knows the user, so this first finds that user's
+    most recent eligible session (their latest roast, matching the "you
+    always land on your newest result" mental model the rest of this app
+    already uses -- e.g. the processing page always redirects to the
+    just-finished session, never an older one), then ranks it exactly
+    like get_session_rank does. Returns None if the user has no eligible
+    session yet (never roasted, or their only roasts aren't shareable/
+    are past the anonymous TTL -- though a signed-in user's own sessions
+    are never TTL-excluded, since Users.is_anonymous is only ever true
+    for the throwaway rows /ingest creates for anonymous uploads).
+    """
+    cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=ANONYMOUS_ROAST_TTL_DAYS)
+    eligible = _leaderboard_eligible_clause(cutoff)
+
+    latest_stmt = (
+        select(SessionModel.slug, SessionModel.composite_score, SessionModel.stamp, SessionModel.created_at)
+        .join(Users, SessionModel.user_id == Users.id)
+        .where(SessionModel.user_id == user_id, *eligible)
+        .order_by(SessionModel.created_at.desc())
+        .limit(1)
+    )
+    latest = (await db.execute(latest_stmt)).first()
+    if latest is None:
+        return None
+
+    rank, total = await get_session_rank(
+        db=db, composite_score=latest.composite_score, created_at=latest.created_at
+    )
+    return {
+        "rank": rank,
+        "total": total,
+        "slug": latest.slug,
+        "composite_score": latest.composite_score,
+        "stamp": latest.stamp,
+        "created_at": latest.created_at,
+    }
 
 
 async def get_session_by_slug(db: AsyncSession, slug: str) -> SessionModel | None:

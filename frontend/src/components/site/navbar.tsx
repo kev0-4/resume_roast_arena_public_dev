@@ -1,7 +1,11 @@
 import Link from "next/link";
 import { AuthMenu } from "./auth-menu";
 
-const NAV_LINKS = ["Leaderboard", "How it works", "Examples"];
+const NAV_LINKS = [
+  { label: "Leaderboard", href: "/leaderboard" },
+  { label: "How it works", href: "#" },
+  { label: "Examples", href: "#" },
+];
 
 // Shared across every page -- same nav links everywhere rather than each
 // page inventing its own subset, so the site reads as one product.
@@ -19,13 +23,13 @@ export function Navbar() {
 
       <div className="hidden items-center space-x-2 md:flex">
         {NAV_LINKS.map((item) => (
-          <a
-            key={item}
-            href="#"
+          <Link
+            key={item.label}
+            href={item.href}
             className="rounded-full border border-white/30 px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-white/10"
           >
-            {item}
-          </a>
+            {item.label}
+          </Link>
         ))}
       </div>
 

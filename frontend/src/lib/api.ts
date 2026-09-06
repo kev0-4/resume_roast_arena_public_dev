@@ -183,3 +183,56 @@ export async function getRoastAnalysis(slug: string): Promise<RoastAnalysis> {
   }
   return resp.json();
 }
+
+export interface LeaderboardEntry {
+  rank: number;
+  slug: string;
+  display_name: string;
+  composite_score: number;
+  // Older rows predate the `stamp` column (backend/src/db/sessions.py) --
+  // never backfilled, so this is genuinely nullable, not just optional.
+  stamp: string | null;
+  created_at: string;
+}
+
+export interface LeaderboardResponse {
+  total: number;
+  limit: number;
+  offset: number;
+  entries: LeaderboardEntry[];
+}
+
+export async function getLeaderboard(limit: number, offset: number): Promise<LeaderboardResponse> {
+  const resp = await fetch(`${API_BASE_URL}/leaderboard?limit=${limit}&offset=${offset}`, {
+    cache: "no-store",
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({ detail: resp.statusText }));
+    throw new ApiError(body.detail ?? "Could not fetch leaderboard", resp.status);
+  }
+  return resp.json();
+}
+
+export interface MyLeaderboardPosition {
+  rank: number;
+  total: number;
+  slug: string;
+  composite_score: number;
+  stamp: string | null;
+  created_at: string;
+}
+
+// Null (not an error) means the signed-in user just has no eligible roast
+// yet -- GET /leaderboard/me returns 200+null for that, see
+// backend/src/routes/leaderboard.py.
+export async function getMyLeaderboardPosition(idToken: string): Promise<MyLeaderboardPosition | null> {
+  const resp = await fetch(`${API_BASE_URL}/leaderboard/me`, {
+    headers: { Authorization: `Bearer ${idToken}` },
+    cache: "no-store",
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({ detail: resp.statusText }));
+    throw new ApiError(body.detail ?? "Could not fetch your leaderboard position", resp.status);
+  }
+  return resp.json();
+}

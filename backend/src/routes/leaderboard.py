@@ -19,8 +19,10 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.session import get_db_sqlalchemy
-from ..services.session_service import get_leaderboard
-from ..schemas.leaderboard_schemas import LeaderboardEntry, LeaderboardResponse
+from ..db.users import Users
+from ..dependencies.auth import get_current_user
+from ..services.session_service import get_leaderboard, get_user_leaderboard_position
+from ..schemas.leaderboard_schemas import LeaderboardEntry, LeaderboardResponse, MyLeaderboardPosition
 
 leaderboard_router = APIRouter()
 
@@ -38,8 +40,27 @@ async def get_leaderboard_route(
             slug=row["slug"],
             display_name=row["display_name"] or "Anonymous Applicant",
             composite_score=row["composite_score"],
+            stamp=row["stamp"],
             created_at=row["created_at"],
         )
         for i, row in enumerate(rows)
     ]
     return LeaderboardResponse(total=total, limit=limit, offset=offset, entries=entries)
+
+
+@leaderboard_router.get("/leaderboard/me", response_model=MyLeaderboardPosition | None)
+async def get_my_leaderboard_position_route(
+    db: AsyncSession = Depends(get_db_sqlalchemy),
+    curr_user: Users = Depends(get_current_user),
+):
+    """
+    The signed-in caller's own leaderboard standing (their latest roast's
+    rank), for the "your rank" banner on the leaderboard page. Requires
+    auth -- there's no meaningful "my rank" for an anonymous request.
+    Returns null (200, not 404) when the user has no eligible roast yet;
+    that's an expected, normal state (e.g. just signed up), not an error.
+    """
+    position = await get_user_leaderboard_position(db=db, user_id=curr_user.id)
+    if position is None:
+        return None
+    return MyLeaderboardPosition(**position)

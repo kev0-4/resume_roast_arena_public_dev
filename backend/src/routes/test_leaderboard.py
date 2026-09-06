@@ -32,6 +32,16 @@ from backend.src.services.user_service import get_or_create_users_from_claims, c
 from backend.src.config import ANONYMOUS_ROAST_TTL_DAYS
 from backend.src import create_app
 
+# NOT backend.src.dependencies.auth -- create_app() (backend/src/__init__.py)
+# wires its routers via `from src.routes...` (absolute, matching conftest.py
+# putting backend/ on sys.path as well as the repo root), so the
+# get_current_user object FastAPI actually registered as a dependency is
+# src.dependencies.auth's, a different module identity than
+# backend.src.dependencies.auth even though it's the same file. Overriding
+# the wrong one is silently a no-op -- dependency_overrides matches by
+# object identity, not by behavior, so the real dependency still runs.
+from src.dependencies.auth import get_current_user
+
 
 def _run(coro_fn):
     async def wrapped():
@@ -57,12 +67,13 @@ async def _make_logged_in_user(db, suffix: str):
     )
 
 
-async def _make_public_session(db, user_id, *, score, slug=None, created_at=None):
+async def _make_public_session(db, user_id, *, score, slug=None, created_at=None, stamp=None):
     session = await create_sessions(user_id=user_id, db=db)
     session_id = session.id
     session = await get_session(db=db, session_id=session_id)
     session.status = "DONE"
     session.composite_score = score
+    session.stamp = stamp
     session.slug = slug or f"lb{uuid.uuid4().hex[:6]}"
     if created_at is not None:
         session.created_at = created_at
@@ -218,3 +229,99 @@ def test_route_returns_ranked_entries_with_display_names():
     assert any(e["slug"] == route_slug and e["composite_score"] == 99 for e in body["entries"])
     assert all(e["rank"] >= 1 for e in body["entries"])
     assert any(e["slug"] == route_slug and e["display_name"] == f"LeaderboardTestroute-{route_slug}" for e in body["entries"])
+
+
+def test_get_leaderboard_includes_stamp():
+    async def run():
+        async with AsyncSessionLocal() as db:
+            user = await _make_logged_in_user(db, "stamp")
+            stamped_id = await _make_public_session(db, user.id, score=85, stamp="SOLID")
+
+            rows, _ = await get_leaderboard(db=db, limit=1000, offset=0)
+            row = next(r for r in rows if r["id"] == stamped_id)
+            assert row["stamp"] == "SOLID"
+
+    _run(run)
+
+
+def test_route_my_position_requires_auth():
+    app = create_app()
+    with TestClient(app) as client:
+        resp = client.get("/leaderboard/me")
+
+    assert resp.status_code == 401
+
+
+def test_route_my_position_null_when_no_eligible_session():
+    async def make_user():
+        async with AsyncSessionLocal() as db:
+            user = await _make_logged_in_user(db, f"me-none-{uuid.uuid4().hex[:6]}")
+            return user.id
+
+    holder = {}
+
+    async def run():
+        holder["user_id"] = await make_user()
+
+    _run(run)
+    user_id = holder["user_id"]
+
+    class _FakeCurrUser:
+        id = user_id
+
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: _FakeCurrUser()
+    with TestClient(app) as client:
+        resp = client.get("/leaderboard/me")
+
+    assert resp.status_code == 200
+    assert resp.json() is None
+
+
+def test_route_my_position_returns_latest_session_rank():
+    route_slug = f"me{uuid.uuid4().hex[:6]}"
+
+    async def setup():
+        async with AsyncSessionLocal() as db:
+            user = await _make_logged_in_user(db, f"me-{route_slug}")
+            user_id = user.id
+            now = datetime.utcnow()
+            # older session should be ignored in favor of the newer one below
+            await _make_public_session(db, user_id, score=10, created_at=now - timedelta(days=1))
+            await _make_public_session(
+                db, user_id, score=90, slug=route_slug, created_at=now, stamp="SOLID"
+            )
+            return user_id
+
+    holder = {}
+
+    async def run():
+        holder["user_id"] = await setup()
+
+    _run(run)
+    user_id = holder["user_id"]
+
+    # A plain stand-in with just `.id`, not the real (now-detached) Users
+    # instance -- the route only ever reads curr_user.id, and the ORM object
+    # would raise DetachedInstanceError on any attribute access anyway:
+    # the commit inside _make_public_session (same db session as the user
+    # was created in) expires every instance in that session's identity map,
+    # user included, and there's no session left to refresh from once the
+    # `async with AsyncSessionLocal()` block above has exited. Same class of
+    # gotcha documented throughout this codebase's other tests.
+    class _FakeCurrUser:
+        id = user_id
+
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: _FakeCurrUser()
+    with TestClient(app) as client:
+        resp = client.get("/leaderboard/me")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body is not None
+    assert body["slug"] == route_slug
+    assert body["composite_score"] == 90
+    assert body["stamp"] == "SOLID"
+    assert body["rank"] >= 1
+    assert body["total"] >= body["rank"]

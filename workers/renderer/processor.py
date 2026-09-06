@@ -16,7 +16,7 @@ Pipeline:
 7. Render HTML -> screenshot PNG
 8. Upload render.png
 8b. Generate unique public slug
-9. Mark DONE (sets render_blob_path + composite_score + slug)
+9. Mark DONE (sets render_blob_path + composite_score + slug + stamp)
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -159,6 +159,7 @@ async def process_render_job(
             render_blob_path=render_blob_path,
             composite_score=context["score"],
             slug=slug,
+            stamp=context["stamp"],
         )
         await db.commit()
         emit_event("render.marked_done", {"session_id": str(session_id), "status": "INFO"})
