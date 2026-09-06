@@ -46,15 +46,15 @@ export function YourRankBanner() {
   return (
     <Link
       href={`/r/${position.slug}`}
-      className="flex w-full max-w-3xl items-center gap-4 rounded-2xl border border-brand-lime/40 bg-black/60 px-5 py-3 backdrop-blur-md transition-colors hover:border-brand-lime/70"
+      className="group flex w-full max-w-2xl items-center gap-4 rounded-2xl border-[3px] border-black bg-brand-lime px-5 py-3 shadow-[5px_5px_0_#000] transition-transform hover:-translate-y-0.5"
     >
-      <span className="font-mono text-[10px] font-semibold uppercase tracking-wide text-white/50">Your rank</span>
-      <span className="font-display text-lg text-brand-lime">#{position.rank}</span>
-      <span className="font-mono text-xs text-white/50">of {position.total}</span>
+      <span className="font-mono text-[10px] font-black uppercase tracking-wide text-black/60">Your rank</span>
+      <span className="font-display text-lg text-black">#{position.rank}</span>
+      <span className="font-mono text-xs font-semibold text-black/50">of {position.total}</span>
       <StampBadge stamp={position.stamp} className="ml-auto" />
-      <span className="font-display text-white">
+      <span className="font-display text-black">
         {position.composite_score}
-        <span className="text-xs text-white/40">/100</span>
+        <span className="text-xs text-black/40">/100</span>
       </span>
     </Link>
   );

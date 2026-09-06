@@ -29,9 +29,17 @@ adapted (not copied) — see git history on `frontend/src/app/globals.css`.
 - `brand-lime` (accent) `#CCFF00`
 - `paper` (bottom section cards) `#F8F9FA`
 - `smoke` (secondary text) `#6B6B6B`
+- `tier-mid` (leaderboard MID stamp badge) `#EF9F27`
+- `tier-roasted` (leaderboard ROASTED stamp badge) `#E24B4A`
 - background/foreground for bottom section: white / black
 - Fonts: same as Palette A (Anton + JetBrains Mono) — only the color palette
   changed, not the typography
+
+Stamp tiers everywhere else in this build (score-banner.tsx, the landing
+page's example cards) still use a uniform lime outline regardless of tier —
+`tier-mid`/`tier-roasted` are used only by the leaderboard's `StampBadge`
+(2026-09-06 redesign, per user reference) so far. Worth unifying later if the
+tri-color treatment reads better everywhere, not decided yet.
 
 ## Status
 

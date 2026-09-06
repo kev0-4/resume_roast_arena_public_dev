@@ -278,7 +278,7 @@ def test_route_my_position_null_when_no_eligible_session():
     assert resp.json() is None
 
 
-def test_route_my_position_returns_latest_session_rank():
+def test_route_my_position_returns_best_session_rank():
     route_slug = f"me{uuid.uuid4().hex[:6]}"
 
     async def setup():
@@ -286,10 +286,12 @@ def test_route_my_position_returns_latest_session_rank():
             user = await _make_logged_in_user(db, f"me-{route_slug}")
             user_id = user.id
             now = datetime.utcnow()
-            # older session should be ignored in favor of the newer one below
-            await _make_public_session(db, user_id, score=10, created_at=now - timedelta(days=1))
+            # newer session should be ignored in favor of the older, higher-
+            # scoring one below -- "your rank" is your best roast, not
+            # necessarily your most recent one
+            await _make_public_session(db, user_id, score=10, created_at=now)
             await _make_public_session(
-                db, user_id, score=90, slug=route_slug, created_at=now, stamp="SOLID"
+                db, user_id, score=90, slug=route_slug, created_at=now - timedelta(days=1), stamp="SOLID"
             )
             return user_id
 
@@ -325,3 +327,41 @@ def test_route_my_position_returns_latest_session_rank():
     assert body["stamp"] == "SOLID"
     assert body["rank"] >= 1
     assert body["total"] >= body["rank"]
+
+
+def test_route_my_position_ties_broken_by_earlier_created_at():
+    earlier_slug = f"metie{uuid.uuid4().hex[:6]}"
+
+    async def setup():
+        async with AsyncSessionLocal() as db:
+            user = await _make_logged_in_user(db, f"me-tie-{earlier_slug}")
+            user_id = user.id
+            now = datetime.utcnow()
+            # same score, different created_at -- "best" should pick the
+            # earlier one, matching get_leaderboard's own tiebreak
+            # (composite_score DESC, created_at ASC) so "my rank" always
+            # agrees with which entry the leaderboard itself would show
+            await _make_public_session(db, user_id, score=70, slug=earlier_slug, created_at=now - timedelta(hours=1))
+            await _make_public_session(db, user_id, score=70, created_at=now)
+            return user_id
+
+    holder = {}
+
+    async def run():
+        holder["user_id"] = await setup()
+
+    _run(run)
+    user_id = holder["user_id"]
+
+    class _FakeCurrUser:
+        id = user_id
+
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: _FakeCurrUser()
+    with TestClient(app) as client:
+        resp = client.get("/leaderboard/me")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body is not None
+    assert body["slug"] == earlier_slug

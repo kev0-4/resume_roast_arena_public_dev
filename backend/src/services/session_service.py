@@ -165,11 +165,12 @@ async def get_user_leaderboard_position(
     banner on the leaderboard page -- distinct from get_session_rank,
     which ranks one *specific* session the caller already knows about.
     Here the caller only knows the user, so this first finds that user's
-    most recent eligible session (their latest roast, matching the "you
-    always land on your newest result" mental model the rest of this app
-    already uses -- e.g. the processing page always redirects to the
-    just-finished session, never an older one), then ranks it exactly
-    like get_session_rank does. Returns None if the user has no eligible
+    single best-scoring eligible session (their strongest roast -- this
+    is what a "your rank" banner should show, not a run they've since
+    beaten), tiebroken by created_at asc (same tiebreak get_leaderboard
+    itself uses, so "best" agrees with how the leaderboard would actually
+    rank two tied submissions), then ranks it exactly like
+    get_session_rank does. Returns None if the user has no eligible
     session yet (never roasted, or their only roasts aren't shareable/
     are past the anonymous TTL -- though a signed-in user's own sessions
     are never TTL-excluded, since Users.is_anonymous is only ever true
@@ -178,27 +179,27 @@ async def get_user_leaderboard_position(
     cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=ANONYMOUS_ROAST_TTL_DAYS)
     eligible = _leaderboard_eligible_clause(cutoff)
 
-    latest_stmt = (
+    best_stmt = (
         select(SessionModel.slug, SessionModel.composite_score, SessionModel.stamp, SessionModel.created_at)
         .join(Users, SessionModel.user_id == Users.id)
         .where(SessionModel.user_id == user_id, *eligible)
-        .order_by(SessionModel.created_at.desc())
+        .order_by(SessionModel.composite_score.desc(), SessionModel.created_at.asc())
         .limit(1)
     )
-    latest = (await db.execute(latest_stmt)).first()
-    if latest is None:
+    best = (await db.execute(best_stmt)).first()
+    if best is None:
         return None
 
     rank, total = await get_session_rank(
-        db=db, composite_score=latest.composite_score, created_at=latest.created_at
+        db=db, composite_score=best.composite_score, created_at=best.created_at
     )
     return {
         "rank": rank,
         "total": total,
-        "slug": latest.slug,
-        "composite_score": latest.composite_score,
-        "stamp": latest.stamp,
-        "created_at": latest.created_at,
+        "slug": best.slug,
+        "composite_score": best.composite_score,
+        "stamp": best.stamp,
+        "created_at": best.created_at,
     }
 
 

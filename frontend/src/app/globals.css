@@ -13,6 +13,12 @@
   --paper: #f8f9fa;
   --smoke: #6b6b6b;
 
+  /* Stamp-tier accent colors -- SOLID reuses brand-lime, MID/ROASTED are
+     new (leaderboard redesign, 2026-09-06). Previously every stamp badge
+     was uniform lime regardless of tier; see DESIGN_NOTES.md. */
+  --tier-mid: #ef9f27;
+  --tier-roasted: #e24b4a;
+
   --background: #ffffff;
   --foreground: #000000;
 }
@@ -23,6 +29,8 @@
   --color-brand-lime: var(--brand-lime);
   --color-paper: var(--paper);
   --color-smoke: var(--smoke);
+  --color-tier-mid: var(--tier-mid);
+  --color-tier-roasted: var(--tier-roasted);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-display: var(--font-anton);

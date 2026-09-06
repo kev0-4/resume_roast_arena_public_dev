@@ -1,28 +1,29 @@
-// Same lime-outline treatment as the roast card itself and its other
-// frontend appearances (score-banner.tsx, the landing page's example
-// cards) -- no per-tier color scheme exists anywhere else in this build,
-// so this doesn't invent one.
 const STAMP_COPY: Record<string, string> = {
   ROASTED: "Roasted",
   SOLID: "Solid",
   MID: "Mid",
 };
 
-export function StampBadge({
-  stamp,
-  variant = "dark",
-  className = "",
-}: {
-  stamp: string | null;
-  // "dark" = lime-on-transparent, for the dark hero/podium cards.
-  // "light" = blue-on-white, for rows sitting on the white list panel.
-  variant?: "dark" | "light";
-  className?: string;
-}) {
+// Solid black-bordered pill per tier, filled with the tier's own color --
+// previously every stamp badge was a uniform lime outline regardless of
+// tier (score-banner.tsx, the landing page's example cards still are);
+// this is a deliberate, more legible upgrade for the leaderboard
+// specifically, where multiple tiers sit side by side and need to read
+// apart at a glance. ROASTED gets white text (its red is too dark for
+// black text to sit comfortably on); the other two keep black text.
+const TIER_STYLE: Record<string, string> = {
+  SOLID: "bg-brand-lime text-black",
+  MID: "bg-tier-mid text-black",
+  ROASTED: "bg-tier-roasted text-white",
+};
+
+export function StampBadge({ stamp, className = "" }: { stamp: string | null; className?: string }) {
   if (!stamp) return null;
-  const colors = variant === "dark" ? "border-brand-lime text-brand-lime" : "border-brand-blue text-brand-blue";
+  const colors = TIER_STYLE[stamp] ?? "bg-brand-lime text-black";
   return (
-    <span className={`rounded-md border-2 px-2 py-0.5 font-display text-[10px] uppercase tracking-wide ${colors} ${className}`}>
+    <span
+      className={`inline-flex items-center rounded-lg border-2 border-black px-2.5 py-1 font-display text-[10px] uppercase tracking-wide ${colors} ${className}`}
+    >
       {STAMP_COPY[stamp] ?? stamp}
     </span>
   );

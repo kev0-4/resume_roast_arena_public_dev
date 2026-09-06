@@ -3,11 +3,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { Navbar } from "@/components/site/navbar";
 import { Podium } from "@/components/leaderboard/podium";
-import { LeaderboardRow } from "@/components/leaderboard/leaderboard-row";
+import { LeaderboardList } from "@/components/leaderboard/leaderboard-list";
 import { YourRankBanner } from "@/components/leaderboard/your-rank-banner";
 import { ApiError, getLeaderboard, type LeaderboardEntry } from "@/lib/api";
 
 const PAGE_SIZE = 15;
+// Hard ceiling on how many rows "Load more" will ever fetch, regardless
+// of how large `total` actually is -- without this, a large enough
+// leaderboard turns "Load more" into an unintentional unlimited scroll.
+// 100 keeps it a genuine top-of-the-pile view, not a full directory.
+const MAX_ENTRIES = 100;
 
 export default function LeaderboardPage() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
@@ -17,7 +22,8 @@ export default function LeaderboardPage() {
   const [error, setError] = useState<string | null>(null);
 
   const loadPage = useCallback(async (offset: number) => {
-    const data = await getLeaderboard(PAGE_SIZE, offset);
+    const limit = Math.min(PAGE_SIZE, MAX_ENTRIES - offset);
+    const data = await getLeaderboard(limit, offset);
     setEntries((prev) => (offset === 0 ? data.entries : [...prev, ...data.entries]));
     setTotal(data.total);
   }, []);
@@ -47,7 +53,8 @@ export default function LeaderboardPage() {
   };
 
   const rest = entries.slice(3);
-  const hasMore = total !== null && entries.length < total;
+  const atCap = entries.length >= MAX_ENTRIES;
+  const hasMore = !atCap && total !== null && entries.length < total;
 
   return (
     <div className="relative flex min-h-screen w-full flex-col overflow-hidden bg-brand-blue font-mono selection:bg-brand-lime selection:text-brand-blue">
@@ -81,13 +88,9 @@ export default function LeaderboardPage() {
       </main>
 
       {!loading && !error && rest.length > 0 && (
-        <section className="relative z-20 mt-auto w-full rounded-t-[2.5rem] bg-white px-6 py-12 text-black shadow-[0_-20px_50px_rgba(0,0,0,0.2)] md:rounded-t-[3.5rem] md:px-10 md:py-16">
-          <div className="mx-auto flex max-w-3xl flex-col gap-8">
-            <div className="flex flex-col gap-2">
-              {rest.map((entry) => (
-                <LeaderboardRow key={entry.slug} entry={entry} />
-              ))}
-            </div>
+        <section className="relative z-20 mt-auto w-full rounded-t-[2.5rem] bg-paper px-6 py-12 text-black shadow-[0_-20px_50px_rgba(0,0,0,0.2)] md:rounded-t-[3.5rem] md:px-10 md:py-16">
+          <div className="mx-auto flex max-w-2xl flex-col gap-6">
+            <LeaderboardList entries={rest} />
 
             {hasMore && (
               <button
@@ -97,6 +100,11 @@ export default function LeaderboardPage() {
               >
                 {loadingMore ? "Loading..." : "Load more"}
               </button>
+            )}
+            {atCap && (
+              <p className="text-center font-mono text-[11px] text-black/40">
+                Showing the top {MAX_ENTRIES} roasts.
+              </p>
             )}
           </div>
         </section>
