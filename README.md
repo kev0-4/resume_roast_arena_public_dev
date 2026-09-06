@@ -1,217 +1,55 @@
-# Resume Processing & Analysis Platform (WIP)
+# Resume Roast Arena
 
-> **Status:** 🟢 Core pipeline complete, verified end-to-end
-> **Goal:** Build a production-grade, distributed system for resume ingestion, extraction, normalization, and downstream analysis (anonymization, scoring, AI feedback).
+Upload your resume, get roasted by an LLM, get an actual score and real fixes. Anonymous by default — sign in if you want your score on the leaderboard.
 
----
+**Live:** [resume-roast-arena.vercel.app](https://resume-roast-arena.vercel.app)
 
-## Overview
+![Landing page](docs/screenshots/landing.png)
 
-This project is a **backend-heavy, distributed resume processing platform** designed with **real-world production constraints** in mind.
+## What it does
 
-The system accepts resumes in multiple formats (PDF, DOCX, images), processes them asynchronously, extracts structured information, and prepares the data for downstream analysis such as anonymization, rule-based evaluation, scoring, and AI-generated feedback.
+You upload a PDF/DOCX/image of your resume. It gets parsed, anonymized (names, emails, etc. stripped before anything touches an LLM), scored against a rule engine across six categories, and then an LLM writes a roast that's actually grounded in your resume's real content — not generic feedback. You get a score, a radar chart breakdown, specific fixes, and a shareable card.
 
-The focus of this project is **architecture, reliability, correctness, and scalability**, not just feature demos.
+![Result page](docs/screenshots/result.png)
 
----
+## How it's built
 
-## High-Level Architecture
-
-```
-Client
-  ↓
-FastAPI (Ingest API)
-  ↓
-Blob Storage (raw files)
-  ↓
-Azure Service Bus (queue)
-  ↓
-Extraction Worker (Tika + OCR)
-  ↓
-Blob Storage (extracted.json)
-  ↓
-Normalization Worker
-  ↓
-Blob Storage (normalized.json)
-```
-
-Each stage is **decoupled**, **idempotent**, **stateless**, and **retry-safe**, following patterns used in production systems.
-
----
-
-## Key Design Principles
-
-- **Asynchronous, event-driven architecture**
-- **At-least-once message delivery**
-- **Explicit state machine per job**
-- **Clear retry vs dead-letter semantics**
-- **Stateless workers**
-- **Deterministic, explainable processing**
-- **Separation of concerns across pipeline stages**
-
----
-
-## Tech Stack
-
-### Backend & Infrastructure
-
-- **Python**
-- **FastAPI** (API layer)
-- **SQLAlchemy (async)** + **PostgreSQL**
-- **Docker & Docker Compose**
-- **Azure Service Bus** (with emulator for local dev)
-- **Azure Blob Storage** (raw & processed artifacts)
-
-### Document Processing
-
-- **Apache Tika (Docker-based)** for text extraction
-- **Tesseract OCR (via Tika)** for scanned/image resumes
-
-### Architecture Patterns
-
-- Worker-based pipeline (extract → normalize → …)
-- Message-driven orchestration
-- Idempotency keys for safe retries
-- Explicit job state transitions
-
----
-
-## Current Pipeline Status
-
-### ✅ Completed
-
-- **FastAPI application setup**
-- **Health & service routes**
-- **Authentication layer**
-- **Idempotent ingest endpoint**
-- **Resume upload & validation**
-- **Blob storage integration**
-- **Azure Service Bus integration**
-- **Extraction worker**
-  - Tika-based text extraction
-  - OCR fallback using Tesseract
-  - Confidence-based decision logic
-  - Correct retry vs permanent failure handling
-  - **Enqueues normalization job**
-
-- **Extraction artifacts (`extracted.json`)**
-- **Normalization worker skeleton**
-  - Deterministic orchestration
-  - State transitions (`EXTRACTED → NORMALIZING → NORMALIZED`)
-  - Schema-first design
-  - Normalization converts extracted text into a **canonical, structured representation**.
-  - Implemented components:
-    - Loader (`extracted.json` validation)
-    - Deterministic segmenter (resume sections)
-    - Regex-based entity extraction (emails, phones, URLs)
-    - Tiered signal computation (boolean / categorical)
-    - Numeric metrics computation
-    - Assembler (schema-stable `normalized.json`)
-    - State transitions (`EXTRACTED → NORMALIZED`)
-
-  Output artifact:
-
-  ```
-  normalized/<session_id>/normalized.json
-  ```
-
-  This stage is **fully deterministic** and **non-ML** by design.
-
----
-
-## Artifacts Produced
-
-| Stage         | Artifact                                  |
-| ------------- | ----------------------------------------- |
-| Ingest        | `raw/<session_id>/<filename>`             |
-| Extraction    | `extracted/<session_id>/extracted.json`   |
-| Normalization | `normalized/<session_id>/normalized.json` |
-
-Artifacts are immutable and traceable across stages.
-
----
-
-## Job State Machine
-
-Each resume follows a strict lifecycle:
+It's a pipeline, not a monolith. Upload hits a FastAPI backend, which drops the file in blob storage and enqueues it. From there it's six independent workers, each doing one job and passing the baton via Service Bus:
 
 ```
-QUEUED
-  ↓
-PROCESSING
-  ↓
-EXTRACTED
-  ↓
-NORMALIZING
-  ↓
-NORMALIZED
-  ↓
-ANONYMIZING
-  ↓
-ANONYMIZED
+ingest → extract (Tika) → normalize → anonymize → score → roast (Gemini) → render
 ```
 
-Failures are classified as:
+Each stage is stateless and retry-safe. If a worker dies mid-job, the next run just picks it back up. The renderer runs a real headless Chromium instance to produce the shareable card image (the one above the roast text).
 
-- **Transient** → retried automatically
-- **Permanent** → marked failed & dead-lettered
+Deployed on Azure Container Apps, with the pipeline workers scaling to zero when idle and spinning up on demand — no idle compute cost for a pipeline that mostly sits empty between uploads. Frontend is Next.js on Vercel.
 
----
+**Stack:** FastAPI, Postgres, Redis, Azure Service Bus + Blob Storage, Apache Tika, Gemini, Playwright, Next.js, Firebase Auth.
 
-## What’s Next (Planned)
+## Running it locally
 
-### 🔜 Next Pipeline Stage
+```bash
+# infra (postgres/redis/azurite/tika/service bus emulator)
+cd backend && docker compose up -d
 
-- **Anonymization**
-  - Span-based PII redaction
-  - Deterministic masking
-  - `anonymized.json`
-  - No ML, no heuristics
+# backend
+source venv/bin/activate
+cd backend && uvicorn app:app --reload
 
-### 🔮 Future Stages
+# workers (each in its own terminal, from repo root)
+python -m workers.extraction.main
+python -m workers.normalization.main
+python -m workers.anonymization.main
+python -m workers.scoring.main
+python -m workers.llm.main
+python -m workers.renderer.main
 
-- Rule-based evaluation engine
-- Scoring with explainability
-- AI-assisted resume feedback (“resume roast”)
-- Rendering (HTML / image cards)
-- Public shareable result links
-- Observability (metrics, tracing)
-- CI/CD pipelines
-- Performance tuning & caching
+# frontend
+cd frontend && npm run dev
+```
 
-## Why This Project Matters
+You'll need real Postgres/Redis/Blob/Service Bus/Gemini credentials in `.env` files under `backend/src/` and `workers/` (see `frontend/.env.example` for the frontend's own env vars).
 
-This project is **not a CRUD app** or a demo script.
+## CI/CD
 
-It demonstrates:
-
-- Distributed systems thinking
-- Real-world backend architecture
-- Worker-based async processing
-- Message queues & failure handling
-- Production-grade document processing
-- Clean separation between deterministic logic and AI-driven stages
-
-It is being built incrementally, with **correctness and scalability prioritized over speed**.
-
----
-
-## Project Status
-
-> ⚠️ This project is **actively being developed**.
-> The architecture and core pipeline are stable, while higher-level features are being layered on top.
-
----
-
-## Author
-
-Built by **Kevin Tandon**
-Focused on backend systems, distributed architecture, and production-ready design.
-
-> For myself
-> source venv/bin/activate
-> cd backend && uvicorn app:app , 
-> cd to proj root and 
-> python -m workers.normalization.main
-> python -m workers.normalization.main
-> python -m workers.extraction.main
+Every push runs the full test suite. Merges to `main` build and push both Docker images and roll all 8 Container Apps to the new revision, authenticated to Azure via OIDC (no stored cloud credential).
