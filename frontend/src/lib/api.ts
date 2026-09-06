@@ -99,9 +99,50 @@ export async function getSessionStatus(sessionId: string): Promise<SessionStatus
   return resp.json();
 }
 
-// The public roast-card PNG lives on the backend itself (GET /r/{slug})
-// -- there's no dedicated frontend result page yet (next on the build
-// plan), so this is what the processing page links to in the meantime.
+// The public roast-card PNG lives on the backend itself (GET /r/{slug}).
 export function publicRoastCardUrl(slug: string): string {
   return `${API_BASE_URL}/r/${slug}`;
+}
+
+export interface ScoreSummary {
+  total_issues: number;
+  critical_issues: number;
+  high_issues: number;
+  medium_issues: number;
+  low_issues: number;
+  total_strengths: number;
+}
+
+export interface Highlight {
+  quote: string;
+  comment: string;
+}
+
+export interface RoastAnalysis {
+  slug: string;
+  composite_score: number;
+  stamp: string;
+  created_at: string;
+  rank: number;
+  total_ranked: number;
+  summary: ScoreSummary;
+  metrics: Record<string, number | string | null>;
+  verdict: string;
+  roast: string;
+  fixes: string[];
+  highlights: Highlight[];
+}
+
+// Backend companion to the PNG above (GET /r/{slug}/data) -- the full
+// analysis behind the card. `cache: "no-store"` here is about Next's own
+// fetch cache, a separate layer from the backend response's own
+// Cache-Control (backend/src/routes/public.py) -- explicit no-store keeps
+// the two from being confusing to reason about together.
+export async function getRoastAnalysis(slug: string): Promise<RoastAnalysis> {
+  const resp = await fetch(`${API_BASE_URL}/r/${slug}/data`, { cache: "no-store" });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({ detail: resp.statusText }));
+    throw new ApiError(body.detail ?? "Could not fetch roast analysis", resp.status);
+  }
+  return resp.json();
 }

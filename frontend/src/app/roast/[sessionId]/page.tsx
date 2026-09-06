@@ -4,11 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, RotateCcw } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import { Navbar } from "@/components/site/navbar";
 import { ProcessingStages } from "@/components/roast/processing-stages";
 import { stackedShadow } from "@/lib/text-shadow";
-import { getSessionStatus, publicRoastCardUrl, SessionStatusResponse } from "@/lib/api";
+import { getSessionStatus, SessionStatusResponse } from "@/lib/api";
 
 const HEADLINE_SHADOW = stackedShadow(10, "#001A99");
 const POLL_INTERVAL_MS = 2000;
@@ -39,6 +39,9 @@ export default function ProcessingPage() {
         if (result.status === "DONE" || result.status === "FAILED") {
           if (intervalRef.current) clearInterval(intervalRef.current);
         }
+        if (result.status === "DONE" && result.slug) {
+          router.push(`/r/${result.slug}`);
+        }
       } catch {
         if (!cancelled) setPollError("Lost connection to the server -- retrying...");
       }
@@ -51,7 +54,7 @@ export default function ProcessingPage() {
       cancelled = true;
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [params.sessionId]);
+  }, [params.sessionId, router]);
 
   const status = session?.status;
   const isTerminal = status === "DONE" || status === "FAILED";
@@ -92,21 +95,7 @@ export default function ProcessingPage() {
               >
                 Your roast is ready
               </h1>
-              <a
-                href={publicRoastCardUrl(session!.slug!)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-8 flex items-center gap-2 rounded-full bg-brand-lime px-8 py-4 font-display text-sm uppercase tracking-wide text-black shadow-[4px_4px_0_#000] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0_#000] md:text-base"
-              >
-                View your roast card
-                <ArrowRight size={18} strokeWidth={2.5} />
-              </a>
-              <button
-                onClick={() => router.push("/roast")}
-                className="mt-4 font-mono text-xs font-semibold text-white/60 underline-offset-4 hover:text-white hover:underline"
-              >
-                Roast another resume
-              </button>
+              <p className="mt-4 font-mono text-xs text-white/60">Taking you there now...</p>
             </motion.div>
           ) : (
             <motion.div key="processing" {...VIEW_TRANSITION}>
