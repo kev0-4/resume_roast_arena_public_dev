@@ -141,12 +141,21 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      # GITHUB_TOKEN can't push here: rra-backend/rra-renderer were first
+      # pushed manually (this session's initial deploy, before this workflow
+      # existed) via a personal token, so GHCR never linked the packages to
+      # this repo -- GITHUB_TOKEN only gets write access to packages already
+      # linked to the triggering repo, so it fails with
+      # "denied: permission_denied: read_package" (confirmed via a real
+      # failed run: https://github.com/kev0-4/resume_roast_arena_public_dev/actions/runs/34055079492).
+      # GHCR_PAT is the same personal token already trusted for the
+      # Container Apps' image-pull registry secret.
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT }}
 
       - name: Build and push backend/workers image
         uses: docker/build-push-action@v6
