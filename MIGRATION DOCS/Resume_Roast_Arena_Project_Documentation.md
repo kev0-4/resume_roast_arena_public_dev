@@ -1424,7 +1424,7 @@ When starting a new chat/model, give it this document and ask it to:
 
 # 28. Current project status
 
-**Updated 2026-09-06 (later still)** — Auth (section 37): Firebase Google + GitHub sign-in wired into the frontend, user-confirmed working end-to-end on a real account (one real quirk found and fixed: navbar avatar now falls back to initials if the photo CDN is blocked browser-side). Only Pydantic V2 warnings, the CI/CD deploy half, a dedicated frontend leaderboard page, a history/dashboard page, and the original MVP's unimplemented Clarity/Credibility/Signal-to-Noise scoring dimension remain open below.
+**Updated 2026-09-06 (later still)** — Leaderboard frontend page (section 38): podium + ranked list + your-rank banner, built on top of the `GET /leaderboard` endpoint that already existed. Only Pydantic V2 warnings, the CI/CD deploy half, a history/dashboard page, and the original MVP's unimplemented Clarity/Credibility/Signal-to-Noise scoring dimension remain open below.
 
 ```text
 INGEST                  ██████████  COMPLETE (incl. anonymous sessions)
@@ -1443,8 +1443,9 @@ RENDERER                ██████████  COMPLETE — workers/ren
 PUBLIC LINK             ██████████  COMPLETE — GET /r/{slug}, see section 30. A roast can now
                                      actually be shared end-to-end. Only the original MVP's core
                                      pipeline items remain unimplemented below.
-LEADERBOARD/GLOBAL CMP  ██████████  COMPLETE — GET /leaderboard, see section 35. Ranked by
-                                     composite_score, same eligibility as the Public Link Service.
+LEADERBOARD/GLOBAL CMP  ██████████  COMPLETE — GET /leaderboard (+/leaderboard/me), see sections 35
+                                     and 38. Ranked by composite_score, same eligibility as the
+                                     Public Link Service. Frontend page shipped in section 38.
                                      Percentile framing and time-windowed boards deliberately not
                                      built (v1 scope).
 TTL/CLEANUP             ██████████  COMPLETE — workers/cleanup/, see section 32. Raw uploads deleted
@@ -1460,12 +1461,12 @@ PRODUCTION HARDENING    ████░░░░░░  PARTIAL — structured l
 CI/CD (TEST)            ██████████  COMPLETE — .github/workflows/ci.yml runs the full pytest suite
                                      on every push/PR, see section 33. Container builds + Azure
                                      deploy still not implemented (no Azure credentials/target yet).
-FRONTEND                ████████░░  IN PROGRESS — Next.js, see sections 36-37. Landing/upload/
-                                     processing/result pages built and wired to the real backend,
-                                     share buttons verified on real Android + iOS devices. Firebase
-                                     Google + GitHub auth wired and user-confirmed working end-to-end
-                                     on a real account. A dedicated leaderboard page and a
-                                     history/dashboard page still not built.
+FRONTEND                █████████░  IN PROGRESS — Next.js, see sections 36-38. Landing/upload/
+                                     processing/result/leaderboard pages built and wired to the real
+                                     backend, share buttons verified on real Android + iOS devices,
+                                     Firebase Google + GitHub auth wired and user-confirmed working
+                                     end-to-end. Only a history/dashboard page (stretch/optional) and
+                                     an error-states/polish pass remain unbuilt.
 ```
 
 Full pipeline (ingest → extraction → normalization → anonymization → scoring → LLM roast → render) verified working end-to-end against real infra on 2026-09-05, all the way to DONE with a real generated PNG card.
@@ -1725,3 +1726,34 @@ The backend side of this (`firebase_admin` init, `verify_id_token()`, `get_curre
 **Broken-avatar fix**: traced the actual stored value first rather than guessing — the Users row's `photo_url` in Postgres (a real pre-existing row for this Google account, matched by `firebase_uid`) is a valid, currently-live `lh3.googleusercontent.com` URL (curled directly, got a real 200 `image/jpeg`). Reproduced the exact signed-in state in a clean headless browser using a Firebase custom token minted for the same real uid (sidesteps needing a live OAuth popup) — it rendered correctly there too, ruling out a data or config bug. Root cause is environment-dependent on the user's actual browser (ad-blockers/privacy extensions commonly blocklist Google's avatar CDN since it's Google-associated) — not something fixable from this codebase. What *was* a real gap: `auth-menu.tsx`'s `<Image>` had no `onError` handler, so a blocked/failed request left a permanent broken-image icon instead of the initials-avatar fallback the component already had code for when there's no `photoUrl` at all. Added `onError` → `photoFailed` state → same fallback. Verified both paths with Playwright: unblocked renders the real photo, and with the CDN request forced to abort (simulating an ad-blocker), it now cleanly shows the initials avatar. `build`/`lint` clean, hooks-order lint error caught and fixed along the way (the new `useState` had to move above an early `return` in the component). Committed and pushed separately from the initial auth commit.
 
 **Status**: shipped and user-confirmed, pushed to `worktree-frontend-landing`, not yet merged to `main`.
+
+# 38. Leaderboard Frontend Page (2026-09-06)
+
+`GET /leaderboard` (section 35) had no frontend consumer until this section — the page itself, plus two backend additions it needed.
+
+## Planning note
+
+Composition was agreed with the user before building anything: a hero header with a top-3 podium, a plain ranked list below with "load more" pagination (the user's own earlier preference — "usually in frontend we show top 10-15... then once user clicks view more then we show rest", from the original leaderboard-caching discussion in section 35), and a "your rank" banner for signed-in users. The user explicitly asked to keep the podium treatment and to add the "your rank" banner rather than leave it as a stretch idea ("it is better to build a good app than leave half baked features"). They also asked that leaderboard entries be clickable through to "their submitted resumes/roasts page" — every row and podium card links to `/r/{slug}`, that page's existing result view (score, roast, highlights, share actions). **Noted for a future feature, not built here**: this only surfaces the *roast* (the analysis/output), never the original *uploaded resume document* itself — nothing in this app currently exposes the raw uploaded file back to a viewer at all (extraction/anonymization/scoring all consume it, nothing re-serves it), and doing so would be a genuinely separate, security-sensitive feature (raw files are already deleted after 24h per the TTL policy in section 32, and re-exposing a user's original document needs its own access-control thinking, not something to bolt onto a leaderboard row's link).
+
+## Backend additions
+
+- **`Sessions.stamp` column** (migration `e2b7a4c910f3`) — the roast card's tier badge (ROASTED/MID/SOLID) is derived from a session's severity *summary* (critical/high issue counts, strength count — see `workers/renderer/pipeline/card_data.py:compute_stamp`), not from `composite_score`. A paginated leaderboard listing many rows can't afford a blob read per row just to show a badge, so `stamp` is now stored once at the same DONE transition that already sets `composite_score` (`workers/renderer/state.py:mark_done`, `workers/renderer/processor.py`) — same reasoning as why `composite_score` itself is a stored column. Nullable: existing DONE sessions predate this and aren't backfilled; the frontend simply omits the badge when null (`StampBadge` returns nothing for a null stamp).
+- **`GET /leaderboard/me`** (auth required, `backend/src/routes/leaderboard.py` + `session_service.get_user_leaderboard_position`) — a signed-in user's own rank. Finds their most recent eligible session (mirrors the "you always land on your newest result" convention already used by the processing-page redirect, not their best-ever score) and ranks it via the existing `get_session_rank`. Returns `200` + `null` (not `404`) when the user has no eligible roast yet — an expected state for a brand-new signer-in, not an error condition.
+
+## Frontend
+
+- `app/leaderboard/page.tsx` — client component (consistent with every page except `/r/[slug]`, which is server-rendered specifically for OG tags this page doesn't need). Fetches page 1 on mount, "Load more" appends subsequent pages via the existing `limit`/`offset` params — no new pagination mechanism invented.
+- `components/leaderboard/podium.tsx` — top 3 as a 2-1-3 visual layout (CSS order, not array order, so #1 renders center/tallest regardless of source order), a `Crown` icon (lucide-react) on #1.
+- `components/leaderboard/leaderboard-row.tsx` — ranks 4+, plain list rows on the white content panel (same panel pattern as the result page).
+- `components/leaderboard/stamp-badge.tsx` — shared badge, `dark`/`light` variant (lime-on-transparent for the podium's dark cards, blue-on-white for list rows on the white panel) — no per-tier color scheme invented; matches every other stamp badge in this codebase (uniform lime outline regardless of tier).
+- `components/leaderboard/your-rank-banner.tsx` — fetches `/leaderboard/me` client-side once signed in via `useAuth()`; renders nothing at all while signed out (no sign-in nag competing with the page header) or while the signed-in user has no eligible roast yet.
+- `lib/relative-time.ts` — small hand-rolled "2d ago" formatter; no new date library pulled in for something this simple.
+- Navbar's "Leaderboard" link (previously a `href="#"` placeholder shared by all three nav items) now points at the real page; the other two links are untouched.
+
+## Verified
+
+- 4 new backend tests (stamp round-trips through `get_leaderboard`; `/leaderboard/me` requires auth; returns null for no eligible session; returns the correct rank/stamp/score for one that does). Caught and fixed a real `DetachedInstanceError` writing these — passing a detached ORM `Users` instance across a `dependency_overrides` boundary in a test hits the exact identity-map class of bug documented elsewhere in this codebase's tests; fixed by overriding with a plain object carrying just `.id`, not the ORM instance. 143/143 backend tests pass.
+- Frontend `build`/`lint` clean; one `react-hooks/set-state-in-effect` violation caught and fixed in `your-rank-banner.tsx` (a synchronous `setState` in the effect body's early-return branch was redundant anyway, since the render guard already checks `!firebaseUser` first — removed rather than restructured).
+- Verified against the real running dev stack with Playwright, not just build passing: zero console errors on `/leaderboard`, `Load more` actually grows the visible list, navbar link lands on the real page. The your-rank banner was verified in *both* states using the same real account and the same Firebase-custom-token technique used to verify the broken-avatar fix earlier this session (mints a real token for a known real `uid` via the Admin SDK, sidesteps needing a live OAuth popup): confirmed absent for the account's real current state (no eligible session), then a throwaway eligible session was inserted directly in Postgres, the banner rendered with the correct real rank/total/stamp/score, and the throwaway row was deleted immediately after.
+
+**Status**: shipped, pushed to `worktree-frontend-landing`, not yet merged to `main`.
