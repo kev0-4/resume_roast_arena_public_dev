@@ -25,6 +25,7 @@ function useCloseOnOutsideClick(open: boolean, onClose: () => void) {
 export function AuthMenu() {
   const { firebaseUser, backendUser, loading, signInWithGoogle, signInWithGithub, signOutUser } = useAuth();
   const [open, setOpen] = useState(false);
+  const [photoFailed, setPhotoFailed] = useState(false);
   const menuRef = useCloseOnOutsideClick(open, () => setOpen(false));
 
   if (loading) {
@@ -77,8 +78,21 @@ export function AuthMenu() {
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 rounded-full border border-white/30 py-1 pl-1 pr-3 text-xs font-semibold text-white transition-colors hover:bg-white/10 md:text-sm"
       >
-        {photoUrl ? (
-          <Image src={photoUrl} alt={displayName} width={28} height={28} className="rounded-full" unoptimized />
+        {photoUrl && !photoFailed ? (
+          <Image
+            src={photoUrl}
+            alt={displayName}
+            width={28}
+            height={28}
+            className="rounded-full"
+            unoptimized
+            // Google/GitHub avatar CDNs are blocked outright by some
+            // ad-blockers and privacy extensions (e.g. lh3.googleusercontent.com
+            // shows up on a few tracker blocklists) -- rather than a
+            // permanently broken-image icon, fall back to the initials
+            // avatar the same way we do when there's no photoUrl at all.
+            onError={() => setPhotoFailed(true)}
+          />
         ) : (
           <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-lime font-display text-xs text-black">
             {displayName.charAt(0).toUpperCase()}
