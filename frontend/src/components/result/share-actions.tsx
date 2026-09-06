@@ -3,21 +3,19 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Download, Link2 } from "lucide-react";
 import { publicRoastCardUrl } from "@/lib/api";
-import { InstagramLogo, LinkedInLogo, WhatsAppLogo, XLogo } from "./social-icons";
+import { InstagramLogo, LinkedInLogo, RedditLogo, WhatsAppLogo, XLogo } from "./social-icons";
 
 const SHARE_TEXT = "I just got my resume roasted. It did not go well.";
 const INSTAGRAM_APP_ID = process.env.NEXT_PUBLIC_INSTAGRAM_APP_ID;
 
-function isMobileDevice(): boolean {
-  return /iphone|ipad|ipod|android/i.test(navigator.userAgent);
+function isIOS(): boolean {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent);
 }
 
 // Waits to see whether the browser actually switched away to a native app
-// (the tab going `hidden` is the closest signal a website gets for "the
-// instagram-stories:// deep link just worked") -- resolves true if that
-// happens within `timeoutMs`, false otherwise (no Instagram app installed,
-// desktop browser that ignores the scheme, etc.), so the caller knows
-// whether to fall back.
+// (the tab going `hidden` is the closest signal a website gets for "a
+// custom URL scheme deep link just worked") -- resolves true if that
+// happens within `timeoutMs`, false otherwise.
 function waitForAppSwitch(timeoutMs: number): Promise<boolean> {
   return new Promise((resolve) => {
     const onVisibilityChange = () => {
@@ -47,9 +45,11 @@ function waitForAppSwitch(timeoutMs: number): Promise<boolean> {
 export function ShareActions({ slug }: { slug: string }) {
   const [copied, setCopied] = useState(false);
   const [instagramStatus, setInstagramStatus] = useState<"idle" | "downloaded">("idle");
-  // Prefetched on mount, not on click -- see tryInstagramStoriesDeepLink's
-  // comment below for why this matters (it's the actual fix for the deep
-  // link never firing on a real device).
+  // Prefetched on mount, not on click -- iOS Safari revokes "user
+  // activation" after an awaited network request, which silently breaks
+  // navigator.clipboard.write if the image is fetched inside the click
+  // handler. Prefetching means the click handler can call it with no
+  // network wait in between.
   const cardBlobRef = useRef<Blob | null>(null);
 
   useEffect(() => {
@@ -92,35 +92,36 @@ export function ShareActions({ slug }: { slug: string }) {
     window.open(href, "_blank", "noopener,noreferrer");
   };
 
+  const openReddit = () => {
+    const href = `https://www.reddit.com/submit?url=${encodeURIComponent(shareUrl())}&title=${encodeURIComponent(SHARE_TEXT)}`;
+    window.open(href, "_blank", "noopener,noreferrer");
+  };
+
   // Instagram has no web share-intent URL (deliberately, on Instagram's
-  // side). What Spotify Wrapped-style apps do (open Stories with the
-  // image already loaded) is a *native app* capability -- they write to
-  // the OS pasteboard using a private Instagram-specific data type
-  // (com.instagram.sharedSticker.backgroundImage) via native Swift/Kotlin
-  // code, which a website's JavaScript cannot do. This is the closest
-  // real equivalent from a website: write the image to the *general*
-  // clipboard via the standard Clipboard API, then trigger Instagram's
-  // documented Stories deep link (instagram-stories://share) with our
-  // Meta App ID as source_application. On some iOS/Instagram versions
-  // the Stories composer picks up a plain image already on the general
-  // pasteboard -- this isn't guaranteed the way the native-only trick is,
-  // it's the best a web app can do, so it's only attempted on mobile
-  // (the scheme means nothing on desktop) and always has a real fallback
-  // if the app never opens.
+  // side), and the two platforms need genuinely different handling here --
+  // this isn't a detail, it's the actual reason the first version of this
+  // never worked on Android:
   //
-  // Critical ordering constraint (found from real-device testing, not
-  // simulated): navigator.clipboard.write must be *called* with no
-  // `await` between the click and that call, or Safari on iOS silently
-  // rejects it as "not associated with a user gesture" -- browsers only
-  // keep a click's "user activation" alive for a very short window, and
-  // an awaited network request is enough to lose it. This is exactly why
-  // this needs the prefetched blob (cardBlobRef, fetched on mount) rather
-  // than fetching the image on click -- an `await fetch()` right before
-  // this call was silently breaking it on every real device even though
-  // automated (Chromium-based) testing never caught it, since Chrome is
-  // much more lenient here than Safari.
+  // - iOS: Meta's documented "share to Instagram Stories from your app"
+  //   trick writes to the OS pasteboard using a private Instagram-specific
+  //   data type, which is a *native* Swift capability. The closest a
+  //   website can get is writing a plain image to the general clipboard
+  //   via the standard Clipboard API, then triggering the
+  //   instagram-stories://share deep link -- on some iOS/Instagram
+  //   versions the Stories composer picks up a plain image already
+  //   sitting on the general pasteboard. Not guaranteed, but a real,
+  //   documented-if-unofficial pattern worth attempting.
+  // - Android: that same trick does not exist. Android's real equivalent
+  //   is a native Android Intent (action com.instagram.share.ADD_TO_STORY
+  //   with a content:// URI extra) -- something only native app code can
+  //   construct, not a URL scheme a browser can navigate to. Attempting
+  //   the iOS-style deep link on Android does nothing but burn the
+  //   timeout window. Android's actual working mechanism for handing a
+  //   file to another app is the Web Share API's native share sheet,
+  //   which Android supports well (better than iOS does, in practice) --
+  //   so Android goes straight there instead of via a dead-end scheme.
   const tryInstagramStoriesDeepLink = async (blob: Blob): Promise<boolean> => {
-    if (!INSTAGRAM_APP_ID || !isMobileDevice()) return false;
+    if (!INSTAGRAM_APP_ID || !isIOS()) return false;
 
     try {
       await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
@@ -134,11 +135,8 @@ export function ShareActions({ slug }: { slug: string }) {
   };
 
   const shareToInstagram = async () => {
-    // Try the prefetched blob FIRST, synchronously relative to the click
-    // (see the big comment above) -- only fetch on demand as a fallback
-    // if the mount-time prefetch hasn't landed yet, in which case the
-    // deep link is already off the table for this click and we go
-    // straight to the download/share-sheet path below anyway.
+    // iOS only -- see the big comment above for why Android skips this
+    // entirely and goes straight to the Web Share API below.
     if (cardBlobRef.current) {
       if (await tryInstagramStoriesDeepLink(cardBlobRef.current)) return;
     }
@@ -153,6 +151,8 @@ export function ShareActions({ slug }: { slug: string }) {
       }
     }
 
+    // Android's real mechanism: the native share sheet, with Instagram as
+    // one of the real options the user picks, image already attached.
     const file = new File([blob], "roast-card.png", { type: "image/png" });
     if (navigator.canShare?.({ files: [file] })) {
       try {
@@ -186,7 +186,7 @@ export function ShareActions({ slug }: { slug: string }) {
 
   return (
     <div className="flex flex-col items-center gap-2">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-center gap-2">
         <button onClick={copyLink} title="Copy link" aria-label="Copy link" className={iconButtonClass}>
           {copied ? <Check size={16} className="text-brand-lime" /> : <Link2 size={16} />}
         </button>
@@ -198,6 +198,9 @@ export function ShareActions({ slug }: { slug: string }) {
         </button>
         <button onClick={openWhatsApp} title="Share on WhatsApp" aria-label="Share on WhatsApp" className={iconButtonClass}>
           <WhatsAppLogo size={16} />
+        </button>
+        <button onClick={openReddit} title="Share on Reddit" aria-label="Share on Reddit" className={iconButtonClass}>
+          <RedditLogo size={16} />
         </button>
         <button
           onClick={shareToInstagram}
