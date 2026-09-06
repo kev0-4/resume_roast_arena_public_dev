@@ -212,6 +212,58 @@ async def get_session_by_slug(db: AsyncSession, slug: str) -> SessionModel | Non
     return result.scalar_one_or_none()
 
 
+async def get_user_sessions(
+    db: AsyncSession, *, user_id: str | uuid.UUID, limit: int = 20, offset: int = 0
+) -> tuple[list[dict], int]:
+    """
+    A signed-in user's own roast history -- every session they've ever
+    started, most recent first, regardless of status. Deliberately not
+    scoped to the leaderboard-eligible subset (_leaderboard_eligible_clause)
+    the way get_leaderboard/get_user_leaderboard_position are: a history
+    page is exactly the place a user *should* be able to see an
+    in-progress or FAILED session too, not just the ones that made it all
+    the way to a public roast card.
+
+    Selects individual columns rather than whole SessionModel rows, same
+    reasoning as get_leaderboard: sidesteps the identity-map gotcha
+    documented throughout this codebase's tests.
+    """
+    count_stmt = select(func.count()).select_from(SessionModel).where(SessionModel.user_id == user_id)
+    total = (await db.execute(count_stmt)).scalar_one()
+
+    rows_stmt = (
+        select(
+            SessionModel.id,
+            SessionModel.status,
+            SessionModel.slug,
+            SessionModel.composite_score,
+            SessionModel.stamp,
+            SessionModel.error_code,
+            SessionModel.error_message,
+            SessionModel.created_at,
+        )
+        .where(SessionModel.user_id == user_id)
+        .order_by(SessionModel.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    result = await db.execute(rows_stmt)
+    rows = [
+        {
+            "id": row.id,
+            "status": row.status,
+            "slug": row.slug,
+            "composite_score": row.composite_score,
+            "stamp": row.stamp,
+            "error_code": row.error_code,
+            "error_message": row.error_message,
+            "created_at": row.created_at,
+        }
+        for row in result.all()
+    ]
+    return rows, total
+
+
 ALLOWED_TRANSITIONS = {
     JobStatusEnum.UPLOADED: {JobStatusEnum.QUEUED, JobStatusEnum.FAILED},
     JobStatusEnum.QUEUED: {JobStatusEnum.PROCESSING, JobStatusEnum.FAILED},

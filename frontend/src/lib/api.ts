@@ -241,3 +241,36 @@ export async function getMyLeaderboardPosition(idToken: string): Promise<MyLeade
   }
   return resp.json();
 }
+
+export interface MySession {
+  session_id: string;
+  status: SessionStatus;
+  slug: string | null;
+  composite_score: number | null;
+  stamp: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface MySessionsResponse {
+  total: number;
+  limit: number;
+  offset: number;
+  sessions: MySession[];
+}
+
+// A signed-in user's own roast history -- every session they've ever
+// started, unlike the leaderboard/rank endpoints which only ever surface
+// finished, shareable roasts. Backend: GET /api/v1/sessions/me.
+export async function getMySessions(idToken: string, limit: number, offset: number): Promise<MySessionsResponse> {
+  const resp = await fetch(`${API_BASE_URL}/api/v1/sessions/me?limit=${limit}&offset=${offset}`, {
+    headers: { Authorization: `Bearer ${idToken}` },
+    cache: "no-store",
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({ detail: resp.statusText }));
+    throw new ApiError(body.detail ?? "Could not fetch your roast history", resp.status);
+  }
+  return resp.json();
+}

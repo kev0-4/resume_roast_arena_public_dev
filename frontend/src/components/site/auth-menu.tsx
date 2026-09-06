@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { GitHubLogo, GoogleLogo } from "@/components/icons/social-icons";
 
@@ -102,6 +103,13 @@ export function AuthMenu() {
       </button>
       {open && (
         <div className="absolute right-0 top-full z-30 mt-2 w-48 rounded-2xl border border-black/10 bg-white p-2 shadow-xl">
+          <Link
+            href="/dashboard"
+            onClick={() => setOpen(false)}
+            className="block w-full rounded-xl px-3 py-2.5 text-left font-mono text-sm font-semibold text-black transition-colors hover:bg-black/5"
+          >
+            My Roasts
+          </Link>
           <button
             onClick={async () => {
               setOpen(false);
