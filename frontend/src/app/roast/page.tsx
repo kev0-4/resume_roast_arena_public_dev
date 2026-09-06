@@ -2,10 +2,12 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, FileText, LogIn, RefreshCcw, UploadCloud, X } from "lucide-react";
+import { ArrowRight, FileText, LogOut, RefreshCcw, UploadCloud, X } from "lucide-react";
 import { ArrowAccentLeft, ArrowDarkDown } from "@/components/landing/accents";
+import { GitHubLogo, GoogleLogo } from "@/components/icons/social-icons";
 import { Navbar } from "@/components/site/navbar";
 import { stackedShadow } from "@/lib/text-shadow";
+import { useAuth } from "@/lib/auth-context";
 import { ApiError, ingestResume } from "@/lib/api";
 
 const HEADLINE_SHADOW = stackedShadow(10, "#001A99");
@@ -29,9 +31,10 @@ function formatFileSize(bytes: number): string {
 
 export default function RoastPage() {
   const router = useRouter();
+  const { firebaseUser, backendUser, signInWithGoogle, signInWithGithub, signOutUser, getIdToken } = useAuth();
   const [file, setFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
-  const [mode, setMode] = useState<"anonymous" | "signin">("anonymous");
+  const [showSignInOptions, setShowSignInOptions] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -62,11 +65,13 @@ export default function RoastPage() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      // `mode` (anonymous vs. sign-in) has no effect on the request yet --
-      // Firebase auth isn't wired into the frontend yet (later phase), so
-      // every submission goes through as anonymous regardless of the
-      // toggle. The backend already supports both paths either way.
-      const result = await ingestResume(file);
+      // Attaches the real Firebase ID token when signed in -- when not,
+      // idToken is null and the request goes through anonymous, exactly
+      // like before auth existed. The backend resolves the user from
+      // this header itself (get_current_user_optional), so there's
+      // nothing else this page needs to do differently either way.
+      const idToken = await getIdToken();
+      const result = await ingestResume(file, idToken);
       router.push(`/roast/${result.session_id}`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 429) {
@@ -212,27 +217,53 @@ export default function RoastPage() {
               <p className="max-w-sm text-center font-mono text-xs font-semibold text-brand-lime">{submitError}</p>
             )}
 
-            <div className="flex items-center gap-1 rounded-full border border-white/25 bg-white/10 p-1">
-              <button
-                onClick={() => setMode("anonymous")}
-                className={[
-                  "rounded-full px-4 py-1.5 text-xs font-bold transition-colors",
-                  mode === "anonymous" ? "bg-white text-brand-blue" : "text-white/70 hover:text-white",
-                ].join(" ")}
-              >
-                Continue anonymously
-              </button>
-              <button
-                onClick={() => setMode("signin")}
-                className={[
-                  "flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-bold transition-colors",
-                  mode === "signin" ? "bg-white text-brand-blue" : "text-white/70 hover:text-white",
-                ].join(" ")}
-              >
-                <LogIn size={12} />
-                Sign in for extra features
-              </button>
-            </div>
+            {firebaseUser ? (
+              <div className="flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-4 py-1.5 text-xs font-bold text-white">
+                Roasting as {backendUser?.display_name || firebaseUser.displayName || "you"}
+                <button
+                  onClick={signOutUser}
+                  aria-label="Sign out"
+                  className="text-white/60 transition-colors hover:text-white"
+                >
+                  <LogOut size={12} />
+                </button>
+              </div>
+            ) : showSignInOptions ? (
+              <div className="flex items-center gap-2 rounded-full border border-white/25 bg-white/10 p-1">
+                <button
+                  onClick={signInWithGoogle}
+                  className="flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-brand-blue transition-colors hover:brightness-95"
+                >
+                  <GoogleLogo size={12} />
+                  Google
+                </button>
+                <button
+                  onClick={signInWithGithub}
+                  className="flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-brand-blue transition-colors hover:brightness-95"
+                >
+                  <GitHubLogo size={12} />
+                  GitHub
+                </button>
+                <button
+                  onClick={() => setShowSignInOptions(false)}
+                  className="px-2 text-xs font-bold text-white/60 transition-colors hover:text-white"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1 rounded-full border border-white/25 bg-white/10 p-1">
+                <span className="rounded-full bg-white px-4 py-1.5 text-xs font-bold text-brand-blue">
+                  Continue anonymously
+                </span>
+                <button
+                  onClick={() => setShowSignInOptions(true)}
+                  className="rounded-full px-4 py-1.5 text-xs font-bold text-white/70 transition-colors hover:text-white"
+                >
+                  Sign in for extra features
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </main>

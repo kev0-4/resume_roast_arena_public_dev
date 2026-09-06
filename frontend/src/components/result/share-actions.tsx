@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Download, Link2 } from "lucide-react";
 import { publicRoastCardUrl } from "@/lib/api";
-import { InstagramLogo, LinkedInLogo, RedditLogo, WhatsAppLogo, XLogo } from "./social-icons";
+import { InstagramLogo, LinkedInLogo, RedditLogo, WhatsAppLogo, XLogo } from "@/components/icons/social-icons";
 
 const SHARE_TEXT = "I just got my resume roasted. It did not go well.";
 const INSTAGRAM_APP_ID = process.env.NEXT_PUBLIC_INSTAGRAM_APP_ID;

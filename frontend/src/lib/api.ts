@@ -64,14 +64,17 @@ function getIdempotencyKey(): string {
   return key;
 }
 
-export async function ingestResume(file: File): Promise<IngestResponse> {
+export async function ingestResume(file: File, idToken?: string | null): Promise<IngestResponse> {
   const formData = new FormData();
   formData.append("file", file);
+
+  const headers: Record<string, string> = { "X-Idempotency-Key": getIdempotencyKey() };
+  if (idToken) headers["Authorization"] = `Bearer ${idToken}`;
 
   const resp = await fetch(`${API_BASE_URL}/api/v1/ingest`, {
     method: "POST",
     body: formData,
-    headers: { "X-Idempotency-Key": getIdempotencyKey() },
+    headers,
   });
 
   if (resp.status === 429) {
@@ -97,6 +100,40 @@ export async function getSessionStatus(sessionId: string): Promise<SessionStatus
     throw new ApiError(body.detail ?? "Could not fetch session status", resp.status);
   }
   return resp.json();
+}
+
+export interface BackendUser {
+  id: string;
+  firebase_uid: string;
+  display_name: string | null;
+  email: string | null;
+  photo_url: string | null;
+  role: string;
+  is_anonymous: boolean;
+  created_at: string | null;
+  last_login_at: string | null;
+}
+
+// Called once right after Firebase sign-in with the real ID token. Not
+// strictly required before other authenticated-optional routes work --
+// /ingest resolves the backend user itself from any valid Bearer token
+// (backend/src/dependencies/auth.py get_current_user_optional) -- but
+// calling this immediately serves two real purposes: it's an early check
+// that the token actually verifies against the backend's Firebase project
+// (surfaces a credential/project mismatch right away, not silently on
+// the next upload), and it hands back real profile info (display name,
+// photo) for the UI without waiting for that next request.
+export async function syncFirebaseAuth(idToken: string): Promise<BackendUser> {
+  const resp = await fetch(`${API_BASE_URL}/api/v1/auth/firebase`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({ detail: resp.statusText }));
+    throw new ApiError(body.detail ?? "Could not sync auth with backend", resp.status);
+  }
+  const data = await resp.json();
+  return data.user;
 }
 
 // The public roast-card PNG lives on the backend itself (GET /r/{slug}).

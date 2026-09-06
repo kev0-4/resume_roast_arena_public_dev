@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AuthMenu } from "./auth-menu";
 
 const NAV_LINKS = ["Leaderboard", "How it works", "Examples"];
 
@@ -28,9 +29,7 @@ export function Navbar() {
         ))}
       </div>
 
-      <button className="rounded-full border border-white px-6 py-2 text-xs font-semibold text-white transition-colors hover:bg-white hover:text-brand-blue md:text-sm">
-        Sign in
-      </button>
+      <AuthMenu />
     </nav>
   );
 }
