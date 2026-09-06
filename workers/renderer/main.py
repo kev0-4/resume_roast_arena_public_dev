@@ -26,6 +26,9 @@ import sys
 from pathlib import Path
 
 project_root = Path(__file__).resolve().parent.parent.parent
+backend_dir = project_root / "backend"
+
+sys.path.insert(0, str(backend_dir))  # backend/src/__init__.py does `from src...` (absolute), needs backend/ on sys.path
 sys.path.insert(0, str(project_root))
 
 import asyncio

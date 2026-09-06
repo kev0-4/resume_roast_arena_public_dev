@@ -15,6 +15,9 @@ REDIS_HOST = os.getenv("REDIS_HOST")
 REDIS_PORT = os.getenv("REDIS_PORT")
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
 REDIS_URL = os.getenv("REDIS_URL")
+# Local docker-compose Redis has no TLS; managed providers (Upstash, Azure
+# Cache for Redis) require it. Off by default so local dev is unaffected.
+REDIS_SSL = os.getenv("REDIS_SSL", "false").lower() == "true"
 
 
 AZURE_STORAGE_ACCOUNT = os.getenv("AZURE_STORAGE_ACCOUNT")
@@ -42,6 +45,15 @@ INGEST_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("INGEST_RATE_LIMIT_WINDOW_SECON
 RAW_UPLOAD_TTL_HOURS = int(os.getenv("RAW_UPLOAD_TTL_HOURS", "24"))
 ANONYMOUS_ROAST_TTL_DAYS = int(os.getenv("ANONYMOUS_ROAST_TTL_DAYS", "30"))
 CLEANUP_SWEEP_INTERVAL_SECONDS = int(os.getenv("CLEANUP_SWEEP_INTERVAL_SECONDS", "3600"))
+
+# Comma-separated list of origins allowed to call this API from a browser.
+# Defaults to the Next.js dev server -- no frontend existed when this API
+# was first built, so nothing set this before now.
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+    if origin.strip()
+]
 
 if None in VALUES:
     print("Warning: one or more variables not found in environment variables.")

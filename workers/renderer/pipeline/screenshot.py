@@ -12,14 +12,15 @@ every consumer in this codebase processes one message at a time --
 MAX_CONCURRENT_MESSAGES=1 -- so the asyncio.Lock below is cheap insurance
 against a future concurrency bump, not something exercised today).
 
-Launches via channel="chrome" to reuse the already-installed system Chrome
-and skip the ~300MB `playwright install chromium` download during local
-dev. NOTE: before containerizing/deploying to Azure, switch this to
-`playwright install chromium` (pinned to the installed playwright package
-version) instead -- channel="chrome" drifts independently via apt/whatever
-the deploy image's package manager resolves at build time, which isn't
-reproducible, and a minimal Docker base image won't have Chrome
-preinstalled anyway.
+Launches Playwright's own managed Chromium (`chromium.launch()`, no
+`channel=` override) -- pinned to whatever version the installed
+`playwright` package resolves, reproducible via `playwright install
+chromium` in the Dockerfile. Previously used channel="chrome" to reuse
+an already-installed system Chrome and skip the ~300MB download during
+local dev; switched for the real Azure deployment, where the container
+image has no system Chrome preinstalled and channel="chrome" would just
+fail outright, and where an implicit dependency on whatever Chrome apt
+happens to resolve isn't reproducible anyway.
 """
 
 import asyncio
@@ -40,7 +41,7 @@ async def _launch_browser() -> Browser:
     global _playwright
     if _playwright is None:
         _playwright = await async_playwright().start()
-    return await _playwright.chromium.launch(channel="chrome")
+    return await _playwright.chromium.launch()
 
 
 async def _get_browser() -> Browser:

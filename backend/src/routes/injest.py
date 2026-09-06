@@ -1,13 +1,14 @@
-from fastapi import APIRouter, Response, status, Depends, Request, HTTPException, UploadFile, File, Header
+from fastapi import APIRouter, Response, status, Depends, Request, HTTPException, UploadFile, File, Header, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from ..dependencies.auth import get_current_user_optional
+from ..dependencies.auth import get_current_user_optional, get_current_user
 from ..dependencies.rate_limit import check_ingest_rate_limit
 from ..utils.telemetry import emit_event, with_trace
 from ..services.blob import upload_raw, delete_raw, read_blob, blob_exists, initialize_blob_storage
 from ..services.service_bus import enqueue_extraction
-from ..services.session_service import create_sessions, get_session, update_session_status, update_session_raw_blob_path
+from ..services.session_service import create_sessions, get_session, update_session_status, update_session_raw_blob_path, get_user_sessions, get_user_stats
 from ..services.idempotency_service import get_session_by_key, create_key_mapping
 from ..services.user_service import create_anonymous_user
+from ..db.users import Users
 import logging
 import uuid
 from typing import Optional
@@ -197,6 +198,45 @@ async def injest_resume(file: UploadFile = File(...),
     }
 
 
+@injest_router.get("/sessions/me", status_code=status.HTTP_200_OK)
+async def get_my_sessions(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db_sqlalchemy),
+    curr_user: Users = Depends(get_current_user),
+):
+    """
+    The signed-in caller's own roast history, most recent first --
+    every session they've ever started, regardless of status (unlike
+    the leaderboard, which only ever shows finished, shareable roasts).
+    Registered ABOVE /sessions/{session_id} deliberately: Starlette
+    matches routes in registration order, and {session_id} is typed
+    loosely enough (uuid.UUID | str) that "me" would otherwise match it
+    as a literal string session_id instead of hitting this route at all.
+    """
+    rows, total = await get_user_sessions(db=db, user_id=curr_user.id, limit=limit, offset=offset)
+    stats = await get_user_stats(db=db, user_id=curr_user.id)
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "stats": stats,
+        "sessions": [
+            {
+                "session_id": str(row["id"]),
+                "status": row["status"],
+                "slug": row["slug"],
+                "composite_score": row["composite_score"],
+                "stamp": row["stamp"],
+                "error_code": row["error_code"],
+                "error_message": row["error_message"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ],
+    }
+
+
 @injest_router.get("/sessions/{session_id}", status_code=status.HTTP_200_OK)
 async def get_injest_resume(session_id: uuid.UUID | str, db=Depends(get_db_sqlalchemy)):
     session = await get_session(
@@ -231,6 +271,9 @@ async def get_injest_resume(session_id: uuid.UUID | str, db=Depends(get_db_sqlal
         "status": session.status,
         "created_at": session.created_at,
         "updated_at": session.updated_at,
+        "slug": session.slug,
+        "error_code": session.error_code,
+        "error_message": session.error_message,
     }
 
 

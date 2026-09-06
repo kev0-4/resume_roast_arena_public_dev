@@ -5,7 +5,7 @@ also has their supporting util functions, to check connectivity with postgres, r
 from fastapi import APIRouter, Response, status
 import psycopg2
 from src.config import POSTGRES_DB, POSTGRES_HOST, POSTGRES_PASSWORD, POSTGRES_PORT, POSTGRES_USER
-from src.config import REDIS_HOST, REDIS_PORT, REDIS_URL, REDIS_PASSWORD
+from src.config import REDIS_HOST, REDIS_PORT, REDIS_URL, REDIS_PASSWORD, REDIS_SSL
 from src.config import AZURE_BLOB_ENDPOINT, AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_CONNECTION_STRING, AZURE_STORAGE_KEY
 import time
 import redis
@@ -84,7 +84,8 @@ def redis_status():
         r = redis.StrictRedis(
             host=REDIS_HOST, port=REDIS_PORT,
             password=REDIS_PASSWORD if REDIS_PASSWORD else None,
-            socket_timeout=1
+            socket_timeout=1,
+            ssl=REDIS_SSL,
         )
         r.ping()
         process_time = time.perf_counter() - start_time

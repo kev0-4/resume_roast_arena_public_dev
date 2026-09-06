@@ -24,11 +24,25 @@ class LLMJobMessage(BaseModel):
     created_at: datetime
 
 
+class Highlight(BaseModel):
+    """
+    One quoted excerpt from the resume + a roast comment on it.
+
+    `quote` must be a verbatim substring of the anonymized resume text the
+    LLM was shown (enforced by validator.py's grounding check, not by this
+    schema) -- the whole point is that these are real words from the
+    resume, not the LLM's paraphrase or invention.
+    """
+    quote: str
+    comment: str
+
+
 class RoastResult(BaseModel):
     """Parsed output from the LLM."""
     verdict: str
     roast: str
     fixes: List[str]
+    highlights: List[Highlight] = []
 
 
 class RoastOutput(BaseModel):
@@ -39,6 +53,7 @@ class RoastOutput(BaseModel):
     verdict: str
     roast: str
     fixes: List[str]
+    highlights: List[Highlight] = []
 
     model: str
     usage: Dict[str, int]

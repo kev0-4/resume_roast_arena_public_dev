@@ -121,7 +121,7 @@ async def process_llm_job(
         # 6. Parse + validate output
         # ------------------------------------------------------------
         try:
-            roast_result = parse_roast_output(raw_text)
+            roast_result = parse_roast_output(raw_text, source_text=prompt)
         except ValueError as e:
             raise PermanentLLMError(f"Failed to parse LLM output: {e}")
         emit_event("llm.output_parsed", {"session_id": str(session_id), "status": "INFO"})
@@ -148,7 +148,19 @@ async def process_llm_job(
         emit_event("llm.roast_uploaded", {"session_id": str(session_id), "status": "INFO"})
 
         # ------------------------------------------------------------
-        # 8b. Enqueue render job
+        # 8b. Mark ROASTED -- BEFORE enqueueing, not after. Same real bug
+        # as workers/scoring/processor.py's identical reordering: the
+        # renderer is a separate process with its own DB connection and
+        # guards on session.status == ROASTED the moment it receives the
+        # message. Enqueueing before this commit lets a fast consumer
+        # read the still-ROASTING status and silently drop the job.
+        # ------------------------------------------------------------
+        await mark_roasted(db=db, session=session)
+        await db.commit()
+        emit_event("llm.marked_roasted", {"session_id": str(session_id), "status": "INFO"})
+
+        # ------------------------------------------------------------
+        # 9. Enqueue render job
         # ------------------------------------------------------------
         try:
             enqueue_render(
@@ -159,13 +171,6 @@ async def process_llm_job(
         except Exception as e:
             raise TransientLLMError(f"Failed to enqueue render job: {e}")
         emit_event("llm.render_job_enqueued", {"session_id": str(session_id), "status": "INFO"})
-
-        # ------------------------------------------------------------
-        # 9. Mark ROASTED
-        # ------------------------------------------------------------
-        await mark_roasted(db=db, session=session)
-        await db.commit()
-        emit_event("llm.marked_roasted", {"session_id": str(session_id), "status": "INFO"})
 
     # ----------------------------------------------------------------
     # Error handling

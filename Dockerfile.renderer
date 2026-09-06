@@ -1,0 +1,20 @@
+# Renderer worker only -- needs a real headless browser (Playwright +
+# Chromium) to screenshot the roast card, unlike every other worker.
+# Official Playwright-maintained base image, pinned to match
+# requirements.txt's playwright==1.62.0 exactly: browser + all its
+# system deps (fonts, codecs, etc.) come preinstalled and pre-tested
+# together, which is a lot more reliable than assembling the same apt
+# package list by hand on top of python:3.12-slim.
+FROM mcr.microsoft.com/playwright/python:v1.62.0-noble
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY backend/ backend/
+COPY workers/ workers/
+
+# No default CMD -- the renderer Container App supplies
+# `python -m workers.renderer.main` at deploy time, same convention as
+# the shared Dockerfile.
