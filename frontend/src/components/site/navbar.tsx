@@ -3,8 +3,7 @@ import { AuthMenu } from "./auth-menu";
 
 const NAV_LINKS = [
   { label: "Leaderboard", href: "/leaderboard" },
-  { label: "How it works", href: "#" },
-  { label: "Examples", href: "#" },
+  { label: "How it works", href: "/how-it-works" },
 ];
 
 // Shared across every page -- same nav links everywhere rather than each
@@ -12,14 +11,23 @@ const NAV_LINKS = [
 export function Navbar() {
   return (
     <nav className="relative z-20 mx-auto flex w-full max-w-[1440px] items-center justify-between px-6 py-6 md:px-10 md:py-8">
-      <Link href="/" className="flex items-center gap-1">
-        <div className="rounded-2xl rounded-bl-sm bg-white px-3 py-1.5 font-display text-xs tracking-tight text-black shadow-sm md:text-sm">
+      <div className="flex items-center gap-1">
+        {/* Brand half -- home. */}
+        <Link
+          href="/"
+          className="rounded-2xl rounded-bl-sm bg-white px-3 py-1.5 font-display text-xs tracking-tight text-black shadow-sm transition-transform hover:-translate-y-0.5 md:text-sm"
+        >
           RESUME
-        </div>
-        <div className="rounded-full border-[1.5px] border-white bg-brand-lime px-3 py-1.5 font-display text-xs tracking-tight text-black shadow-sm md:text-sm">
+        </Link>
+        {/* Was visually a second half of the same logo but read as its own
+            dead button -- now a real CTA straight to the upload page. */}
+        <Link
+          href="/roast"
+          className="rounded-full border-[1.5px] border-white bg-brand-lime px-3 py-1.5 font-display text-xs tracking-tight text-black shadow-sm transition-transform hover:-translate-y-0.5 md:text-sm"
+        >
           ROAST
-        </div>
-      </Link>
+        </Link>
+      </div>
 
       <div className="hidden items-center space-x-2 md:flex">
         {NAV_LINKS.map((item) => (
