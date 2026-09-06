@@ -8,8 +8,12 @@ import { getMyLeaderboardPosition, type MyLeaderboardPosition } from "@/lib/api"
 
 // Only meaningful for a signed-in user (the leaderboard itself is public/
 // anonymous-friendly, but "which entry is mine" needs a real identity) --
-// renders nothing at all while signed out rather than a sign-in prompt,
-// so it doesn't compete with the page's own header for attention.
+// renders nothing at all while signed out or still loading. Once signed
+// in, always renders a card -- either the real position, or (no eligible
+// roast yet) a "--" placeholder that doubles as a CTA to go get roasted,
+// rather than disappearing entirely. A card that's just gone reads as
+// broken; a card that says "you haven't been roasted yet" reads as
+// intentional.
 export function YourRankBanner() {
   const { firebaseUser, getIdToken } = useAuth();
   const [position, setPosition] = useState<MyLeaderboardPosition | null>(null);
@@ -30,8 +34,9 @@ export function YourRankBanner() {
         const result = await getMyLeaderboardPosition(token);
         if (!cancelled) setPosition(result);
       } catch {
-        // best-effort -- a failed lookup just means no banner, not a
-        // broken page
+        // best-effort -- a failed lookup just means no real position to
+        // show, falls back to the placeholder card below, not a broken
+        // page
       } finally {
         if (!cancelled) setLoaded(true);
       }
@@ -41,7 +46,22 @@ export function YourRankBanner() {
     };
   }, [firebaseUser, getIdToken]);
 
-  if (!firebaseUser || !loaded || !position) return null;
+  if (!firebaseUser || !loaded) return null;
+
+  if (!position) {
+    return (
+      <Link
+        href="/roast"
+        className="flex w-full max-w-2xl items-center gap-4 rounded-2xl border-[3px] border-black bg-white/90 px-5 py-3 shadow-[5px_5px_0_#000] transition-transform hover:-translate-y-0.5"
+      >
+        <span className="font-mono text-[10px] font-black uppercase tracking-wide text-black/40">Your rank</span>
+        <span className="font-display text-lg text-black/30">--</span>
+        <span className="ml-auto font-mono text-xs font-semibold text-black/50">
+          Roast your resume to get on the board
+        </span>
+      </Link>
+    );
+  }
 
   return (
     <Link
