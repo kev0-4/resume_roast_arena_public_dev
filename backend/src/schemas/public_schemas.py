@@ -27,6 +27,7 @@ class RoastAnalysisResponse(BaseModel):
 
     summary: ScoreSummary
     metrics: dict
+    subscores: dict[str, int]
 
     verdict: str
     roast: str

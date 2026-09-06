@@ -164,6 +164,11 @@ export interface RoastAnalysis {
   total_ranked: number;
   summary: ScoreSummary;
   metrics: Record<string, number | string | null>;
+  // Per-category 0-100 scores (Structure, Contact & Links, Experience,
+  // Clarity, Conciseness, Skills) for the radar chart -- real deductions
+  // from this session's own rule-engine issues, not invented numbers.
+  // See backend/src/routes/public.py:_compute_subscores.
+  subscores: Record<string, number>;
   verdict: string;
   roast: string;
   fixes: string[];

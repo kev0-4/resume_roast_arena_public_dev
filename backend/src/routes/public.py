@@ -77,6 +77,59 @@ async def _resolve_live_session(slug: str, db: AsyncSession) -> SessionModel:
     return session
 
 
+_SEVERITY_WEIGHT = {"critical": 40, "high": 25, "medium": 15, "low": 8}
+
+# Every Issue.code the rule engine can produce (workers/scoring/pipeline/
+# rules.py), partitioned into exactly one radar-chart axis each -- no code
+# appears in two categories, and every code in rules.py appears somewhere
+# here (kept in sync manually; there's no shared import boundary between
+# backend/ and workers/, same reason _compute_stamp below is duplicated
+# rather than imported).
+_SUBSCORE_CATEGORIES = {
+    "Structure": {"NO_EXPERIENCE", "NO_PROJECTS", "NO_SUMMARY"},
+    # "Contact" not "Contact & Links" -- single-word labels are what fit
+    # cleanly around the result page's radar chart without the axis
+    # labels colliding into each other or clipping at the chart's edge.
+    "Contact": {"NO_CONTACT_INFO", "NO_PROFESSIONAL_LINKS"},
+    "Experience": {"NO_DATES_IN_EXPERIENCE", "NO_ACTION_VERBS", "PASSIVE_VOICE"},
+    "Clarity": {"FIRST_PERSON_USAGE", "LONG_SENTENCES", "LOW_VOCABULARY_VARIETY"},
+    "Conciseness": {"RESUME_TOO_SHORT", "RESUME_TOO_LONG"},
+}
+# "Skills" has no issue code at all in rules.py (only the HAS_SKILLS
+# strength) -- there's no rule that flags a *missing* skills section, so
+# it can't be scored by deduction like the others. Handled separately
+# below rather than forced into this table.
+_SKILLS_STRENGTH_CODE = "HAS_SKILLS"
+_NO_SKILLS_SCORE = 55  # deliberately not 0 or 100 -- see the docstring below
+
+
+def _compute_subscores(scored: dict) -> dict[str, int]:
+    """
+    Real per-category subscores for the result page's radar chart, built
+    entirely from this session's actual rule-engine output (scored.json's
+    `issues`/`strengths` lists, workers/scoring/pipeline/rules.py) -- not
+    invented numbers, and not a second LLM call. Each of the 5 deduction-
+    based categories starts at 100 and loses points per issue that falls
+    in it, weighted by severity (_SEVERITY_WEIGHT), floored at 0. "Skills"
+    is the one category with no corresponding issue rule to deduct from
+    (rules.py only ever produces the HAS_SKILLS *strength*, never a
+    "missing skills" issue) -- scored as 100 if that strength fired, else
+    a flat 55, since giving 0 would overstate a penalty this codebase's
+    own rule engine doesn't actually claim to detect.
+    """
+    issue_codes = [issue["code"] for issue in scored.get("issues", [])]
+    issue_severities = {issue["code"]: issue["severity"] for issue in scored.get("issues", [])}
+    strength_codes = {strength["code"] for strength in scored.get("strengths", [])}
+
+    subscores: dict[str, int] = {}
+    for category, codes in _SUBSCORE_CATEGORIES.items():
+        deduction = sum(_SEVERITY_WEIGHT.get(issue_severities[code], 0) for code in issue_codes if code in codes)
+        subscores[category] = max(0, 100 - deduction)
+
+    subscores["Skills"] = 100 if _SKILLS_STRENGTH_CODE in strength_codes else _NO_SKILLS_SCORE
+    return subscores
+
+
 def _compute_stamp(summary: dict) -> str:
     """
     Mirrors workers/renderer/pipeline/card_data.py's compute_stamp exactly
@@ -137,6 +190,7 @@ async def get_public_roast_analysis(slug: str, db: AsyncSession = Depends(get_db
         rank=rank,
         total_ranked=total_ranked,
         summary=summary,
+        subscores=_compute_subscores(scored),
         metrics=scored.get("metrics", {}),
         verdict=roast["verdict"],
         roast=roast["roast"],

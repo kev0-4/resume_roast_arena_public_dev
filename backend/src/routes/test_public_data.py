@@ -56,6 +56,14 @@ SCORED_FIXTURE = {
         "total_strengths": 2,
     },
     "metrics": {"word_count": 312, "avg_sentence_length": 18.4, "lexical_diversity": 0.52},
+    "issues": [
+        {"code": "NO_PROJECTS", "message": "No projects section found", "severity": "high"},
+        {"code": "FIRST_PERSON_USAGE", "message": "Uses first-person language", "severity": "medium"},
+    ],
+    "strengths": [
+        {"code": "HAS_EXPERIENCE", "message": "Includes experience section"},
+        {"code": "HAS_SKILLS", "message": "Includes skills section"},
+    ],
 }
 
 ROAST_FIXTURE = {
@@ -155,6 +163,15 @@ class TestPublicDataRoute:
         assert body["total_ranked"] >= 1
         assert body["summary"]["total_issues"] == 2
         assert body["metrics"]["word_count"] == 312
+        # NO_PROJECTS (high, -25) -> Structure=75; FIRST_PERSON_USAGE
+        # (medium, -15) -> Clarity=85; everything else untouched by the
+        # fixture's issues, Skills=100 from the HAS_SKILLS strength
+        assert body["subscores"]["Structure"] == 75
+        assert body["subscores"]["Clarity"] == 85
+        assert body["subscores"]["Contact"] == 100
+        assert body["subscores"]["Experience"] == 100
+        assert body["subscores"]["Conciseness"] == 100
+        assert body["subscores"]["Skills"] == 100
         assert body["verdict"] == "Competent but forgettable."
         assert body["fixes"] == ["Quantify your impact.", "Cut the buzzwords."]
         assert body["highlights"][0]["quote"] == "team player"
@@ -186,3 +203,56 @@ class TestPublicDataRoute:
         with TestClient(app) as client:
             resp = client.get(f"/r/{slug}/data")
         assert resp.status_code == 410
+
+
+class TestComputeSubscores:
+    """
+    Unit tests against the pure function directly (no DB/blob involved) --
+    the route-level test above only exercises one fixed issue/strength
+    combination; these cover the parts of _compute_subscores that combo
+    doesn't reach: multiple issues compounding in one category, the floor
+    at 0, and the no-corresponding-issue Skills special case.
+    """
+
+    def test_multiple_issues_in_same_category_compound(self):
+        from backend.src.routes.public import _compute_subscores
+
+        scored = {
+            "issues": [
+                {"code": "NO_EXPERIENCE", "message": "x", "severity": "critical"},
+                {"code": "NO_PROJECTS", "message": "x", "severity": "high"},
+            ],
+            "strengths": [],
+        }
+        # both land in Structure: 100 - 40 (critical) - 25 (high) = 35
+        assert _compute_subscores(scored)["Structure"] == 35
+
+    def test_floors_at_zero_not_negative(self):
+        from backend.src.routes.public import _compute_subscores
+
+        scored = {
+            "issues": [
+                {"code": "NO_CONTACT_INFO", "message": "x", "severity": "critical"},
+                {"code": "NO_PROFESSIONAL_LINKS", "message": "x", "severity": "critical"},
+                {"code": "NO_PROFESSIONAL_LINKS", "message": "x", "severity": "critical"},
+            ],
+            "strengths": [],
+        }
+        # 40 + 40 + 40 = 120 raw deduction -- must clamp at 0, not go negative
+        assert _compute_subscores(scored)["Contact"] == 0
+
+    def test_skills_without_strength_gets_neutral_default_not_zero(self):
+        from backend.src.routes.public import _compute_subscores
+
+        scored = {"issues": [], "strengths": []}
+        result = _compute_subscores(scored)
+        assert result["Skills"] == 55
+        # every deduction-based category with zero issues stays at 100
+        assert result["Structure"] == 100
+        assert result["Contact"] == 100
+
+    def test_skills_with_strength_is_100(self):
+        from backend.src.routes.public import _compute_subscores
+
+        scored = {"issues": [], "strengths": [{"code": "HAS_SKILLS", "message": "x"}]}
+        assert _compute_subscores(scored)["Skills"] == 100

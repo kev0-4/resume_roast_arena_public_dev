@@ -6,6 +6,7 @@ import { Navbar } from "@/components/site/navbar";
 import { ScoreBanner } from "@/components/result/score-banner";
 import { ShareActions } from "@/components/result/share-actions";
 import { SeverityChart } from "@/components/result/severity-chart";
+import { RadarChart } from "@/components/result/radar-chart";
 import { MetricsStrip } from "@/components/result/metrics-strip";
 import { RoastPanel } from "@/components/result/roast-panel";
 import { HighlightsList } from "@/components/result/highlights-list";
@@ -89,6 +90,7 @@ export default async function ResultPage({ params }: PageParams) {
       <section className="relative z-20 mt-auto w-full rounded-t-[2.5rem] bg-white px-6 py-12 text-black shadow-[0_-20px_50px_rgba(0,0,0,0.2)] md:rounded-t-[3.5rem] md:px-10 md:py-16">
         <div className="mx-auto flex max-w-4xl flex-col gap-10">
           <SeverityChart summary={data.summary} />
+          <RadarChart subscores={data.subscores} />
           <MetricsStrip metrics={data.metrics} />
           <RoastPanel verdict={data.verdict} roast={data.roast} />
           <HighlightsList highlights={data.highlights} />
