@@ -5,7 +5,7 @@ from ..dependencies.rate_limit import check_ingest_rate_limit
 from ..utils.telemetry import emit_event, with_trace
 from ..services.blob import upload_raw, delete_raw, read_blob, blob_exists, initialize_blob_storage
 from ..services.service_bus import enqueue_extraction
-from ..services.session_service import create_sessions, get_session, update_session_status, update_session_raw_blob_path, get_user_sessions
+from ..services.session_service import create_sessions, get_session, update_session_status, update_session_raw_blob_path, get_user_sessions, get_user_stats
 from ..services.idempotency_service import get_session_by_key, create_key_mapping
 from ..services.user_service import create_anonymous_user
 from ..db.users import Users
@@ -215,10 +215,12 @@ async def get_my_sessions(
     as a literal string session_id instead of hitting this route at all.
     """
     rows, total = await get_user_sessions(db=db, user_id=curr_user.id, limit=limit, offset=offset)
+    stats = await get_user_stats(db=db, user_id=curr_user.id)
     return {
         "total": total,
         "limit": limit,
         "offset": offset,
+        "stats": stats,
         "sessions": [
             {
                 "session_id": str(row["id"]),

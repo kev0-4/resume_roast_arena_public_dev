@@ -197,3 +197,62 @@ def test_pagination_limit_and_offset():
     ids1 = {s["session_id"] for s in page1["sessions"]}
     ids2 = {s["session_id"] for s in page2["sessions"]}
     assert ids1.isdisjoint(ids2)
+
+
+def test_stats_reflect_only_scored_sessions():
+    holder = {}
+
+    async def setup():
+        async with AsyncSessionLocal() as db:
+            user = await _make_user(db, f"stats-{uuid.uuid4().hex[:6]}")
+            user_id = user.id
+
+            for score in (40, 80, 60):
+                s = await create_sessions(user_id=user_id, db=db)
+                s_id = s.id
+                s = await get_session(db=db, session_id=s_id)
+                s.status = "DONE"
+                s.composite_score = score
+                db.add(s)
+                await db.commit()
+
+            # an UPLOADED session with no score at all -- must not count
+            # toward total_roasts or skew the average
+            await create_sessions(user_id=user_id, db=db)
+
+            holder["user_id"] = user_id
+
+    _run(setup)
+
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: _override_with(holder["user_id"])
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/sessions/me", params={"limit": 100})
+
+    assert resp.status_code == 200
+    stats = resp.json()["stats"]
+    assert stats["total_roasts"] == 3
+    assert stats["best_score"] == 80
+    assert stats["average_score"] == 60  # (40 + 80 + 60) / 3
+
+
+def test_stats_are_null_when_no_scored_sessions():
+    holder = {}
+
+    async def setup():
+        async with AsyncSessionLocal() as db:
+            user = await _make_user(db, f"stats-none-{uuid.uuid4().hex[:6]}")
+            holder["user_id"] = user.id
+
+    _run(setup)
+
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: _override_with(holder["user_id"])
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/sessions/me")
+
+    assert resp.status_code == 200
+    stats = resp.json()["stats"]
+    assert stats["total_roasts"] == 0
+    assert stats["best_score"] is None
+    assert stats["average_score"] is None

@@ -17,13 +17,20 @@ const TIER_STYLE: Record<string, string> = {
   ROASTED: "bg-tier-roasted text-white",
 };
 
-export function StampBadge({ stamp, className = "" }: { stamp: string | null; className?: string }) {
+export function StampBadge({
+  stamp,
+  size = "sm",
+  className = "",
+}: {
+  stamp: string | null;
+  size?: "sm" | "lg";
+  className?: string;
+}) {
   if (!stamp) return null;
   const colors = TIER_STYLE[stamp] ?? "bg-brand-lime text-black";
+  const sizing = size === "lg" ? "px-3 py-1.5 text-xs" : "px-2.5 py-1 text-[10px]";
   return (
-    <span
-      className={`inline-flex items-center rounded-lg border-2 border-black px-2.5 py-1 font-display text-[10px] uppercase tracking-wide ${colors} ${className}`}
-    >
+    <span className={`inline-flex items-center rounded-lg border-2 border-black font-display uppercase tracking-wide ${sizing} ${colors} ${className}`}>
       {STAMP_COPY[stamp] ?? stamp}
     </span>
   );

@@ -253,10 +253,17 @@ export interface MySession {
   created_at: string;
 }
 
+export interface MyStats {
+  total_roasts: number;
+  best_score: number | null;
+  average_score: number | null;
+}
+
 export interface MySessionsResponse {
   total: number;
   limit: number;
   offset: number;
+  stats: MyStats;
   sessions: MySession[];
 }
 

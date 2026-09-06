@@ -264,6 +264,29 @@ async def get_user_sessions(
     return rows, total
 
 
+async def get_user_stats(db: AsyncSession, *, user_id: str | uuid.UUID) -> dict:
+    """
+    Real aggregate stats for the dashboard's KPI row (best/average score) --
+    one SQL query (COUNT/MAX/AVG), not something computed client-side from
+    whatever page of history happens to be loaded. Scoped to sessions with
+    a real composite_score (i.e. DONE) the same way "roasts" is understood
+    everywhere else in this app -- an UPLOADED or FAILED session was never
+    actually scored, so it shouldn't count toward "how many roasts" or drag
+    the average down/up.
+    """
+    stmt = select(
+        func.count(SessionModel.composite_score),
+        func.max(SessionModel.composite_score),
+        func.avg(SessionModel.composite_score),
+    ).where(SessionModel.user_id == user_id, SessionModel.composite_score.isnot(None))
+    total_roasts, best_score, average_score = (await db.execute(stmt)).one()
+    return {
+        "total_roasts": total_roasts or 0,
+        "best_score": best_score,
+        "average_score": round(average_score) if average_score is not None else None,
+    }
+
+
 ALLOWED_TRANSITIONS = {
     JobStatusEnum.UPLOADED: {JobStatusEnum.QUEUED, JobStatusEnum.FAILED},
     JobStatusEnum.QUEUED: {JobStatusEnum.PROCESSING, JobStatusEnum.FAILED},
