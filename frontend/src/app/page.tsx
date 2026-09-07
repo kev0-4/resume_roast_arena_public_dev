@@ -21,10 +21,19 @@ export default function Home() {
       {/* Hero */}
       <main className="relative z-10 mx-auto flex w-full max-w-[1440px] flex-1 flex-col items-center justify-center px-4 pb-32 pt-8 md:pb-48 md:pt-12">
         <div className="relative mx-auto mb-16 mt-4 flex w-full max-w-5xl flex-col items-center justify-center text-center">
+          {/* The clamp() minimums below (not the vw-scaling middle term)
+              are what's actually rendering on narrow phones -- 11vw/15vw/9vw
+              all round below their old rem minimums under ~430px wide, so
+              the headline was sitting at a fixed large size there regardless
+              of how little width it had, pushing into the floating example
+              cards' fixed positions below. Lowering just the minimums
+              shrinks the headline specifically on that narrow range without
+              touching anything at tablet/desktop widths, where the vw term
+              or the px ceiling takes over instead. */}
           <div className="relative z-10 flex w-full flex-col items-center space-y-2 md:space-y-4">
             <div className="relative z-30 flex w-full justify-start pl-[8%] md:pl-[20%]">
               <h1
-                className="m-0 p-0 font-display text-[clamp(4rem,11vw,140px)] uppercase leading-[0.85] tracking-tighter text-brand-lime"
+                className="m-0 p-0 font-display text-[clamp(3.2rem,11vw,140px)] uppercase leading-[0.85] tracking-tighter text-brand-lime"
                 style={{ textShadow: HEADLINE_SHADOW }}
               >
                 GET
@@ -33,7 +42,7 @@ export default function Home() {
 
             <div className="relative z-20 flex w-full justify-center">
               <h1
-                className="m-0 p-0 font-display text-[clamp(5rem,15vw,220px)] uppercase leading-[0.85] tracking-tighter text-white"
+                className="m-0 p-0 font-display text-[clamp(4rem,15vw,220px)] uppercase leading-[0.85] tracking-tighter text-white"
                 style={{ textShadow: HEADLINE_SHADOW }}
               >
                 ROASTED
@@ -42,7 +51,7 @@ export default function Home() {
 
             <div className="relative z-10 flex w-full justify-start pl-[12%] md:pl-[26%]">
               <h1
-                className="m-0 p-0 font-display text-[clamp(3.5rem,9vw,120px)] uppercase leading-[0.85] tracking-tighter text-white"
+                className="m-0 p-0 font-display text-[clamp(2.8rem,9vw,120px)] uppercase leading-[0.85] tracking-tighter text-white"
                 style={{ textShadow: HEADLINE_SHADOW }}
               >
                 FOR FREE

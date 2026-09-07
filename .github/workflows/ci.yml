@@ -191,7 +191,7 @@ jobs:
       - name: Roll backend/workers apps to the new image
         run: |
           set -e
-          for app in ca-backend ca-worker-extraction ca-worker-normalization ca-worker-anonymization ca-worker-scoring ca-worker-llm ca-worker-cleanup; do
+          for app in ca-backend ca-worker-normalization ca-worker-anonymization ca-worker-scoring ca-worker-llm ca-worker-cleanup; do
             echo "Updating $app..."
             az containerapp update \
               --resource-group rg-resume-roast-arena \
@@ -199,6 +199,20 @@ jobs:
               --image "ghcr.io/kev0-4/rra-backend:${{ github.sha }}" \
               --revision-suffix "gha${{ github.run_number }}"
           done
+
+          # ca-worker-extraction runs two containers per replica (extraction +
+          # a Tika sidecar) -- az containerapp update refuses to guess which
+          # one to retarget ("--container-name is required when adding or
+          # updating a container", a real failure from the first live deploy:
+          # https://github.com/kev0-4/resume_roast_arena_public_dev/actions/runs/34055803737).
+          # Only the extraction container uses our image; tika stays as-is.
+          echo "Updating ca-worker-extraction..."
+          az containerapp update \
+            --resource-group rg-resume-roast-arena \
+            --name ca-worker-extraction \
+            --container-name extraction \
+            --image "ghcr.io/kev0-4/rra-backend:${{ github.sha }}" \
+            --revision-suffix "gha${{ github.run_number }}"
 
       - name: Roll renderer app to the new image
         run: |

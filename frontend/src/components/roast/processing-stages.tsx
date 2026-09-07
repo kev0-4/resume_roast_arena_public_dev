@@ -47,8 +47,12 @@ export function ProcessingStages({ status }: { status: SessionStatus | undefined
               fill="none"
             />
             <text className="font-mono text-[11px] font-bold uppercase tracking-[0.18em]" fill="black">
+              {/* One copy only -- the circle spins via the parent's CSS
+                  animation, which already reads as a continuous loop. A
+                  second copy used to overflow the circumference and
+                  overlap the first at the seam ("ROROASTING IN PROGRESS"). */}
               <textPath href="#processingCirclePath" startOffset="0%">
-                ROASTING IN PROGRESS • ROASTING IN PROGRESS •{" "}
+                ROASTING IN PROGRESS •{" "}
               </textPath>
             </text>
           </svg>
