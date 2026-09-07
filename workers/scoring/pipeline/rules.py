@@ -149,24 +149,6 @@ def evaluate_rules(
         ))
 
     # ------------------------------------------------------------
-    # NLP-BASED RULES (only if analysis ran successfully)
-    # ------------------------------------------------------------
-    if signals.get("nlp_analysis_successful"):
-        if signals.get("uses_passive_voice"):
-            issues.append(Issue(
-                code="PASSIVE_VOICE",
-                message="Uses passive voice in experience descriptions",
-                severity=Severity.MEDIUM,
-            ))
-
-        if not signals.get("has_action_verbs"):
-            issues.append(Issue(
-                code="NO_ACTION_VERBS",
-                message="Experience bullets lack strong action verbs",
-                severity=Severity.HIGH,
-            ))
-
-    # ------------------------------------------------------------
     # SIGNAL-BASED STRENGTHS
     # ------------------------------------------------------------
     if signals.get("has_links"):

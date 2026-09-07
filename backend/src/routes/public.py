@@ -91,7 +91,7 @@ _SUBSCORE_CATEGORIES = {
     # cleanly around the result page's radar chart without the axis
     # labels colliding into each other or clipping at the chart's edge.
     "Contact": {"NO_CONTACT_INFO", "NO_PROFESSIONAL_LINKS"},
-    "Experience": {"NO_DATES_IN_EXPERIENCE", "NO_ACTION_VERBS", "PASSIVE_VOICE"},
+    "Experience": {"NO_DATES_IN_EXPERIENCE"},
     "Clarity": {"FIRST_PERSON_USAGE", "LONG_SENTENCES", "LOW_VOCABULARY_VARIETY"},
     "Conciseness": {"RESUME_TOO_SHORT", "RESUME_TOO_LONG"},
 }
@@ -102,21 +102,43 @@ _SUBSCORE_CATEGORIES = {
 _SKILLS_STRENGTH_CODE = "HAS_SKILLS"
 _NO_SKILLS_SCORE = 55  # deliberately not 0 or 100 -- see the docstring below
 
+# Every QualityIssueCode the LLM can raise (workers/llm/schemas.py) -- its
+# own radar axis rather than folded into the rule-based categories above,
+# since it's a genuinely different kind of judgment (content quality, not
+# structure) and mixing the two under one axis would make that axis mean
+# two different things depending on which resume you're looking at.
+_QUALITY_ISSUE_CODES = {
+    "GENERIC_BULLETS",
+    "NO_QUANTIFIED_IMPACT",
+    "BUZZWORD_FILLER",
+    "WEAK_ACTION_LANGUAGE",
+    "SHALLOW_CONTENT",
+}
 
-def _compute_subscores(scored: dict) -> dict[str, int]:
+
+def _compute_subscores(scored: dict, quality_issues: list[dict] | None = None) -> dict[str, int]:
     """
-    Real per-category subscores for the result page's radar chart, built
-    entirely from this session's actual rule-engine output (scored.json's
-    `issues`/`strengths` lists, workers/scoring/pipeline/rules.py) -- not
-    invented numbers, and not a second LLM call. Each of the 5 deduction-
-    based categories starts at 100 and loses points per issue that falls
-    in it, weighted by severity (_SEVERITY_WEIGHT), floored at 0. "Skills"
-    is the one category with no corresponding issue rule to deduct from
-    (rules.py only ever produces the HAS_SKILLS *strength*, never a
-    "missing skills" issue) -- scored as 100 if that strength fired, else
-    a flat 55, since giving 0 would overstate a penalty this codebase's
-    own rule engine doesn't actually claim to detect.
+    Real per-category subscores for the result page's radar chart. The 5
+    rule-based categories are built entirely from this session's actual
+    rule-engine output (scored.json's `issues`/`strengths` lists,
+    workers/scoring/pipeline/rules.py) -- not invented numbers, and not a
+    second LLM call. Each starts at 100 and loses points per issue that
+    falls in it, weighted by severity (_SEVERITY_WEIGHT), floored at 0.
+
+    "Quality" is the one axis built from the LLM's own judgment
+    (roast.json's quality_issues, `quality_issues` param here) rather than
+    the deterministic rule engine -- same deduction math, different issue
+    source, since GENERIC_BULLETS/NO_QUANTIFIED_IMPACT/etc. require
+    actually reading the writing, not just checking section presence.
+
+    "Skills" is the one category with no corresponding issue rule to
+    deduct from (rules.py only ever produces the HAS_SKILLS *strength*,
+    never a "missing skills" issue) -- scored as 100 if that strength
+    fired, else a flat 55, since giving 0 would overstate a penalty this
+    codebase's own rule engine doesn't actually claim to detect.
     """
+    quality_issues = quality_issues or []
+
     issue_codes = [issue["code"] for issue in scored.get("issues", [])]
     issue_severities = {issue["code"]: issue["severity"] for issue in scored.get("issues", [])}
     strength_codes = {strength["code"] for strength in scored.get("strengths", [])}
@@ -126,8 +148,36 @@ def _compute_subscores(scored: dict) -> dict[str, int]:
         deduction = sum(_SEVERITY_WEIGHT.get(issue_severities[code], 0) for code in issue_codes if code in codes)
         subscores[category] = max(0, 100 - deduction)
 
+    quality_deduction = sum(
+        _SEVERITY_WEIGHT.get(issue["severity"], 0)
+        for issue in quality_issues
+        if issue.get("code") in _QUALITY_ISSUE_CODES
+    )
+    subscores["Quality"] = max(0, 100 - quality_deduction)
+
     subscores["Skills"] = 100 if _SKILLS_STRENGTH_CODE in strength_codes else _NO_SKILLS_SCORE
     return subscores
+
+
+_VALID_QUALITY_SEVERITIES = ("critical", "high", "medium", "low")
+
+
+def _merge_quality_into_summary(summary: dict, quality_issues: list[dict]) -> dict:
+    """
+    Mirrors workers/renderer/pipeline/card_data.py's
+    merge_quality_into_summary exactly -- duplicated for the same reason
+    _compute_stamp below is (no shared import boundary between backend/
+    and workers/). Keep in sync if the merge logic ever changes.
+    """
+    merged = dict(summary)
+    for issue in quality_issues:
+        severity = issue.get("severity")
+        if severity not in _VALID_QUALITY_SEVERITIES:
+            continue
+        key = f"{severity}_issues"
+        merged[key] = merged.get(key, 0) + 1
+        merged["total_issues"] = merged.get("total_issues", 0) + 1
+    return merged
 
 
 def _compute_stamp(summary: dict) -> str:
@@ -180,17 +230,27 @@ async def get_public_roast_analysis(slug: str, db: AsyncSession = Depends(get_db
         get_session_rank(db=db, composite_score=session.composite_score, created_at=session.created_at),
     )
 
+    # `summary` in the response stays pure rule-engine output (the result
+    # page's "WHAT THE RULE ENGINE FOUND" section is labeled exactly that
+    # and shouldn't silently start including LLM-judged issues). Stamp and
+    # composite_score DO need the merged view: the renderer already used
+    # the merged summary (card_data.py's merge_quality_into_summary) to
+    # compute the stamp baked into the card PNG, so recomputing it here
+    # from unmerged counts would let the result page disagree with its own
+    # card image.
     summary = scored["summary"]
+    quality_issues = roast.get("quality_issues", [])
+    merged_summary = _merge_quality_into_summary(summary, quality_issues)
 
     response = RoastAnalysisResponse(
         slug=session.slug,
         composite_score=session.composite_score,
-        stamp=_compute_stamp(summary),
+        stamp=_compute_stamp(merged_summary),
         created_at=session.created_at,
         rank=rank,
         total_ranked=total_ranked,
         summary=summary,
-        subscores=_compute_subscores(scored),
+        subscores=_compute_subscores(scored, quality_issues),
         metrics=scored.get("metrics", {}),
         verdict=roast["verdict"],
         roast=roast["roast"],

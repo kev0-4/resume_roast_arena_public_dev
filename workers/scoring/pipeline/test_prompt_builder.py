@@ -277,15 +277,44 @@ class TestBuildRoastPrompt:
         )
         assert "312" in prompt
 
-    def test_prompt_contains_output_format_labels(self):
+    def test_prompt_describes_the_required_task(self):
+        # Output *shape* (verdict/roast/fixes/highlights/quality_flags) is
+        # enforced by Gemini's response_schema now, not by text labels in
+        # the prompt (see workers/llm/pipeline/client.py) -- this just
+        # checks the prompt still asks for the right content.
         anonymized = _make_anonymized(blocks={})
         prompt = build_roast_prompt(
             anonymized=anonymized,
             scoring_result=_make_scoring_result(),
         )
-        assert "VERDICT:" in prompt
-        assert "ROAST:" in prompt
-        assert "FIXES:" in prompt
+        assert "roast" in prompt.lower()
+        assert "verdict" in prompt.lower()
+        assert "HIGHLIGHTS" in prompt
+
+    def test_prompt_contains_quality_flag_instructions(self):
+        anonymized = _make_anonymized(blocks={})
+        prompt = build_roast_prompt(
+            anonymized=anonymized,
+            scoring_result=_make_scoring_result(),
+        )
+        for code in (
+            "GENERIC_BULLETS",
+            "NO_QUANTIFIED_IMPACT",
+            "BUZZWORD_FILLER",
+            "WEAK_ACTION_LANGUAGE",
+            "SHALLOW_CONTENT",
+        ):
+            assert code in prompt
+
+    def test_prompt_contains_quantified_impact_grounding_line(self):
+        anonymized = _make_anonymized(
+            blocks={"experience": [{"text": "Cut latency by 40%\nManaged a team"}]}
+        )
+        prompt = build_roast_prompt(
+            anonymized=anonymized,
+            scoring_result=_make_scoring_result(),
+        )
+        assert "1 of 2 experience/project lines contain a number or percentage" in prompt
 
     def test_raises_on_missing_content(self):
         bad_anonymized = {"session_id": "x", "metrics": {}}

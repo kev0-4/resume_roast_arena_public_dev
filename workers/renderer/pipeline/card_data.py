@@ -16,6 +16,11 @@ section 29):
 - v1 ships with hardcoded resume-snippet lines (matching the reference
   component's defaultResumeLines) -- a real-anonymized-snippet mode is a
   deferred future toggle, not built here.
+- composite_score/stamp are computed from scored.json's issues merged with
+  roast.json's LLM-issued quality_issues (merge_quality_into_summary) --
+  content-quality problems (generic bullets, no quantified impact, etc.)
+  the rule engine structurally can't detect, so a resume with clean
+  sections but hollow content no longer scores as if it had none.
 """
 
 from typing import Dict, Any, List
@@ -42,9 +47,44 @@ RESUME_SNIPPET_LINES: List[str] = [
 CTA_TEXT = "resumeroastarena.com"  # placeholder -- no real domain yet
 
 
+_VALID_SEVERITIES = ("critical", "high", "medium", "low")
+
+
+def merge_quality_into_summary(
+    summary: Dict[str, Any], quality_issues: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Fold roast.json's LLM-issued quality_issues into a copy of scored.json's
+    summary counts -- same shape in, same shape out, so compute_score and
+    compute_stamp don't need to know two different issue sources exist.
+
+    Quality issues never carry "critical" severity (see workers/llm/schemas
+    .py's QUALITY_SEVERITY -- the LLM only ever assesses high/medium/low
+    content-quality codes), but this reads whatever severity string shows
+    up rather than assuming, so it stays correct if that ever changes.
+
+    Checks against _VALID_SEVERITIES rather than "is this key already in
+    the summary dict" -- scored.json's summary always has all 5 keys in
+    practice (ScoreSummary requires them), but the merge shouldn't silently
+    drop a real severity just because a caller's dict happened not to
+    pre-populate that key at zero.
+    """
+    merged = dict(summary)
+    for issue in quality_issues:
+        severity = issue.get("severity")
+        if severity not in _VALID_SEVERITIES:
+            continue
+        key = f"{severity}_issues"
+        merged[key] = merged.get(key, 0) + 1
+        merged["total_issues"] = merged.get("total_issues", 0) + 1
+    return merged
+
+
 def compute_score(summary: Dict[str, Any]) -> int:
     """
-    Deterministic 0-100 composite score from scored.json's summary counts.
+    Deterministic 0-100 composite score from a summary's issue counts
+    (scored.json's own counts, or merge_quality_into_summary's merged
+    result -- this function doesn't care which).
 
     100 - 20*critical - 10*high - 5*medium - 2*low, clamped to [0, 100].
     """
@@ -79,7 +119,7 @@ def build_card_context(
     display_name: str,
 ) -> Dict[str, Any]:
     """Assembles the full Jinja2 template context for roast_card.html."""
-    summary = scored["summary"]
+    summary = merge_quality_into_summary(scored["summary"], roast.get("quality_issues", []))
 
     return {
         "candidate_name": display_name,

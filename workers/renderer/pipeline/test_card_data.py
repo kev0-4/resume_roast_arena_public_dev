@@ -4,6 +4,7 @@ from workers.renderer.pipeline.card_data import (
     compute_score,
     compute_stamp,
     build_card_context,
+    merge_quality_into_summary,
 )
 
 
@@ -78,6 +79,34 @@ class TestComputeStamp:
         assert compute_stamp({}) == "MID"
 
 
+class TestMergeQualityIntoSummary:
+    def test_no_quality_issues_is_a_no_op(self):
+        summary = _summary(high_issues=1, total_issues=1)
+        merged = merge_quality_into_summary(summary, [])
+        assert merged == summary
+
+    def test_quality_issues_increment_matching_severity_and_total(self):
+        summary = _summary(high_issues=1, total_issues=1)
+        quality_issues = [
+            {"code": "GENERIC_BULLETS", "severity": "high"},
+            {"code": "SHALLOW_CONTENT", "severity": "low"},
+        ]
+        merged = merge_quality_into_summary(summary, quality_issues)
+        assert merged["high_issues"] == 2
+        assert merged["low_issues"] == 1
+        assert merged["total_issues"] == 3
+
+    def test_does_not_mutate_the_original_summary(self):
+        summary = _summary(high_issues=1, total_issues=1)
+        merge_quality_into_summary(summary, [{"code": "SHALLOW_CONTENT", "severity": "low"}])
+        assert summary == _summary(high_issues=1, total_issues=1)
+
+    def test_unknown_severity_key_is_ignored_not_raised(self):
+        summary = _summary()
+        merged = merge_quality_into_summary(summary, [{"code": "X", "severity": "extreme"}])
+        assert merged["total_issues"] == 0
+
+
 class TestBuildCardContext:
     def test_assembles_expected_fields(self):
         scored = {
@@ -95,3 +124,27 @@ class TestBuildCardContext:
         assert context["stat2_value"] == "3"
         assert isinstance(context["resume_lines"], list) and context["resume_lines"]
         assert context["cta_text"]
+
+    def test_quality_issues_pull_the_score_down_below_the_rule_engine_alone(self):
+        # This is the whole point of the feature: a resume the rule engine
+        # sees as flawless (clean sections, no structural issues) should
+        # NOT score 100 if its content is actually generic/hollow -- that
+        # was the real gap (see the "why do mediocre resumes score 90+"
+        # discussion this feature came out of).
+        scored = {"summary": _summary(total_strengths=3)}  # zero rule-engine issues
+        roast_clean = {"verdict": "v", "quality_issues": []}
+        roast_flagged = {
+            "verdict": "v",
+            "quality_issues": [
+                {"code": "GENERIC_BULLETS", "severity": "high"},
+                {"code": "NO_QUANTIFIED_IMPACT", "severity": "high"},
+            ],
+        }
+
+        clean_context = build_card_context(scored=scored, roast=roast_clean, display_name="A")
+        flagged_context = build_card_context(scored=scored, roast=roast_flagged, display_name="A")
+
+        assert clean_context["score"] == 100
+        assert clean_context["stamp"] == "SOLID"
+        assert flagged_context["score"] == 80
+        assert flagged_context["stamp"] == "ROASTED"  # 2 HIGH quality issues trips the same threshold as 2 rule-engine HIGHs
