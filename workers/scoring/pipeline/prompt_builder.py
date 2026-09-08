@@ -186,14 +186,35 @@ clearly applies, in `quality_flags`. Leave a code out if it's a close
 call or doesn't clearly apply — these should differentiate a strong
 resume from a mediocre one, so only flag what you're confident about:
 
-- GENERIC_BULLETS: describes responsibilities/duties, not outcomes.
+- GENERIC_BULLETS: describes responsibilities/duties, not outcomes or
+  substance. Two equally valid ways a bullet avoids this — a real metric,
+  OR real technical specificity:
   Weak: "Responsible for managing team projects and deadlines."
-  Not generic: "Led a 4-engineer team to cut deploy time from 45min to 6min
-  by migrating a monolith to microservices."
-- NO_QUANTIFIED_IMPACT: claims aren't backed by numbers, %, or scale. Use
-  the quantified-impact check above as a starting signal, but judge for
-  yourself — a bullet can have a number and still say nothing ("led 3
-  meetings a week" has a digit, no real impact).
+  Not generic (metric): "Led a 4-engineer team to cut deploy time from
+  45min to 6min by migrating a monolith to microservices."
+  Not generic (no metric, still strong): "Rewrote the log-ingestion
+  service's deserializer in Rust to eliminate GC pauses under sustained
+  write load, replacing a Java implementation that periodically stalled
+  the consumer thread." Naming the exact tool, the exact problem, and the
+  exact outcome is real substance even without a percentage sign.
+  Not generic (named system + specific sub-components, no metric): "Payments
+  reconciliation service: built the ledger-matching engine, the retry
+  logic for failed bank transfers, and the daily settlement report."
+  Naming a real system plus several specific, distinct capabilities
+  actually built is real substance too — this is not the same as "worked
+  on the payments system," which names nothing concrete.
+- NO_QUANTIFIED_IMPACT: the bullet gives no real evidence of impact or
+  capability at all — not the same as "has no digits in it." A resume
+  demonstrating strength through concrete technical specificity (exact
+  frameworks/protocols/algorithms named) or verifiable pedigree (a
+  selective company or research institution, named specifically) is
+  giving real evidence too, just not a percentage. Reserve this flag for
+  bullets that are vague on BOTH fronts — no metric AND no concrete
+  specifics, just a duty description. Use the quantified-impact check
+  above as one input, not the deciding factor: a bullet can have a digit
+  and still say nothing ("led 3 meetings a week"), and a bullet can have
+  zero digits and still be strong ("built a distributed data pipeline in
+  Kafka and Flink handling billions of events").
 - BUZZWORD_FILLER: leans on vague corporate-speak ("results-driven",
   "team player", "synergy", "self-starter") instead of specifics.
 - WEAK_ACTION_LANGUAGE: passive voice or repetitive/weak verbs throughout
