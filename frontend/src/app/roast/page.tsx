@@ -38,6 +38,13 @@ export default function RoastPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // One key per upload *attempt*, minted the moment a file is selected --
+  // not per tab. Reused across handleSubmit retries of this same file
+  // (so a resubmit after a network failure correctly dedupes), but a new
+  // file selection always gets a fresh one so a second, different upload
+  // in the same tab is never silently short-circuited back to the first
+  // file's session.
+  const idempotencyKeyRef = useRef<string>("");
 
   const acceptFile = useCallback((candidate: File | null | undefined) => {
     if (!candidate) return;
@@ -51,6 +58,7 @@ export default function RoastPage() {
       setSubmitError("File is too large -- max 10MB.");
       return;
     }
+    idempotencyKeyRef.current = crypto.randomUUID();
     setFile(candidate);
   }, []);
 
@@ -71,7 +79,7 @@ export default function RoastPage() {
       // this header itself (get_current_user_optional), so there's
       // nothing else this page needs to do differently either way.
       const idToken = await getIdToken();
-      const result = await ingestResume(file, idToken);
+      const result = await ingestResume(file, idToken, idempotencyKeyRef.current);
       router.push(`/roast/${result.session_id}`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 429) {

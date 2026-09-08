@@ -49,26 +49,24 @@ export class ApiError extends Error {
   }
 }
 
-// Kept in one place (a real browser tab id, not a random UUID per
-// request) so a retried/duplicate submit within the session dedupes on
-// the backend's idempotency-key handling (backend/src/routes/injest.py)
-// instead of creating a second session every time.
-function getIdempotencyKey(): string {
-  const STORAGE_KEY = "rra_idempotency_key";
-  if (typeof window === "undefined") return crypto.randomUUID();
-  let key = window.sessionStorage.getItem(STORAGE_KEY);
-  if (!key) {
-    key = crypto.randomUUID();
-    window.sessionStorage.setItem(STORAGE_KEY, key);
-  }
-  return key;
-}
-
-export async function ingestResume(file: File, idToken?: string | null): Promise<IngestResponse> {
+// Caller-supplied, not generated here: the key must identify one upload
+// *attempt* (so a retried/duplicate submit of the same file dedupes on
+// the backend's idempotency-key handling, backend/src/routes/injest.py)
+// -- not the browser tab. A tab-lifetime key here previously meant every
+// upload after the first in the same tab reused the first request's key,
+// so the backend's dedup short-circuit returned the *first* session's
+// result no matter what file was actually submitted. The caller (roast
+// page) mints a fresh key each time a new file is selected and reuses it
+// only across retries of that same file.
+export async function ingestResume(
+  file: File,
+  idToken: string | null | undefined,
+  idempotencyKey: string,
+): Promise<IngestResponse> {
   const formData = new FormData();
   formData.append("file", file);
 
-  const headers: Record<string, string> = { "X-Idempotency-Key": getIdempotencyKey() };
+  const headers: Record<string, string> = { "X-Idempotency-Key": idempotencyKey };
   if (idToken) headers["Authorization"] = `Bearer ${idToken}`;
 
   const resp = await fetch(`${API_BASE_URL}/api/v1/ingest`, {
