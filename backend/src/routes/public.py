@@ -152,8 +152,8 @@ def _compute_subscores(scored: dict, substance_score: int | None = None) -> dict
 # Mirrors workers/renderer/pipeline/card_data.py's SOLID_MIN_SCORE /
 # MID_MIN_SCORE. Only reached for sessions rendered before Sessions.stamp
 # was persisted -- see _stamp_for below.
-_SOLID_MIN_SCORE = 85
-_MID_MIN_SCORE = 60
+_SOLID_MIN_SCORE = 75
+_MID_MIN_SCORE = 35
 
 
 def _stamp_for(session: SessionModel) -> str:

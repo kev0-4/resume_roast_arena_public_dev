@@ -1,4 +1,7 @@
 from workers.renderer.pipeline.card_data import (
+    MAX_STRUCTURAL_DEDUCTION,
+    SOLID_MIN_SCORE,
+    MID_MIN_SCORE,
     compute_score,
     compute_stamp,
     structural_deduction,
@@ -23,16 +26,33 @@ class TestStructuralDeduction:
     def test_no_issues_costs_nothing(self):
         assert structural_deduction(_summary()) == 0
 
-    def test_severity_weights(self):
-        assert structural_deduction(_summary(critical_issues=1)) == 20
+    def test_severity_weights_below_the_cap(self):
         assert structural_deduction(_summary(high_issues=1)) == 10
         assert structural_deduction(_summary(medium_issues=1)) == 5
         assert structural_deduction(_summary(low_issues=1)) == 2
 
     def test_mixed_severities_sum(self):
-        assert structural_deduction(
-            _summary(critical_issues=1, high_issues=1, medium_issues=1, low_issues=1)
-        ) == 20 + 10 + 5 + 2
+        assert structural_deduction(_summary(medium_issues=1, low_issues=1)) == 7
+
+    def test_capped_so_structure_cannot_dominate_content(self):
+        # Uncapped these weights reach 40-50 on an ordinary resume, enough
+        # to drag excellent content below the ROASTED line. Measured: 9 of
+        # 15 strong eval resumes stamped ROASTED before the cap.
+        assert structural_deduction(_summary(critical_issues=1)) == MAX_STRUCTURAL_DEDUCTION
+        assert (
+            structural_deduction(
+                _summary(critical_issues=3, high_issues=4, medium_issues=2, low_issues=5)
+            )
+            == MAX_STRUCTURAL_DEDUCTION
+        )
+
+    def test_exactly_at_the_cap_is_not_reduced(self):
+        # 1 high + 1 low = 12, under the cap; add a medium -> 17, capped.
+        assert structural_deduction(_summary(high_issues=1, low_issues=1)) == 12
+        assert (
+            structural_deduction(_summary(high_issues=1, medium_issues=1, low_issues=1))
+            == MAX_STRUCTURAL_DEDUCTION
+        )
 
     def test_missing_keys_default_to_zero(self):
         assert structural_deduction({}) == 0
@@ -59,7 +79,14 @@ class TestComputeScore:
         assert compute_score(_summary()) == 100
 
     def test_clamps_to_zero_rather_than_going_negative(self):
-        assert compute_score(_summary(critical_issues=5), substance_score=40) == 0
+        assert compute_score(_summary(critical_issues=5), substance_score=5) == 0
+
+    def test_structure_alone_cannot_sink_strong_content(self):
+        # Every structural rule firing at once still leaves a resume with
+        # excellent content well clear of ROASTED.
+        wrecked = _summary(critical_issues=3, high_issues=4, medium_issues=3, low_issues=4)
+        assert compute_score(wrecked, substance_score=95) == 80
+        assert compute_stamp(compute_score(wrecked, substance_score=95)) == "SOLID"
 
     def test_never_exceeds_100(self):
         assert compute_score(_summary(), substance_score=100) == 100
@@ -77,19 +104,28 @@ class TestComputeStamp:
         assert compute_stamp(92) == "SOLID"
 
     def test_exactly_at_solid_threshold_is_solid(self):
-        assert compute_stamp(85) == "SOLID"
+        assert compute_stamp(SOLID_MIN_SCORE) == "SOLID"
 
     def test_just_below_solid_threshold_is_mid(self):
-        assert compute_stamp(84) == "MID"
+        assert compute_stamp(SOLID_MIN_SCORE - 1) == "MID"
 
     def test_exactly_at_mid_threshold_is_mid(self):
-        assert compute_stamp(60) == "MID"
+        assert compute_stamp(MID_MIN_SCORE) == "MID"
 
     def test_just_below_mid_threshold_is_roasted(self):
-        assert compute_stamp(59) == "ROASTED"
+        assert compute_stamp(MID_MIN_SCORE - 1) == "ROASTED"
 
     def test_zero_is_roasted(self):
         assert compute_stamp(0) == "ROASTED"
+
+    def test_thresholds_match_the_measured_composite_distribution(self):
+        # Fit to quality-scoring-eval/run_shipped_eval.py over 27 resumes:
+        # strong 43-80, mid 20-27, bad 0. The boundary belongs strictly
+        # inside the empty band between the strongest mid resume and the
+        # weakest strong one, so neither side turns on one example.
+        assert 27 < MID_MIN_SCORE < 43
+        # SOLID stays hard to earn -- above the strong tier's median (60).
+        assert 60 < SOLID_MIN_SCORE <= 80
 
 
 class TestBuildCardContext:
@@ -107,7 +143,7 @@ class TestBuildCardContext:
 
         assert context["candidate_name"] == "SavageIntern4821"
         assert context["punchline"] == "This resume screams for help."
-        assert context["score"] == 25  # 45 substance - 20 for the critical
+        assert context["score"] == 30  # 45 substance - 15 (capped structural)
         assert context["stamp"] == "ROASTED"
         assert context["stat2_label"] == "Issues Found"
         assert context["stat2_value"] == "3"
@@ -157,7 +193,7 @@ class TestBuildCardContext:
         base = build_card_context(scored=scored, roast=base_roast, display_name="A")
         flagged = build_card_context(scored=scored, roast=flagged_roast, display_name="A")
 
-        assert base["score"] == flagged["score"] == 50
+        assert base["score"] == flagged["score"] == 55  # 70 - 15 (capped)
         assert base["stat2_value"] == "2"
         assert flagged["stat2_value"] == "4"
 

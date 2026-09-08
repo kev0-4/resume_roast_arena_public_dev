@@ -21,3 +21,10 @@ service-account*.json
 
 # Local deployment secrets/manifests (real Azure/GHCR credentials -- never commit)
 /deploy/
+# Real individuals' self-published CVs used for scoring evaluation.
+# PII is stripped, but the bullet text stays close to the source and would
+# be reverse-searchable in a public repo. Local-only on purpose --
+# quality-scoring-eval/run_shipped_eval.py runs without it.
+quality-scoring-eval/real_resumes.py
+quality-scoring-eval/real_eval_results*.json
+quality-scoring-eval/__pycache__/

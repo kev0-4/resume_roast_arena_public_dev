@@ -1,0 +1,486 @@
+[
+  {
+    "resume_id": "faang_backend_1",
+    "tier": "top",
+    "run": 0,
+    "score": 100,
+    "stamp": "SOLID",
+    "flags": [],
+    "verdict": "This backend engineering resume is a rare beast: actually packed with hard metrics, but criminally brief and lacking any context on who you are outside of code.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "faang_backend_1",
+    "tier": "top",
+    "run": 1,
+    "score": 100,
+    "stamp": "SOLID",
+    "flags": [],
+    "verdict": "This backend engineering resume is a rare sight: it actually reads like someone who builds things and measures the damage, though it lacks an education section and a summary to anchor the narrative.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "faang_backend_1",
+    "tier": "top",
+    "run": 2,
+    "score": 100,
+    "stamp": "SOLID",
+    "flags": [],
+    "verdict": "This is a rare beast: an engineering resume that actually proves its worth with hard numbers.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "faang_frontend_1",
+    "tier": "top",
+    "run": 0,
+    "score": 100,
+    "stamp": "SOLID",
+    "flags": [],
+    "verdict": "This resume reads like a senior engineer masquerading as a brief snippet of heavy-hitting accomplishments, leaving us begging for more context on who you actually are.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "faang_fullstack_1",
+    "tier": "top",
+    "run": 0,
+    "score": 98,
+    "stamp": "MID",
+    "flags": [
+      "SHALLOW_CONTENT"
+    ],
+    "verdict": "This is a surprisingly solid engineering resume that buries its technical competence under a painfully bare-bones presentation.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "faang_devops_1",
+    "tier": "top",
+    "run": 0,
+    "score": 100,
+    "stamp": "SOLID",
+    "flags": [],
+    "verdict": "This is a rare technical gem of a resume: ruthlessly quantified, hyper-specific, and entirely free of corporate fluff.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "faang_newgrad_1",
+    "tier": "top",
+    "run": 0,
+    "score": 100,
+    "stamp": "SOLID",
+    "flags": [],
+    "verdict": "This is a fiercely strong, technically dense resume masquerading as a bare-bones skeleton.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "faang_backend_2",
+    "tier": "top",
+    "run": 0,
+    "score": 98,
+    "stamp": "MID",
+    "flags": [
+      "SHALLOW_CONTENT"
+    ],
+    "verdict": "Your resume has solid metrics and technical depth, but it is dangerously thin and resembles a glorified changelog rather than a compelling career narrative.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "faang_frontend_2",
+    "tier": "top",
+    "run": 0,
+    "score": 100,
+    "stamp": "SOLID",
+    "flags": [],
+    "verdict": "This resume reads like a high-performing engineer trying to hide behind a minimalist wall, leaving a dangerously sparse skills section that undersells deep technical chops.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "hft_quant_researcher_1",
+    "tier": "top",
+    "run": 0,
+    "score": 98,
+    "stamp": "MID",
+    "flags": [
+      "SHALLOW_CONTENT"
+    ],
+    "verdict": "This resume reads like a tightly written highlight reel of a high-performing quant who forgot to explain what they actually do outside of three specific bullet points.",
+    "vertical": "HFT/Quant"
+  },
+  {
+    "resume_id": "hft_quant_researcher_1",
+    "tier": "top",
+    "run": 1,
+    "score": 98,
+    "stamp": "MID",
+    "flags": [
+      "SHALLOW_CONTENT"
+    ],
+    "verdict": "Your quantitative research resume is deceptively brief\u2014loaded with heavy-hitting metrics yet bizarrely devoid of context, projects, or leadership depth.",
+    "vertical": "HFT/Quant"
+  },
+  {
+    "resume_id": "hft_quant_researcher_1",
+    "tier": "top",
+    "run": 2,
+    "score": 98,
+    "stamp": "MID",
+    "flags": [
+      "SHALLOW_CONTENT"
+    ],
+    "verdict": "This quantitative research resume packs heavy-hitting metrics into a surprisingly anorexic 77-word layout that leaves zero room to showcase your methodology or domain expertise.",
+    "vertical": "HFT/Quant"
+  },
+  {
+    "resume_id": "hft_quant_dev_1",
+    "tier": "top",
+    "run": 0,
+    "score": 98,
+    "stamp": "MID",
+    "flags": [
+      "SHALLOW_CONTENT"
+    ],
+    "verdict": "Your resume reads like a high-performance engine strapped to a bicycle frame\u2014technically blistering, but severely underdeveloped.",
+    "vertical": "HFT/Quant"
+  },
+  {
+    "resume_id": "hft_quant_strat_1",
+    "tier": "top",
+    "run": 0,
+    "score": 98,
+    "stamp": "MID",
+    "flags": [
+      "SHALLOW_CONTENT"
+    ],
+    "verdict": "This quantitative trader resume is mathematically sharp and heavily quantified, but suffers from a critically barren skills section that barely skims the surface of your true stack.",
+    "vertical": "HFT/Quant"
+  },
+  {
+    "resume_id": "hft_quant_researcher_2",
+    "tier": "top",
+    "run": 0,
+    "score": 98,
+    "stamp": "MID",
+    "flags": [
+      "SHALLOW_CONTENT"
+    ],
+    "verdict": "This resume reads like an elite quantitative trading memo trapped inside an unfinished skeleton.",
+    "vertical": "HFT/Quant"
+  },
+  {
+    "resume_id": "ib_ma_analyst_1",
+    "tier": "top",
+    "run": 0,
+    "score": 100,
+    "stamp": "SOLID",
+    "flags": [],
+    "verdict": "This is a rare example of a finance resume that actually brings receipts, though it still suffers from some predictable banking jargon fatigue.",
+    "vertical": "IB"
+  },
+  {
+    "resume_id": "ib_sellside_1",
+    "tier": "top",
+    "run": 0,
+    "score": 98,
+    "stamp": "MID",
+    "flags": [
+      "SHALLOW_CONTENT"
+    ],
+    "verdict": "This resume reads like a corporate machine that spits out numbers without ever proving you actually moved the needle.",
+    "vertical": "IB"
+  },
+  {
+    "resume_id": "ib_lbo_1",
+    "tier": "top",
+    "run": 0,
+    "score": 98,
+    "stamp": "MID",
+    "flags": [
+      "SHALLOW_CONTENT"
+    ],
+    "verdict": "Technically dense with impressive deal numbers, yet criminally sparse on context and personality.",
+    "vertical": "IB"
+  },
+  {
+    "resume_id": "ib_generalist_1",
+    "tier": "top",
+    "run": 0,
+    "score": 98,
+    "stamp": "MID",
+    "flags": [
+      "SHALLOW_CONTENT"
+    ],
+    "verdict": "This resume reads like a stub rather than a full professional profile, offering a tiny glimpse of strong deal experience buried under an alarming lack of context.",
+    "vertical": "IB"
+  },
+  {
+    "resume_id": "mid_swe_support_1",
+    "tier": "mid",
+    "run": 0,
+    "score": 73,
+    "stamp": "ROASTED",
+    "flags": [
+      "GENERIC_BULLETS",
+      "NO_QUANTIFIED_IMPACT",
+      "SHALLOW_CONTENT",
+      "WEAK_ACTION_LANGUAGE"
+    ],
+    "verdict": "This resume reads like a generic laundry list of basic IT tasks rather than a compelling pitch from a growing software engineer.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "mid_swe_support_1",
+    "tier": "mid",
+    "run": 1,
+    "score": 73,
+    "stamp": "ROASTED",
+    "flags": [
+      "GENERIC_BULLETS",
+      "NO_QUANTIFIED_IMPACT",
+      "SHALLOW_CONTENT",
+      "WEAK_ACTION_LANGUAGE"
+    ],
+    "verdict": "This resume reads like a generic duty log rather than a track record of engineering impact.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "mid_swe_support_1",
+    "tier": "mid",
+    "run": 2,
+    "score": 73,
+    "stamp": "ROASTED",
+    "flags": [
+      "GENERIC_BULLETS",
+      "NO_QUANTIFIED_IMPACT",
+      "SHALLOW_CONTENT",
+      "WEAK_ACTION_LANGUAGE"
+    ],
+    "verdict": "This resume reads like a generic duty log rather than a track record of an engineer building actual value.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "mid_swe_2",
+    "tier": "mid",
+    "run": 0,
+    "score": 83,
+    "stamp": "MID",
+    "flags": [
+      "GENERIC_BULLETS",
+      "SHALLOW_CONTENT",
+      "WEAK_ACTION_LANGUAGE"
+    ],
+    "verdict": "This resume reads like a ghost wrote it, offering zero proof of your actual engineering capability.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "mid_finance_analyst_1",
+    "tier": "mid",
+    "run": 0,
+    "score": 73,
+    "stamp": "ROASTED",
+    "flags": [
+      "GENERIC_BULLETS",
+      "NO_QUANTIFIED_IMPACT",
+      "SHALLOW_CONTENT",
+      "WEAK_ACTION_LANGUAGE"
+    ],
+    "verdict": "This resume reads like a generic job description rather than a record of professional achievement.",
+    "vertical": "IB"
+  },
+  {
+    "resume_id": "mid_finance_analyst_1",
+    "tier": "mid",
+    "run": 1,
+    "score": 73,
+    "stamp": "ROASTED",
+    "flags": [
+      "GENERIC_BULLETS",
+      "NO_QUANTIFIED_IMPACT",
+      "SHALLOW_CONTENT",
+      "WEAK_ACTION_LANGUAGE"
+    ],
+    "verdict": "This resume reads like a passive job description rather than a track record of financial achievement.",
+    "vertical": "IB"
+  },
+  {
+    "resume_id": "mid_finance_analyst_1",
+    "tier": "mid",
+    "run": 2,
+    "score": 73,
+    "stamp": "ROASTED",
+    "flags": [
+      "GENERIC_BULLETS",
+      "NO_QUANTIFIED_IMPACT",
+      "SHALLOW_CONTENT",
+      "WEAK_ACTION_LANGUAGE"
+    ],
+    "verdict": "This resume reads like a generic job description rather than a track record of financial achievement.",
+    "vertical": "IB"
+  },
+  {
+    "resume_id": "mid_quant_1",
+    "tier": "mid",
+    "run": 0,
+    "score": 83,
+    "stamp": "MID",
+    "flags": [
+      "NO_QUANTIFIED_IMPACT",
+      "SHALLOW_CONTENT",
+      "WEAK_ACTION_LANGUAGE"
+    ],
+    "verdict": "This resume reads like a passive participation trophy rather than a high-impact technical contributor.",
+    "vertical": "HFT/Quant"
+  },
+  {
+    "resume_id": "mid_swe_3",
+    "tier": "mid",
+    "run": 0,
+    "score": 73,
+    "stamp": "ROASTED",
+    "flags": [
+      "GENERIC_BULLETS",
+      "NO_QUANTIFIED_IMPACT",
+      "SHALLOW_CONTENT",
+      "WEAK_ACTION_LANGUAGE"
+    ],
+    "verdict": "This resume reads like an attendance log rather than a record of engineering impact.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "bad_swe_1",
+    "tier": "bad",
+    "run": 0,
+    "score": 68,
+    "stamp": "ROASTED",
+    "flags": [
+      "BUZZWORD_FILLER",
+      "GENERIC_BULLETS",
+      "NO_QUANTIFIED_IMPACT",
+      "SHALLOW_CONTENT",
+      "WEAK_ACTION_LANGUAGE"
+    ],
+    "verdict": "This resume reads less like a professional history and more like a masterclass in corporate evasion.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "bad_swe_1",
+    "tier": "bad",
+    "run": 1,
+    "score": 68,
+    "stamp": "ROASTED",
+    "flags": [
+      "BUZZWORD_FILLER",
+      "GENERIC_BULLETS",
+      "NO_QUANTIFIED_IMPACT",
+      "SHALLOW_CONTENT",
+      "WEAK_ACTION_LANGUAGE"
+    ],
+    "verdict": "This resume reads less like a professional history and more like a masterclass in corporate evasion.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "bad_swe_1",
+    "tier": "bad",
+    "run": 2,
+    "score": 68,
+    "stamp": "ROASTED",
+    "flags": [
+      "BUZZWORD_FILLER",
+      "GENERIC_BULLETS",
+      "NO_QUANTIFIED_IMPACT",
+      "SHALLOW_CONTENT",
+      "WEAK_ACTION_LANGUAGE"
+    ],
+    "verdict": "This resume reads less like a professional history and more like a masterclass in corporate self-parody and passive breathing.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "bad_swe_2",
+    "tier": "bad",
+    "run": 0,
+    "score": 73,
+    "stamp": "ROASTED",
+    "flags": [
+      "GENERIC_BULLETS",
+      "NO_QUANTIFIED_IMPACT",
+      "SHALLOW_CONTENT",
+      "WEAK_ACTION_LANGUAGE"
+    ],
+    "verdict": "This resume reads less like a professional software engineer's track record and more like a cryptically brief placeholder.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "bad_swe_3",
+    "tier": "bad",
+    "run": 0,
+    "score": 68,
+    "stamp": "ROASTED",
+    "flags": [
+      "BUZZWORD_FILLER",
+      "GENERIC_BULLETS",
+      "NO_QUANTIFIED_IMPACT",
+      "SHALLOW_CONTENT",
+      "WEAK_ACTION_LANGUAGE"
+    ],
+    "verdict": "This resume reads less like a professional profile and more like a collection of desperate placeholders.",
+    "vertical": "SWE"
+  },
+  {
+    "resume_id": "bad_finance_1",
+    "tier": "bad",
+    "run": 0,
+    "score": 73,
+    "stamp": "ROASTED",
+    "flags": [
+      "GENERIC_BULLETS",
+      "NO_QUANTIFIED_IMPACT",
+      "SHALLOW_CONTENT",
+      "WEAK_ACTION_LANGUAGE"
+    ],
+    "verdict": "This resume reads like a ghost wrote it, offering zero proof that you actually did any real finance work.",
+    "vertical": "IB"
+  },
+  {
+    "resume_id": "bad_quant_1",
+    "tier": "bad",
+    "run": 0,
+    "score": 73,
+    "stamp": "ROASTED",
+    "flags": [
+      "GENERIC_BULLETS",
+      "NO_QUANTIFIED_IMPACT",
+      "SHALLOW_CONTENT",
+      "WEAK_ACTION_LANGUAGE"
+    ],
+    "verdict": "This resume reads like a ghost wrote it, offering zero proof that you actually do any real quantitative work.",
+    "vertical": "HFT/Quant"
+  },
+  {
+    "resume_id": "bad_quant_1",
+    "tier": "bad",
+    "run": 1,
+    "score": 73,
+    "stamp": "ROASTED",
+    "flags": [
+      "GENERIC_BULLETS",
+      "NO_QUANTIFIED_IMPACT",
+      "SHALLOW_CONTENT",
+      "WEAK_ACTION_LANGUAGE"
+    ],
+    "verdict": "This resume reads like a vague outline written by someone trying desperately to pretend they have a job.",
+    "vertical": "HFT/Quant"
+  },
+  {
+    "resume_id": "bad_quant_1",
+    "tier": "bad",
+    "run": 2,
+    "score": 73,
+    "stamp": "ROASTED",
+    "flags": [
+      "GENERIC_BULLETS",
+      "NO_QUANTIFIED_IMPACT",
+      "SHALLOW_CONTENT",
+      "WEAK_ACTION_LANGUAGE"
+    ],
+    "verdict": "This resume reads less like a professional quantitative track record and more like a vague outline written by someone trying to hide a complete lack of actual work.",
+    "vertical": "HFT/Quant"
+  }
+]
