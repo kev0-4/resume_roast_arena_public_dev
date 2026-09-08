@@ -71,10 +71,13 @@ ROAST_FIXTURE = {
     "roast": "The experience section is fine, but nothing here sticks.",
     "fixes": ["Quantify your impact.", "Cut the buzzwords."],
     "highlights": [{"quote": "team player", "comment": "Everyone says this. Nobody proves it."}],
+    "substance_score": 68,
+    "substance_reasoning": "Real work, but described as duties rather than outcomes.",
+    "quality_flags": ["GENERIC_BULLETS"],
 }
 
 
-async def _make_full_session(db, user_id, *, score, slug):
+async def _make_full_session(db, user_id, *, score, slug, stamp=None):
     initialize_blob_storage()
     session = await create_sessions(user_id=user_id, db=db)
     session_id = session.id
@@ -84,6 +87,7 @@ async def _make_full_session(db, user_id, *, score, slug):
     session.status = "DONE"
     session.slug = slug
     session.composite_score = score
+    session.stamp = stamp
     db.add(session)
     await db.commit()
     return session_id
@@ -172,10 +176,126 @@ class TestPublicDataRoute:
         assert body["subscores"]["Experience"] == 100
         assert body["subscores"]["Conciseness"] == 100
         assert body["subscores"]["Skills"] == 100
+        # Quality is the LLM's holistic judgment used directly, not a
+        # deduction tally -- ROAST_FIXTURE's substance_score verbatim.
+        assert body["subscores"]["Quality"] == 68
         assert body["verdict"] == "Competent but forgettable."
         assert body["fixes"] == ["Quantify your impact.", "Cut the buzzwords."]
         assert body["highlights"][0]["quote"] == "team player"
         assert "public" in resp.headers.get("cache-control", "")
+
+    def test_stamp_comes_from_the_renderer_not_a_recomputation(self):
+        # The stamp shown on the page must be the exact one baked into the
+        # card PNG. This route used to recompute it from issue counts,
+        # which silently drifted from the card whenever the two formulas
+        # fell out of sync. A stored stamp that disagrees with what any
+        # recomputation would produce proves the stored one wins.
+        slug = f"stamp{uuid.uuid4().hex[:6]}"
+
+        async def setup():
+            async with AsyncSessionLocal() as db:
+                user = await _make_user(db, f"stamp-{slug}")
+                # score=20 would recompute to ROASTED; stored says SOLID
+                await _make_full_session(db, user.id, score=20, slug=slug, stamp="SOLID")
+
+        _run(setup)
+
+        app = create_app()
+        with TestClient(app) as client:
+            resp = client.get(f"/r/{slug}/data")
+
+        assert resp.status_code == 200
+        assert resp.json()["stamp"] == "SOLID"
+
+    def test_stamp_falls_back_to_the_score_when_not_stored(self):
+        # Rows rendered before the renderer persisted a stamp.
+        slug = f"nostamp{uuid.uuid4().hex[:6]}"
+
+        async def setup():
+            async with AsyncSessionLocal() as db:
+                user = await _make_user(db, f"nostamp-{slug}")
+                await _make_full_session(db, user.id, score=20, slug=slug, stamp=None)
+
+        _run(setup)
+
+        app = create_app()
+        with TestClient(app) as client:
+            resp = client.get(f"/r/{slug}/data")
+
+        assert resp.status_code == 200
+        assert resp.json()["stamp"] == "ROASTED"
+
+    def test_hollow_content_scores_low_despite_clean_structure(self):
+        # The actual feature: the rule engine sees this fixture as
+        # flawless (every section present, three strengths, zero issues),
+        # but the content says nothing real. It must not present as a
+        # strong resume. The previous flag-deduction design floored
+        # resumes like this in the 68-80 band.
+        ids = {}
+        slug = f"qual{uuid.uuid4().hex[:6]}"
+        clean_scored = {
+            "summary": {
+                "total_issues": 0,
+                "critical_issues": 0,
+                "high_issues": 0,
+                "medium_issues": 0,
+                "low_issues": 0,
+                "total_strengths": 3,
+            },
+            "metrics": {"word_count": 300},
+            "issues": [],
+            "strengths": [
+                {"code": "HAS_EXPERIENCE", "message": "x"},
+                {"code": "HAS_PROJECTS", "message": "x"},
+                {"code": "HAS_SKILLS", "message": "x"},
+            ],
+        }
+        flagged_roast = {
+            "verdict": "Clean but hollow.",
+            "roast": "Every section exists but says nothing real.",
+            "fixes": ["Add real numbers.", "Cut the buzzwords."],
+            "highlights": [],
+            "substance_score": 14,
+            "substance_reasoning": "Buzzwords and responsibilities; no evidence of any specific work.",
+            "quality_flags": ["GENERIC_BULLETS", "NO_QUANTIFIED_IMPACT"],
+        }
+
+        async def setup():
+            async with AsyncSessionLocal() as db:
+                user = await _make_user(db, f"qual-{slug}")
+                initialize_blob_storage()
+                session = await create_sessions(user_id=user.id, db=db)
+                session_id = session.id
+                upload_scored(session_id=str(session_id), data=clean_scored)
+                upload_roast(session_id=str(session_id), data=flagged_roast)
+                session = await get_session(db=db, session_id=session_id)
+                session.status = "DONE"
+                session.slug = slug
+                # What the renderer would have written: substance 14, no
+                # structural deductions.
+                session.composite_score = 14
+                session.stamp = "ROASTED"
+                db.add(session)
+                await db.commit()
+                ids["id"] = session_id
+
+        _run(setup)
+
+        app = create_app()
+        with TestClient(app) as client:
+            resp = client.get(f"/r/{slug}/data")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["subscores"]["Quality"] == 14
+        assert body["stamp"] == "ROASTED"
+        # The rule engine's own axes still report clean -- the content
+        # judgment is scoped to Quality, not smeared across the chart.
+        assert body["subscores"]["Structure"] == 100
+        assert body["subscores"]["Skills"] == 100
+        # And `summary` stays pure rule-engine output: the page's "WHAT
+        # THE RULE ENGINE FOUND" section must not absorb LLM judgments.
+        assert body["summary"]["total_issues"] == 0
 
     def test_unknown_slug_404s(self):
         app = create_app()
@@ -256,3 +376,36 @@ class TestComputeSubscores:
 
         scored = {"issues": [], "strengths": [{"code": "HAS_SKILLS", "message": "x"}]}
         assert _compute_subscores(scored)["Skills"] == 100
+
+    def test_substance_score_is_used_verbatim(self):
+        from backend.src.routes.public import _compute_subscores
+
+        scored = {"issues": [], "strengths": []}
+        assert _compute_subscores(scored, 37)["Quality"] == 37
+
+    def test_missing_substance_score_shows_100_not_0(self):
+        # roast.json predating the field -- an unknown score must not
+        # render as a damning one on a page the user may have shared.
+        from backend.src.routes.public import _compute_subscores
+
+        scored = {"issues": [], "strengths": []}
+        assert _compute_subscores(scored)["Quality"] == 100
+
+    def test_substance_score_does_not_touch_the_other_axes(self):
+        from backend.src.routes.public import _compute_subscores
+
+        scored = {
+            "issues": [{"code": "NO_EXPERIENCE", "message": "x", "severity": "critical"}],
+            "strengths": [],
+        }
+        result = _compute_subscores(scored, 20)
+        assert result["Quality"] == 20
+        # Structure's deduction is the rule-engine issue alone
+        assert result["Structure"] == 60
+
+    def test_out_of_range_substance_score_is_clamped(self):
+        from backend.src.routes.public import _compute_subscores
+
+        scored = {"issues": [], "strengths": []}
+        assert _compute_subscores(scored, 150)["Quality"] == 100
+        assert _compute_subscores(scored, -10)["Quality"] == 0

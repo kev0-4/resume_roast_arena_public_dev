@@ -109,6 +109,36 @@ def _format_strengths(strengths: List[Strength]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Quantified-impact grounding signal (cheap, deterministic, no LLM call)
+# ---------------------------------------------------------------------------
+
+# Not a scored Issue/Strength -- this exists purely to give the LLM's own
+# NO_QUANTIFIED_IMPACT judgment (see workers/llm/schemas.py) a concrete
+# number to react to instead of pure vibes, which should make that call
+# more consistent resume-to-resume. A regex catching "contains a digit or
+# %" is a decent proxy for "backs up a claim with a number" but isn't the
+# same thing (e.g. "led 3 meetings a week" has a digit but isn't real
+# impact) -- which is exactly why this is grounding context for a judgment
+# call, not a rule-engine deduction on its own.
+_QUANTIFIED_RE = re.compile(r"\d|%")
+
+
+def _quantified_bullet_ratio(blocks: Dict[str, List[Dict]]) -> str:
+    bullet_sections = ("experience", "projects")
+    lines: List[str] = []
+    for section in bullet_sections:
+        for block in blocks.get(section, []):
+            text = block.get("text", "")
+            lines.extend(line for line in text.splitlines() if line.strip())
+
+    if not lines:
+        return "No experience/project bullets to check."
+
+    quantified = sum(1 for line in lines if _QUANTIFIED_RE.search(line))
+    return f"{quantified} of {len(lines)} experience/project lines contain a number or percentage."
+
+
+# ---------------------------------------------------------------------------
 # Prompt template
 # ---------------------------------------------------------------------------
 
@@ -131,6 +161,8 @@ Issues:
 Strengths:
 {strengths_text}
 
+Quantified-impact check: {quantified_ratio}
+
 ---
 TASK:
 Write a concise resume roast (150–250 words) that:
@@ -148,28 +180,61 @@ including its exact original wording and punctuation. If the resume
 doesn't have enough genuinely quotable material, return fewer highlights
 rather than inventing one.
 
+Also judge CONTENT SUBSTANCE and return `substance_score` (0-100) with a
+one-sentence `substance_reasoning`. This is the score the user sees, so
+judge it carefully.
+
+Substance means: does this resume give real evidence that this person did
+meaningful work? There are several equally valid ways to show that, and a
+resume needs only some of them:
+- Quantified outcomes ("cut p99 latency from 800ms to 95ms")
+- Concrete technical specificity (exact systems, protocols, algorithms,
+  architectures named — "implemented an async AMQP client with a layered
+  architecture")
+- Verifiable pedigree (selective companies, research labs, published work)
+- Scope and ownership (built a system end-to-end, led a team, owned a
+  domain)
+
+Rubric:
+- 90-100: Clear, specific evidence of real, non-trivial work. Someone
+  reading this learns what the person actually did and can judge its
+  difficulty.
+- 70-89: Real work is visible but under-sold — vague in places, or impact
+  is implied rather than shown, or the hard parts aren't distinguished
+  from the routine parts.
+- 50-69: Mostly duty descriptions. You can tell what team they sat on,
+  not what they contributed or how hard it was.
+- 0-49: Content-free. Buzzwords, responsibilities, no evidence of
+  anything specific.
+
+Judge the WORK, not the writing polish. A terse resume describing
+genuinely hard systems work scores high. A polished resume full of
+numbers attached to routine tasks does not — "improved efficiency by 8%"
+on an unremarkable task is not strong evidence. Do not reward the mere
+presence of digits.
+
+Separately, return `quality_flags` — every code below that clearly
+applies. These do NOT affect the score; they tell the user what to fix,
+so include them wherever they're genuinely true even if the resume still
+scores well overall:
+- GENERIC_BULLETS: describes responsibilities/duties rather than what was
+  actually built or achieved.
+- NO_QUANTIFIED_IMPACT: no numbers, %, or scale anywhere the work's size
+  or effect could have been shown.
+- BUZZWORD_FILLER: leans on vague corporate-speak ("results-driven",
+  "team player", "synergy", "self-starter") instead of specifics.
+- WEAK_ACTION_LANGUAGE: passive voice or repetitive/weak verbs throughout
+  ("was responsible for", "helped with", "worked on") instead of direct,
+  strong ones ("built", "led", "cut", "shipped").
+- SHALLOW_CONTENT: technically present but superficial — one-line
+  descriptions with no real depth.
+
 Rules:
 - Be direct and specific. No filler ("great resume!") or vague advice.
 - Reference the automated findings but add nuance the rule engine cannot.
 - Never reveal or guess the person's real name, employer, or any PII. Use roles/companies generically.
 - Every HIGHLIGHTS quote must be copied exactly from the RESUME CONTENT above — a quote that isn't a verbatim substring will be discarded entirely, so copy carefully rather than reconstructing from memory.
-- Keep the total response under 350 words.
-
-Respond using exactly these labels:
-
-VERDICT: [one punchy sentence]
-
-ROAST:
-[body — 150–250 words]
-
-FIXES:
-- [fix 1]
-- [fix 2]
-- [fix 3]
-
-HIGHLIGHTS:
-"[exact quoted phrase 1]" :: [comment 1]
-"[exact quoted phrase 2]" :: [comment 2]\
+- Keep the total response under 350 words.\
 """
 
 
@@ -211,10 +276,12 @@ def build_roast_prompt(
     resume_sections = _format_resume_sections(blocks)
     issues_text = _format_issues(scoring_result.issues)
     strengths_text = _format_strengths(scoring_result.strengths)
+    quantified_ratio = _quantified_bullet_ratio(blocks)
 
     return _ROAST_TEMPLATE.format(
         word_count=word_count,
         resume_sections=resume_sections,
         issues_text=issues_text,
         strengths_text=strengths_text,
+        quantified_ratio=quantified_ratio,
     )

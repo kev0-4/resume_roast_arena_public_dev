@@ -26,6 +26,9 @@ def assemble_roast(
         roast=roast_result.roast,
         fixes=roast_result.fixes,
         highlights=roast_result.highlights,
+        substance_score=roast_result.substance_score,
+        substance_reasoning=roast_result.substance_reasoning,
+        quality_flags=roast_result.quality_flags,
         model=model,
         usage=usage,
         timestamps={

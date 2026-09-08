@@ -277,15 +277,82 @@ class TestBuildRoastPrompt:
         )
         assert "312" in prompt
 
-    def test_prompt_contains_output_format_labels(self):
+    def test_prompt_describes_the_required_task(self):
+        # Output *shape* (verdict/roast/fixes/highlights/quality_flags) is
+        # enforced by Gemini's response_schema now, not by text labels in
+        # the prompt (see workers/llm/pipeline/client.py) -- this just
+        # checks the prompt still asks for the right content.
         anonymized = _make_anonymized(blocks={})
         prompt = build_roast_prompt(
             anonymized=anonymized,
             scoring_result=_make_scoring_result(),
         )
-        assert "VERDICT:" in prompt
-        assert "ROAST:" in prompt
-        assert "FIXES:" in prompt
+        assert "roast" in prompt.lower()
+        assert "verdict" in prompt.lower()
+        assert "HIGHLIGHTS" in prompt
+
+    def test_prompt_asks_for_the_substance_score_and_its_rubric(self):
+        # substance_score is the number the user actually sees, and the
+        # rubric is the only thing calibrating it -- if the prompt stops
+        # carrying either, scoring silently reverts to vibes.
+        anonymized = _make_anonymized(blocks={})
+        prompt = build_roast_prompt(
+            anonymized=anonymized,
+            scoring_result=_make_scoring_result(),
+        )
+        assert "substance_score" in prompt
+        assert "substance_reasoning" in prompt
+        for band in ("90-100", "70-89", "50-69", "0-49"):
+            assert band in prompt
+
+    def test_prompt_warns_against_scoring_on_polish_alone(self):
+        # The eval's key finding: the model over-rewards the presence of
+        # digits and formatting polish over evidence of real work.
+        anonymized = _make_anonymized(blocks={})
+        prompt = build_roast_prompt(
+            anonymized=anonymized,
+            scoring_result=_make_scoring_result(),
+        )
+        # Normalized: the template hard-wraps, so these sentences span lines.
+        flat = " ".join(prompt.split())
+        assert "Judge the WORK, not the writing polish" in flat
+        assert "Do not reward the mere presence of digits" in flat
+
+    def test_prompt_says_quality_flags_do_not_affect_the_score(self):
+        # Flags are explanatory only now. If the prompt lets the model
+        # believe they're penalties, it double-counts them against
+        # substance_score.
+        anonymized = _make_anonymized(blocks={})
+        prompt = build_roast_prompt(
+            anonymized=anonymized,
+            scoring_result=_make_scoring_result(),
+        )
+        assert "do NOT affect the score" in prompt
+
+    def test_prompt_contains_quality_flag_instructions(self):
+        anonymized = _make_anonymized(blocks={})
+        prompt = build_roast_prompt(
+            anonymized=anonymized,
+            scoring_result=_make_scoring_result(),
+        )
+        for code in (
+            "GENERIC_BULLETS",
+            "NO_QUANTIFIED_IMPACT",
+            "BUZZWORD_FILLER",
+            "WEAK_ACTION_LANGUAGE",
+            "SHALLOW_CONTENT",
+        ):
+            assert code in prompt
+
+    def test_prompt_contains_quantified_impact_grounding_line(self):
+        anonymized = _make_anonymized(
+            blocks={"experience": [{"text": "Cut latency by 40%\nManaged a team"}]}
+        )
+        prompt = build_roast_prompt(
+            anonymized=anonymized,
+            scoring_result=_make_scoring_result(),
+        )
+        assert "1 of 2 experience/project lines contain a number or percentage" in prompt
 
     def test_raises_on_missing_content(self):
         bad_anonymized = {"session_id": "x", "metrics": {}}

@@ -91,7 +91,7 @@ _SUBSCORE_CATEGORIES = {
     # cleanly around the result page's radar chart without the axis
     # labels colliding into each other or clipping at the chart's edge.
     "Contact": {"NO_CONTACT_INFO", "NO_PROFESSIONAL_LINKS"},
-    "Experience": {"NO_DATES_IN_EXPERIENCE", "NO_ACTION_VERBS", "PASSIVE_VOICE"},
+    "Experience": {"NO_DATES_IN_EXPERIENCE"},
     "Clarity": {"FIRST_PERSON_USAGE", "LONG_SENTENCES", "LOW_VOCABULARY_VARIETY"},
     "Conciseness": {"RESUME_TOO_SHORT", "RESUME_TOO_LONG"},
 }
@@ -102,20 +102,35 @@ _SUBSCORE_CATEGORIES = {
 _SKILLS_STRENGTH_CODE = "HAS_SKILLS"
 _NO_SKILLS_SCORE = 55  # deliberately not 0 or 100 -- see the docstring below
 
+# Shown on the radar chart when roast.json predates substance_score
+# (nothing migrates old artifacts). 100, not 0: an unknown score should not
+# render as a damning one on a page the user may have already shared.
+_NO_SUBSTANCE_SCORE = 100
 
-def _compute_subscores(scored: dict) -> dict[str, int]:
+
+def _compute_subscores(scored: dict, substance_score: int | None = None) -> dict[str, int]:
     """
-    Real per-category subscores for the result page's radar chart, built
-    entirely from this session's actual rule-engine output (scored.json's
-    `issues`/`strengths` lists, workers/scoring/pipeline/rules.py) -- not
-    invented numbers, and not a second LLM call. Each of the 5 deduction-
-    based categories starts at 100 and loses points per issue that falls
-    in it, weighted by severity (_SEVERITY_WEIGHT), floored at 0. "Skills"
-    is the one category with no corresponding issue rule to deduct from
-    (rules.py only ever produces the HAS_SKILLS *strength*, never a
-    "missing skills" issue) -- scored as 100 if that strength fired, else
-    a flat 55, since giving 0 would overstate a penalty this codebase's
-    own rule engine doesn't actually claim to detect.
+    Real per-category subscores for the result page's radar chart. The 5
+    rule-based categories are built entirely from this session's actual
+    rule-engine output (scored.json's `issues`/`strengths` lists,
+    workers/scoring/pipeline/rules.py) -- not invented numbers, and not a
+    second LLM call. Each starts at 100 and loses points per issue that
+    falls in it, weighted by severity (_SEVERITY_WEIGHT), floored at 0.
+
+    "Quality" is the one axis built from the LLM's own judgment
+    (roast.json's substance_score, `substance_score` param here) rather
+    than the deterministic rule engine -- judging whether writing shows
+    evidence of real work requires actually reading it, not checking
+    section presence. It's the LLM's holistic 0-100 number used directly,
+    not a deduction tally: an eval of the previous flag-deduction design
+    found 5 binary flags compressed every resume into a 32-point band
+    (see quality-scoring-eval/REPORT.md).
+
+    "Skills" is the one category with no corresponding issue rule to
+    deduct from (rules.py only ever produces the HAS_SKILLS *strength*,
+    never a "missing skills" issue) -- scored as 100 if that strength
+    fired, else a flat 55, since giving 0 would overstate a penalty this
+    codebase's own rule engine doesn't actually claim to detect.
     """
     issue_codes = [issue["code"] for issue in scored.get("issues", [])]
     issue_severities = {issue["code"]: issue["severity"] for issue in scored.get("issues", [])}
@@ -126,28 +141,43 @@ def _compute_subscores(scored: dict) -> dict[str, int]:
         deduction = sum(_SEVERITY_WEIGHT.get(issue_severities[code], 0) for code in issue_codes if code in codes)
         subscores[category] = max(0, 100 - deduction)
 
+    subscores["Quality"] = (
+        _NO_SUBSTANCE_SCORE if substance_score is None else max(0, min(100, substance_score))
+    )
+
     subscores["Skills"] = 100 if _SKILLS_STRENGTH_CODE in strength_codes else _NO_SKILLS_SCORE
     return subscores
 
 
-def _compute_stamp(summary: dict) -> str:
-    """
-    Mirrors workers/renderer/pipeline/card_data.py's compute_stamp exactly
-    -- duplicated rather than imported because backend/ and workers/ are
-    separately deployable services with their own import roots (backend
-    reaching into workers/ would break that boundary for one tiny pure
-    function). Keep in sync if the stamp formula ever changes.
-    """
-    critical = summary.get("critical_issues", 0)
-    high = summary.get("high_issues", 0)
-    total_issues = summary.get("total_issues", 0)
-    total_strengths = summary.get("total_strengths", 0)
+# Mirrors workers/renderer/pipeline/card_data.py's SOLID_MIN_SCORE /
+# MID_MIN_SCORE. Only reached for sessions rendered before Sessions.stamp
+# was persisted -- see _stamp_for below.
+_SOLID_MIN_SCORE = 75
+_MID_MIN_SCORE = 35
 
-    if critical > 0 or high >= 2:
-        return "ROASTED"
-    if total_issues == 0 and total_strengths >= 3:
+
+def _stamp_for(session: SessionModel) -> str:
+    """
+    The stamp to show on the result page.
+
+    Reads the stamp the renderer persisted, which is the exact string baked
+    into the card PNG -- so the page and the image it's showing can't
+    disagree. This route used to recompute the stamp from issue counts,
+    which silently drifted from the card whenever the two formulas fell out
+    of sync (they did).
+
+    Only falls back to recomputing when the column is null, i.e. rows
+    rendered before the renderer started writing it.
+    """
+    if session.stamp:
+        return session.stamp
+
+    score = session.composite_score or 0
+    if score >= _SOLID_MIN_SCORE:
         return "SOLID"
-    return "MID"
+    if score >= _MID_MIN_SCORE:
+        return "MID"
+    return "ROASTED"
 
 
 @public_router.get("/r/{slug}")
@@ -180,17 +210,22 @@ async def get_public_roast_analysis(slug: str, db: AsyncSession = Depends(get_db
         get_session_rank(db=db, composite_score=session.composite_score, created_at=session.created_at),
     )
 
+    # `summary` stays pure rule-engine output -- the result page's "WHAT
+    # THE RULE ENGINE FOUND" section is labeled exactly that and shouldn't
+    # silently start including LLM-judged content. The LLM's judgment
+    # reaches the page through the Quality subscore and the roast text
+    # instead.
     summary = scored["summary"]
 
     response = RoastAnalysisResponse(
         slug=session.slug,
         composite_score=session.composite_score,
-        stamp=_compute_stamp(summary),
+        stamp=_stamp_for(session),
         created_at=session.created_at,
         rank=rank,
         total_ranked=total_ranked,
         summary=summary,
-        subscores=_compute_subscores(scored),
+        subscores=_compute_subscores(scored, roast.get("substance_score")),
         metrics=scored.get("metrics", {}),
         verdict=roast["verdict"],
         roast=roast["roast"],

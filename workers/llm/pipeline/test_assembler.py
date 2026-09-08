@@ -15,6 +15,8 @@ def _make_roast_result(**kwargs) -> RoastResult:
         "verdict": "Your resume is spectacularly mediocre.",
         "roast": "The work experience reads like a job description, not a career.",
         "fixes": ["Quantify impact", "Remove filler phrases", "Shorten skills list"],
+        "substance_score": 64,
+        "substance_reasoning": "Duty descriptions, little evidence of ownership.",
     }
     defaults.update(kwargs)
     return RoastResult(**defaults)
@@ -126,5 +128,36 @@ class TestAssembleRoast:
             usage={"input_tokens": 1, "output_tokens": 1},
             roasted_at=datetime(2024, 1, 1),
         )
-        required = {"session_id", "roast_version", "verdict", "roast", "fixes", "model", "usage", "timestamps"}
+        required = {
+            "session_id",
+            "roast_version",
+            "verdict",
+            "roast",
+            "fixes",
+            "substance_score",
+            "substance_reasoning",
+            "quality_flags",
+            "model",
+            "usage",
+            "timestamps",
+        }
         assert required.issubset(result.keys())
+
+    def test_substance_fields_survive_assembly(self):
+        # roast.json is what the renderer and the public API both read the
+        # score from -- if it doesn't land here, nothing downstream can
+        # score content at all.
+        result = assemble_roast(
+            session_id="s",
+            roast_result=_make_roast_result(
+                substance_score=91,
+                substance_reasoning="Specific systems work with real numbers.",
+                quality_flags=["BUZZWORD_FILLER"],
+            ),
+            model="claude-haiku-4-5",
+            usage={"input_tokens": 1, "output_tokens": 1},
+            roasted_at=datetime(2024, 1, 1),
+        )
+        assert result["substance_score"] == 91
+        assert result["substance_reasoning"] == "Specific systems work with real numbers."
+        assert result["quality_flags"] == ["BUZZWORD_FILLER"]

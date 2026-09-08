@@ -99,13 +99,19 @@ async def process_llm_job(
         # 5. Call LLM
         # ------------------------------------------------------------
         try:
-            raw_text, usage, model_used = await call_roast_llm(prompt)
+            parsed_response, usage, model_used = await call_roast_llm(prompt)
         except genai_errors.ServerError as e:
             raise TransientLLMError(f"Gemini server error ({e.code}): {e}")
         except genai_errors.ClientError as e:
             if e.code == 429:
                 raise TransientLLMError(f"Gemini rate limit: {e}")
             raise PermanentLLMError(f"Gemini client error ({e.code}): {e}")
+        except ValueError as e:
+            # response_schema validation failed -- same class of failure as
+            # the old text-format parser raising, so same treatment: permanent,
+            # not retried (retrying wouldn't change whether the model's
+            # response matched the schema).
+            raise PermanentLLMError(f"Gemini response did not match schema: {e}")
         emit_event(
             "llm.response_received",
             {
@@ -121,7 +127,7 @@ async def process_llm_job(
         # 6. Parse + validate output
         # ------------------------------------------------------------
         try:
-            roast_result = parse_roast_output(raw_text, source_text=prompt)
+            roast_result = parse_roast_output(parsed_response, source_text=prompt)
         except ValueError as e:
             raise PermanentLLMError(f"Failed to parse LLM output: {e}")
         emit_event("llm.output_parsed", {"session_id": str(session_id), "status": "INFO"})

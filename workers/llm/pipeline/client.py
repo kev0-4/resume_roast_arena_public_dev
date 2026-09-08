@@ -11,16 +11,30 @@ Model: gemini-3.5-flash-lite by default (configurable via GEMINI_ROAST_MODEL) �
 chosen for its higher free-tier rate limits.
 Provider may change (e.g. to OpenAI) later — this module is the only place
 that needs to change.
+
+Structured output (response_schema=LLMStructuredResponse, JSON mode): was a
+hand-rolled "VERDICT:/ROAST:/FIXES:/HIGHLIGHTS:" text format regex-parsed by
+validator.py, which meant any formatting slip from the model was an outright
+parse failure (a real, silently-costly failure mode -- see
+processor.py's PermanentLLMError on parse errors, which burns the call's
+tokens for nothing). JSON mode constrains the model to the schema directly
+instead of hoping it follows text formatting instructions; adding the new
+quality_flags field to a schema is a one-line change, versus another
+hand-parsed text section.
 """
 
 import os
 from google import genai
 from typing import Tuple
 
+from ..schemas import LLMStructuredResponse
+
 _MODEL = os.getenv("GEMINI_ROAST_MODEL", "gemini-3.5-flash-lite")
 # Bumped from 1024 -- the HIGHLIGHTS section (2-4 quoted excerpts + comments)
 # added real headroom pressure on top of verdict/roast/fixes; 1024 was
 # already close to the response's natural length before this addition.
+# quality_flags adds a handful more tokens on top (a short list of enum
+# values) -- not bumped further, well within the existing headroom.
 _MAX_OUTPUT_TOKENS = 1536
 
 _async_client: genai.Client | None = None
@@ -33,13 +47,16 @@ def _get_client() -> genai.Client:
     return _async_client
 
 
-async def call_roast_llm(prompt: str) -> Tuple[str, dict, str]:
+async def call_roast_llm(prompt: str) -> Tuple[LLMStructuredResponse, dict, str]:
     """
-    Call the Gemini API and return (response_text, usage_dict, model_used).
+    Call the Gemini API and return (parsed_response, usage_dict, model_used).
 
     Raises:
         google.genai.errors.ServerError → caller should wrap as TransientLLMError
         google.genai.errors.ClientError → caller inspects .code (429 vs other 4xx)
+        ValueError → response_schema validation failed to parse (caller wraps
+                     as PermanentLLMError, same as a text-format parse failure
+                     used to be)
     """
     client = _get_client()
 
@@ -48,14 +65,18 @@ async def call_roast_llm(prompt: str) -> Tuple[str, dict, str]:
         contents=prompt,
         config=genai.types.GenerateContentConfig(
             max_output_tokens=_MAX_OUTPUT_TOKENS,
+            response_mime_type="application/json",
+            response_schema=LLMStructuredResponse,
         ),
     )
 
-    text = response.text or ""
+    if response.parsed is None:
+        raise ValueError(f"Gemini response did not match response_schema: {response.text!r}")
+
     usage = {
         "input_tokens": response.usage_metadata.prompt_token_count,
         "output_tokens": response.usage_metadata.candidates_token_count,
     }
     model_used: str = response.model_version or _MODEL
 
-    return text, usage, model_used
+    return response.parsed, usage, model_used
