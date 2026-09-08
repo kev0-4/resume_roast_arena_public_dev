@@ -237,6 +237,28 @@ jobs:
     defaults:
       run:
         working-directory: frontend
+    # Not secrets -- an org/project ID is an identifier, not a credential
+    # (VERCEL_TOKEN is the actual secret, unchanged below). Pins the CI job
+    # to the real "resume-roast-arena" project, matching
+    # frontend/.vercel/project.json (gitignored, so this is the only copy
+    # CI ever sees -- a fresh `actions/checkout` has no linked project at
+    # all otherwise).
+    #
+    # Without this, `vercel deploy --yes` doesn't fail when it can't find a
+    # linked project -- it silently AUTO-CREATES a new one named after the
+    # working directory ("frontend") and deploys there instead, exiting 0
+    # for the *link* step. That's exactly what happened right after --yes
+    # was added below: three merges (#12/#13/#14) each reported CI failure,
+    # but not from this cause -- they'd already silently deployed to the
+    # wrong "frontend" project (which then failed its own build from
+    # missing env vars, since nothing had ever configured that project).
+    # Real production (resume-roast-arena) sat 23+ hours stale through all
+    # three while every run *looked* like an infra failure. Confirmed by
+    # listing the account's Vercel projects and seeing "frontend" appear
+    # for the first time at the exact timestamp of the first --yes run.
+    env:
+      VERCEL_ORG_ID: team_NJBlouYFjF0mdtNSvpr2uU4v
+      VERCEL_PROJECT_ID: prj_o0WHPw3k9GoJavgJkSawq9L9bjgZ
 
     steps:
       - uses: actions/checkout@v4
