@@ -263,4 +263,4 @@ jobs:
       # scope -- confirmed working via a real manual deploy with this same
       # token before this fix.
       - name: Deploy to production
-        run: vercel deploy --prod --token="${{ secrets.VERCEL_TOKEN }}"
+        run: vercel deploy --prod --yes --token="${{ secrets.VERCEL_TOKEN }}"
