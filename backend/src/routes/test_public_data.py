@@ -71,10 +71,13 @@ ROAST_FIXTURE = {
     "roast": "The experience section is fine, but nothing here sticks.",
     "fixes": ["Quantify your impact.", "Cut the buzzwords."],
     "highlights": [{"quote": "team player", "comment": "Everyone says this. Nobody proves it."}],
+    "substance_score": 68,
+    "substance_reasoning": "Real work, but described as duties rather than outcomes.",
+    "quality_flags": ["GENERIC_BULLETS"],
 }
 
 
-async def _make_full_session(db, user_id, *, score, slug):
+async def _make_full_session(db, user_id, *, score, slug, stamp=None):
     initialize_blob_storage()
     session = await create_sessions(user_id=user_id, db=db)
     session_id = session.id
@@ -84,6 +87,7 @@ async def _make_full_session(db, user_id, *, score, slug):
     session.status = "DONE"
     session.slug = slug
     session.composite_score = score
+    session.stamp = stamp
     db.add(session)
     await db.commit()
     return session_id
@@ -172,20 +176,61 @@ class TestPublicDataRoute:
         assert body["subscores"]["Experience"] == 100
         assert body["subscores"]["Conciseness"] == 100
         assert body["subscores"]["Skills"] == 100
-        # ROAST_FIXTURE has no quality_issues -- Quality stays untouched at 100
-        assert body["subscores"]["Quality"] == 100
+        # Quality is the LLM's holistic judgment used directly, not a
+        # deduction tally -- ROAST_FIXTURE's substance_score verbatim.
+        assert body["subscores"]["Quality"] == 68
         assert body["verdict"] == "Competent but forgettable."
         assert body["fixes"] == ["Quantify your impact.", "Cut the buzzwords."]
         assert body["highlights"][0]["quote"] == "team player"
         assert "public" in resp.headers.get("cache-control", "")
 
-    def test_quality_issues_lower_the_quality_subscore_and_stamp(self):
-        # Rule engine alone (a fixture with zero structural issues) would
-        # call this SOLID -- two LLM-issued HIGH quality flags should pull
-        # it down to ROASTED, and the radar chart's Quality axis should
-        # reflect the deduction. This is the actual feature: a resume with
-        # clean structure but hollow content shouldn't score as if it had
-        # neither problem.
+    def test_stamp_comes_from_the_renderer_not_a_recomputation(self):
+        # The stamp shown on the page must be the exact one baked into the
+        # card PNG. This route used to recompute it from issue counts,
+        # which silently drifted from the card whenever the two formulas
+        # fell out of sync. A stored stamp that disagrees with what any
+        # recomputation would produce proves the stored one wins.
+        slug = f"stamp{uuid.uuid4().hex[:6]}"
+
+        async def setup():
+            async with AsyncSessionLocal() as db:
+                user = await _make_user(db, f"stamp-{slug}")
+                # score=20 would recompute to ROASTED; stored says SOLID
+                await _make_full_session(db, user.id, score=20, slug=slug, stamp="SOLID")
+
+        _run(setup)
+
+        app = create_app()
+        with TestClient(app) as client:
+            resp = client.get(f"/r/{slug}/data")
+
+        assert resp.status_code == 200
+        assert resp.json()["stamp"] == "SOLID"
+
+    def test_stamp_falls_back_to_the_score_when_not_stored(self):
+        # Rows rendered before the renderer persisted a stamp.
+        slug = f"nostamp{uuid.uuid4().hex[:6]}"
+
+        async def setup():
+            async with AsyncSessionLocal() as db:
+                user = await _make_user(db, f"nostamp-{slug}")
+                await _make_full_session(db, user.id, score=20, slug=slug, stamp=None)
+
+        _run(setup)
+
+        app = create_app()
+        with TestClient(app) as client:
+            resp = client.get(f"/r/{slug}/data")
+
+        assert resp.status_code == 200
+        assert resp.json()["stamp"] == "ROASTED"
+
+    def test_hollow_content_scores_low_despite_clean_structure(self):
+        # The actual feature: the rule engine sees this fixture as
+        # flawless (every section present, three strengths, zero issues),
+        # but the content says nothing real. It must not present as a
+        # strong resume. The previous flag-deduction design floored
+        # resumes like this in the 68-80 band.
         ids = {}
         slug = f"qual{uuid.uuid4().hex[:6]}"
         clean_scored = {
@@ -210,10 +255,9 @@ class TestPublicDataRoute:
             "roast": "Every section exists but says nothing real.",
             "fixes": ["Add real numbers.", "Cut the buzzwords."],
             "highlights": [],
-            "quality_issues": [
-                {"code": "GENERIC_BULLETS", "severity": "high"},
-                {"code": "NO_QUANTIFIED_IMPACT", "severity": "high"},
-            ],
+            "substance_score": 14,
+            "substance_reasoning": "Buzzwords and responsibilities; no evidence of any specific work.",
+            "quality_flags": ["GENERIC_BULLETS", "NO_QUANTIFIED_IMPACT"],
         }
 
         async def setup():
@@ -227,7 +271,10 @@ class TestPublicDataRoute:
                 session = await get_session(db=db, session_id=session_id)
                 session.status = "DONE"
                 session.slug = slug
-                session.composite_score = 80
+                # What the renderer would have written: substance 14, no
+                # structural deductions.
+                session.composite_score = 14
+                session.stamp = "ROASTED"
                 db.add(session)
                 await db.commit()
                 ids["id"] = session_id
@@ -240,12 +287,15 @@ class TestPublicDataRoute:
 
         assert resp.status_code == 200
         body = resp.json()
-        # 2 HIGH quality issues -> 25*2 = 50 deduction, floored logic n/a here
-        assert body["subscores"]["Quality"] == 50
-        # Same 2-HIGH threshold compute_stamp uses for rule-engine issues
+        assert body["subscores"]["Quality"] == 14
         assert body["stamp"] == "ROASTED"
-        # Unaffected axes stay at 100 -- the deduction is scoped to Quality only
+        # The rule engine's own axes still report clean -- the content
+        # judgment is scoped to Quality, not smeared across the chart.
         assert body["subscores"]["Structure"] == 100
+        assert body["subscores"]["Skills"] == 100
+        # And `summary` stays pure rule-engine output: the page's "WHAT
+        # THE RULE ENGINE FOUND" section must not absorb LLM judgments.
+        assert body["summary"]["total_issues"] == 0
 
     def test_unknown_slug_404s(self):
         app = create_app()
@@ -327,65 +377,35 @@ class TestComputeSubscores:
         scored = {"issues": [], "strengths": [{"code": "HAS_SKILLS", "message": "x"}]}
         assert _compute_subscores(scored)["Skills"] == 100
 
-    def test_no_quality_issues_arg_defaults_quality_to_100(self):
+    def test_substance_score_is_used_verbatim(self):
+        from backend.src.routes.public import _compute_subscores
+
+        scored = {"issues": [], "strengths": []}
+        assert _compute_subscores(scored, 37)["Quality"] == 37
+
+    def test_missing_substance_score_shows_100_not_0(self):
+        # roast.json predating the field -- an unknown score must not
+        # render as a damning one on a page the user may have shared.
         from backend.src.routes.public import _compute_subscores
 
         scored = {"issues": [], "strengths": []}
         assert _compute_subscores(scored)["Quality"] == 100
 
-    def test_quality_issues_deduct_from_quality_only(self):
+    def test_substance_score_does_not_touch_the_other_axes(self):
         from backend.src.routes.public import _compute_subscores
 
         scored = {
             "issues": [{"code": "NO_EXPERIENCE", "message": "x", "severity": "critical"}],
             "strengths": [],
         }
-        quality_issues = [{"code": "BUZZWORD_FILLER", "severity": "medium"}]
-        result = _compute_subscores(scored, quality_issues)
-        # BUZZWORD_FILLER (medium, -15) only touches Quality
-        assert result["Quality"] == 85
-        # Structure's deduction is from the rule-engine issue, unaffected by quality_issues
+        result = _compute_subscores(scored, 20)
+        assert result["Quality"] == 20
+        # Structure's deduction is the rule-engine issue alone
         assert result["Structure"] == 60
 
-    def test_unknown_quality_code_is_ignored_not_raised(self):
+    def test_out_of_range_substance_score_is_clamped(self):
         from backend.src.routes.public import _compute_subscores
 
         scored = {"issues": [], "strengths": []}
-        quality_issues = [{"code": "SOME_FUTURE_CODE", "severity": "high"}]
-        assert _compute_subscores(scored, quality_issues)["Quality"] == 100
-
-
-class TestMergeQualityIntoSummary:
-    """
-    Mirrors workers/renderer/pipeline/test_card_data.py's
-    TestMergeQualityIntoSummary -- this file's _merge_quality_into_summary
-    is a deliberate duplicate (see its own docstring for why), so it gets
-    the same test coverage independently rather than assuming the two
-    copies can't drift.
-    """
-
-    def test_no_quality_issues_is_a_no_op(self):
-        from backend.src.routes.public import _merge_quality_into_summary
-
-        summary = {"high_issues": 1, "total_issues": 1}
-        assert _merge_quality_into_summary(summary, []) == summary
-
-    def test_quality_issues_increment_matching_severity_and_total(self):
-        from backend.src.routes.public import _merge_quality_into_summary
-
-        summary = {"high_issues": 1, "total_issues": 1}
-        quality_issues = [
-            {"code": "GENERIC_BULLETS", "severity": "high"},
-            {"code": "SHALLOW_CONTENT", "severity": "low"},
-        ]
-        merged = _merge_quality_into_summary(summary, quality_issues)
-        assert merged["high_issues"] == 2
-        assert merged["low_issues"] == 1
-        assert merged["total_issues"] == 3
-
-    def test_does_not_mutate_the_original_summary(self):
-        from backend.src.routes.public import _merge_quality_into_summary
-
-        summary = {"high_issues": 1, "total_issues": 1}
-        _merge_quality_into_summary(summary, [{"code": "SHALLOW_CONTENT", "severity": "low"}])
-        assert summary == {"high_issues": 1, "total_issues": 1}
+        assert _compute_subscores(scored, 150)["Quality"] == 100
+        assert _compute_subscores(scored, -10)["Quality"] == 0

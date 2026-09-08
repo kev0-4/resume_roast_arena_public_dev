@@ -16,11 +16,12 @@ section 29):
 - v1 ships with hardcoded resume-snippet lines (matching the reference
   component's defaultResumeLines) -- a real-anonymized-snippet mode is a
   deferred future toggle, not built here.
-- composite_score/stamp are computed from scored.json's issues merged with
-  roast.json's LLM-issued quality_issues (merge_quality_into_summary) --
-  content-quality problems (generic bullets, no quantified impact, etc.)
-  the rule engine structurally can't detect, so a resume with clean
-  sections but hollow content no longer scores as if it had none.
+- composite_score = roast.json's substance_score (the LLM's holistic 0-100
+  content judgment) minus the rule engine's structural deductions, and the
+  stamp is derived from that score rather than from issue counts. Replaced
+  a design that deducted fixed points per binary quality flag, which a real
+  eval showed compressed everything into a 32-point band and couldn't tell
+  mediocre from bad -- see quality-scoring-eval/REPORT.md.
 """
 
 from typing import Dict, Any, List
@@ -47,69 +48,73 @@ RESUME_SNIPPET_LINES: List[str] = [
 CTA_TEXT = "resumeroastarena.com"  # placeholder -- no real domain yet
 
 
-_VALID_SEVERITIES = ("critical", "high", "medium", "low")
-
-
-def merge_quality_into_summary(
-    summary: Dict[str, Any], quality_issues: List[Dict[str, Any]]
-) -> Dict[str, Any]:
+def structural_deduction(summary: Dict[str, Any]) -> int:
     """
-    Fold roast.json's LLM-issued quality_issues into a copy of scored.json's
-    summary counts -- same shape in, same shape out, so compute_score and
-    compute_stamp don't need to know two different issue sources exist.
-
-    Quality issues never carry "critical" severity (see workers/llm/schemas
-    .py's QUALITY_SEVERITY -- the LLM only ever assesses high/medium/low
-    content-quality codes), but this reads whatever severity string shows
-    up rather than assuming, so it stays correct if that ever changes.
-
-    Checks against _VALID_SEVERITIES rather than "is this key already in
-    the summary dict" -- scored.json's summary always has all 5 keys in
-    practice (ScoreSummary requires them), but the merge shouldn't silently
-    drop a real severity just because a caller's dict happened not to
-    pre-populate that key at zero.
+    Points the rule engine's structural issues cost (missing sections, bad
+    length, no contact info, etc.) -- 20/critical, 10/high, 5/medium,
+    2/low, the same weights this file has always used.
     """
-    merged = dict(summary)
-    for issue in quality_issues:
-        severity = issue.get("severity")
-        if severity not in _VALID_SEVERITIES:
-            continue
-        key = f"{severity}_issues"
-        merged[key] = merged.get(key, 0) + 1
-        merged["total_issues"] = merged.get("total_issues", 0) + 1
-    return merged
-
-
-def compute_score(summary: Dict[str, Any]) -> int:
-    """
-    Deterministic 0-100 composite score from a summary's issue counts
-    (scored.json's own counts, or merge_quality_into_summary's merged
-    result -- this function doesn't care which).
-
-    100 - 20*critical - 10*high - 5*medium - 2*low, clamped to [0, 100].
-    """
-    score = (
-        100
-        - 20 * summary.get("critical_issues", 0)
-        - 10 * summary.get("high_issues", 0)
-        - 5 * summary.get("medium_issues", 0)
-        - 2 * summary.get("low_issues", 0)
+    return (
+        20 * summary.get("critical_issues", 0)
+        + 10 * summary.get("high_issues", 0)
+        + 5 * summary.get("medium_issues", 0)
+        + 2 * summary.get("low_issues", 0)
     )
-    return max(0, min(100, score))
 
 
-def compute_stamp(summary: Dict[str, Any]) -> str:
-    """Dynamic stamp badge tier, replacing the reference's hardcoded "ROASTED"."""
-    critical = summary.get("critical_issues", 0)
-    high = summary.get("high_issues", 0)
-    total_issues = summary.get("total_issues", 0)
-    total_strengths = summary.get("total_strengths", 0)
+def compute_score(summary: Dict[str, Any], substance_score: int | None = None) -> int:
+    """
+    0-100 composite score: the LLM's holistic substance judgment
+    (roast.json's substance_score) as the baseline, minus what the rule
+    engine's structural issues cost. Clamped to [0, 100].
 
-    if critical > 0 or high >= 2:
-        return "ROASTED"
-    if total_issues == 0 and total_strengths >= 3:
+    Reads as "your content is worth 75, and you lose 10 more for having no
+    projects section" -- content quality dominates, structure adjusts.
+
+    `substance_score=None` falls back to a flat 100 baseline, i.e. pure
+    structural scoring. That's the pre-substance-score behaviour, kept for
+    sessions whose roast.json predates the field (nothing migrates old
+    artifacts) rather than scoring them as if their content were worthless.
+
+    Why substance is a baseline rather than a set of point deductions: the
+    previous design deducted fixed points per binary quality flag, which a
+    real 25-resume eval showed compressed every result into a 32-point band
+    (a deliberately content-free resume floored at 68/100) and could not
+    separate mediocre from bad, because the flags are correlated symptoms
+    that fire together. One holistic judgment measured a 90-point spread on
+    the same set and tracked human tier labels better. See
+    quality-scoring-eval/REPORT.md.
+    """
+    baseline = 100 if substance_score is None else substance_score
+    return max(0, min(100, baseline - structural_deduction(summary)))
+
+
+SOLID_MIN_SCORE = 85
+MID_MIN_SCORE = 60
+
+
+def compute_stamp(score: int) -> str:
+    """
+    Stamp badge tier, derived from the final composite score.
+
+    Was derived from structural issue counts alone ("critical > 0 or
+    high >= 2 -> ROASTED; no issues and 3+ strengths -> SOLID"). That
+    breaks under substance scoring: a resume with every section present
+    but content-free writing has zero structural issues and would have
+    been stamped SOLID while scoring in the single digits. Deriving the
+    tier from the score it's displayed next to keeps the two from ever
+    contradicting each other.
+
+    Thresholds calibrated against the eval set (quality-scoring-eval/):
+    metric-rich and strong technical resumes land 85-95 (SOLID), real but
+    under-sold resumes 65-80 (MID), duty-description and buzzword resumes
+    5-45 (ROASTED).
+    """
+    if score >= SOLID_MIN_SCORE:
         return "SOLID"
-    return "MID"
+    if score >= MID_MIN_SCORE:
+        return "MID"
+    return "ROASTED"
 
 
 def build_card_context(
@@ -119,15 +124,20 @@ def build_card_context(
     display_name: str,
 ) -> Dict[str, Any]:
     """Assembles the full Jinja2 template context for roast_card.html."""
-    summary = merge_quality_into_summary(scored["summary"], roast.get("quality_issues", []))
+    summary = scored["summary"]
+    score = compute_score(summary, roast.get("substance_score"))
 
     return {
         "candidate_name": display_name,
         "punchline": roast["verdict"],
-        "stamp": compute_stamp(summary),
-        "score": compute_score(summary),
+        "stamp": compute_stamp(score),
+        "score": score,
         "stat2_label": "Issues Found",
-        "stat2_value": str(summary.get("total_issues", 0)),
+        # Structural issues plus the named quality flags -- the flags no
+        # longer cost points (substance_score does the scoring now) but
+        # they're still real, user-visible things to fix, so the card's
+        # count shouldn't pretend they don't exist.
+        "stat2_value": str(summary.get("total_issues", 0) + len(roast.get("quality_flags", []))),
         "resume_lines": RESUME_SNIPPET_LINES,
         "cta_text": CTA_TEXT,
     }

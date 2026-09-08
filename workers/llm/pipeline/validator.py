@@ -2,9 +2,8 @@
 workers/llm/pipeline/validator.py
 
 Turns the raw structured Gemini response into a RoastResult: grounds
-HIGHLIGHTS quotes against the real resume text, and attaches severity to
-quality_flags (the model only ever returns codes -- see
-workers/llm/schemas.py's QUALITY_SEVERITY for why).
+HIGHLIGHTS quotes against the real resume text, and range-checks
+substance_score.
 
 HIGHLIGHTS is the one thing response_schema can't enforce -- JSON mode
 guarantees *shape*, not that a quote is real. Every quote is checked
@@ -15,12 +14,23 @@ between "the LLM picked a real detail out of this specific resume" and
 "the LLM made something up that sounds plausible" -- the latter is exactly
 the AI-slop failure mode this exists to prevent, so it's enforced in code,
 not just asked for in the prompt.
+
+substance_score is likewise shape-guaranteed (an int) but not
+range-guaranteed -- a model returning 150 or -20 would sail through
+response_schema and then quietly produce a nonsense composite score
+downstream, so it's clamped here at the boundary rather than trusted.
 """
 
 import re
 from typing import List
 
-from ..schemas import LLMStructuredResponse, RoastResult, Highlight, QualityIssue, QUALITY_SEVERITY
+from ..schemas import (
+    LLMStructuredResponse,
+    RoastResult,
+    Highlight,
+    SUBSTANCE_SCORE_MIN,
+    SUBSTANCE_SCORE_MAX,
+)
 
 
 def _normalize_whitespace(text: str) -> str:
@@ -74,15 +84,16 @@ def parse_roast_output(response: LLMStructuredResponse, source_text: str = "") -
 
     highlights = _ground_highlights(response.highlights, source_text)
 
-    quality_issues = [
-        QualityIssue(code=code, severity=QUALITY_SEVERITY[code])
-        for code in dict.fromkeys(response.quality_flags)  # de-dupe, keep order
-    ]
+    # Clamped, not rejected: an out-of-range score is the model fumbling a
+    # number, not a reason to fail a whole roast the user is waiting on.
+    substance_score = max(SUBSTANCE_SCORE_MIN, min(SUBSTANCE_SCORE_MAX, response.substance_score))
 
     return RoastResult(
         verdict=response.verdict.strip(),
         roast=response.roast.strip(),
         fixes=[f.strip() for f in response.fixes if f.strip()],
         highlights=highlights,
-        quality_issues=quality_issues,
+        substance_score=substance_score,
+        substance_reasoning=response.substance_reasoning.strip(),
+        quality_flags=list(dict.fromkeys(response.quality_flags)),  # de-dupe, keep order
     )

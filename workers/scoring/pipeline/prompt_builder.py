@@ -180,48 +180,54 @@ including its exact original wording and punctuation. If the resume
 doesn't have enough genuinely quotable material, return fewer highlights
 rather than inventing one.
 
-Also assess CONTENT QUALITY — not structure (the rule engine already
-covers that), the actual writing. Return every one of these codes that
-clearly applies, in `quality_flags`. Leave a code out if it's a close
-call or doesn't clearly apply — these should differentiate a strong
-resume from a mediocre one, so only flag what you're confident about:
+Also judge CONTENT SUBSTANCE and return `substance_score` (0-100) with a
+one-sentence `substance_reasoning`. This is the score the user sees, so
+judge it carefully.
 
-- GENERIC_BULLETS: describes responsibilities/duties, not outcomes or
-  substance. Two equally valid ways a bullet avoids this — a real metric,
-  OR real technical specificity:
-  Weak: "Responsible for managing team projects and deadlines."
-  Not generic (metric): "Led a 4-engineer team to cut deploy time from
-  45min to 6min by migrating a monolith to microservices."
-  Not generic (no metric, still strong): "Rewrote the log-ingestion
-  service's deserializer in Rust to eliminate GC pauses under sustained
-  write load, replacing a Java implementation that periodically stalled
-  the consumer thread." Naming the exact tool, the exact problem, and the
-  exact outcome is real substance even without a percentage sign.
-  Not generic (named system + specific sub-components, no metric): "Payments
-  reconciliation service: built the ledger-matching engine, the retry
-  logic for failed bank transfers, and the daily settlement report."
-  Naming a real system plus several specific, distinct capabilities
-  actually built is real substance too — this is not the same as "worked
-  on the payments system," which names nothing concrete.
-- NO_QUANTIFIED_IMPACT: the bullet gives no real evidence of impact or
-  capability at all — not the same as "has no digits in it." A resume
-  demonstrating strength through concrete technical specificity (exact
-  frameworks/protocols/algorithms named) or verifiable pedigree (a
-  selective company or research institution, named specifically) is
-  giving real evidence too, just not a percentage. Reserve this flag for
-  bullets that are vague on BOTH fronts — no metric AND no concrete
-  specifics, just a duty description. Use the quantified-impact check
-  above as one input, not the deciding factor: a bullet can have a digit
-  and still say nothing ("led 3 meetings a week"), and a bullet can have
-  zero digits and still be strong ("built a distributed data pipeline in
-  Kafka and Flink handling billions of events").
+Substance means: does this resume give real evidence that this person did
+meaningful work? There are several equally valid ways to show that, and a
+resume needs only some of them:
+- Quantified outcomes ("cut p99 latency from 800ms to 95ms")
+- Concrete technical specificity (exact systems, protocols, algorithms,
+  architectures named — "implemented an async AMQP client with a layered
+  architecture")
+- Verifiable pedigree (selective companies, research labs, published work)
+- Scope and ownership (built a system end-to-end, led a team, owned a
+  domain)
+
+Rubric:
+- 90-100: Clear, specific evidence of real, non-trivial work. Someone
+  reading this learns what the person actually did and can judge its
+  difficulty.
+- 70-89: Real work is visible but under-sold — vague in places, or impact
+  is implied rather than shown, or the hard parts aren't distinguished
+  from the routine parts.
+- 50-69: Mostly duty descriptions. You can tell what team they sat on,
+  not what they contributed or how hard it was.
+- 0-49: Content-free. Buzzwords, responsibilities, no evidence of
+  anything specific.
+
+Judge the WORK, not the writing polish. A terse resume describing
+genuinely hard systems work scores high. A polished resume full of
+numbers attached to routine tasks does not — "improved efficiency by 8%"
+on an unremarkable task is not strong evidence. Do not reward the mere
+presence of digits.
+
+Separately, return `quality_flags` — every code below that clearly
+applies. These do NOT affect the score; they tell the user what to fix,
+so include them wherever they're genuinely true even if the resume still
+scores well overall:
+- GENERIC_BULLETS: describes responsibilities/duties rather than what was
+  actually built or achieved.
+- NO_QUANTIFIED_IMPACT: no numbers, %, or scale anywhere the work's size
+  or effect could have been shown.
 - BUZZWORD_FILLER: leans on vague corporate-speak ("results-driven",
   "team player", "synergy", "self-starter") instead of specifics.
 - WEAK_ACTION_LANGUAGE: passive voice or repetitive/weak verbs throughout
   ("was responsible for", "helped with", "worked on") instead of direct,
   strong ones ("built", "led", "cut", "shipped").
 - SHALLOW_CONTENT: technically present but superficial — one-line
-  descriptions with no real depth or substance.
+  descriptions with no real depth.
 
 Rules:
 - Be direct and specific. No filler ("great resume!") or vague advice.

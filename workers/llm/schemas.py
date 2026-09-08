@@ -16,34 +16,23 @@ ROAST_VERSION = "1.0"
 
 class QualityIssueCode(str, Enum):
     """
-    Content-quality checks the rule engine structurally can't make -- these
-    require actually judging whether the writing is good, not just whether
-    a section exists. Deliberately a small fixed enum, same spirit as
-    workers/scoring/pipeline/rules.py's issue codes: the LLM only ever
-    decides yes/no per code (see QUALITY_SEVERITY below for why it never
-    assigns its own severity), so scores stay comparable and auditable
-    across resumes instead of the model inventing arbitrary categories or
-    weights each time.
+    Named content-quality problems the LLM can point at. These are
+    EXPLANATORY ONLY -- they tell the user what to fix, and they do not
+    affect the score at all (substance_score does that, see below).
+
+    They used to be the scoring mechanism: each flag carried a fixed
+    severity and deducted points. A real eval against 25 synthetic resumes
+    plus 3 real ones killed that design -- 5 binary flags with fixed point
+    values compressed everything into a 32-point band (a deliberately
+    content-free resume floored at 68/100) and couldn't separate mediocre
+    from bad at all, because the flags are correlated symptoms of one root
+    problem and fire as a bundle. See quality-scoring-eval/REPORT.md.
     """
     GENERIC_BULLETS = "GENERIC_BULLETS"
     NO_QUANTIFIED_IMPACT = "NO_QUANTIFIED_IMPACT"
     BUZZWORD_FILLER = "BUZZWORD_FILLER"
     WEAK_ACTION_LANGUAGE = "WEAK_ACTION_LANGUAGE"
     SHALLOW_CONTENT = "SHALLOW_CONTENT"
-
-
-# Severity is owned here, not by the model -- the LLM only ever returns
-# *which* codes apply (see LLMStructuredResponse.quality_flags), never a
-# severity for them. Same point values as workers/scoring/pipeline/rules.py
-# uses for its HIGH/MEDIUM/LOW issues, so a quality flag costs exactly as
-# much as an equivalent-severity structural one once merged into one score.
-QUALITY_SEVERITY: Dict[QualityIssueCode, str] = {
-    QualityIssueCode.GENERIC_BULLETS: "high",
-    QualityIssueCode.NO_QUANTIFIED_IMPACT: "high",
-    QualityIssueCode.BUZZWORD_FILLER: "medium",
-    QualityIssueCode.WEAK_ACTION_LANGUAGE: "medium",
-    QualityIssueCode.SHALLOW_CONTENT: "low",
-}
 
 
 class LLMJobMessage(BaseModel):
@@ -70,18 +59,8 @@ class Highlight(BaseModel):
     comment: str
 
 
-class QualityIssue(BaseModel):
-    """
-    One quality flag the LLM raised, with severity attached by us (see
-    QUALITY_SEVERITY) -- never by the model itself. Same shape as
-    workers/scoring/pipeline/schemas.py's Issue on purpose: both get
-    merged into one set of severity counts downstream (renderer's
-    compute_score, backend's radar-chart subscores), so keeping the shape
-    identical means that merge is just "concatenate two lists," not a
-    field-mapping exercise.
-    """
-    code: QualityIssueCode
-    severity: str
+SUBSTANCE_SCORE_MIN = 0
+SUBSTANCE_SCORE_MAX = 100
 
 
 class LLMStructuredResponse(BaseModel):
@@ -89,24 +68,33 @@ class LLMStructuredResponse(BaseModel):
     The exact shape asked of Gemini via response_schema (JSON mode) --
     passed directly as GenerateContentConfig.response_schema, so this
     class *is* the API contract with the model, not just an internal
-    convenience type. quality_flags carries codes only, never severity;
-    the caller (processor.py) attaches severity via QUALITY_SEVERITY
-    before this becomes a QualityIssue.
+    convenience type.
+
+    substance_score is the scoring signal: one holistic 0-100 judgment of
+    how much real evidence of meaningful work the resume actually gives,
+    against the rubric in workers/scoring/pipeline/prompt_builder.py.
+    quality_flags are explanatory only -- they name what to fix and never
+    touch the number (see QualityIssueCode's docstring for why the old
+    flag-deduction scoring was replaced).
     """
     verdict: str
     roast: str
     fixes: List[str]
     highlights: List[Highlight] = []
+    substance_score: int
+    substance_reasoning: str
     quality_flags: List[QualityIssueCode] = []
 
 
 class RoastResult(BaseModel):
-    """Parsed output from the LLM, after grounding + severity attachment."""
+    """Parsed output from the LLM, after grounding + range validation."""
     verdict: str
     roast: str
     fixes: List[str]
     highlights: List[Highlight] = []
-    quality_issues: List[QualityIssue] = []
+    substance_score: int
+    substance_reasoning: str
+    quality_flags: List[QualityIssueCode] = []
 
 
 class RoastOutput(BaseModel):
@@ -118,7 +106,9 @@ class RoastOutput(BaseModel):
     roast: str
     fixes: List[str]
     highlights: List[Highlight] = []
-    quality_issues: List[QualityIssue] = []
+    substance_score: int
+    substance_reasoning: str
+    quality_flags: List[QualityIssueCode] = []
 
     model: str
     usage: Dict[str, int]
