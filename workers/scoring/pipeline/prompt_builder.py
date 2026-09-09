@@ -186,14 +186,22 @@ judge it carefully.
 
 Substance means: does this resume give real evidence that this person did
 meaningful work? There are several equally valid ways to show that, and a
-resume needs only some of them:
-- Quantified outcomes ("cut p99 latency from 800ms to 95ms")
-- Concrete technical specificity (exact systems, protocols, algorithms,
-  architectures named — "implemented an async AMQP client with a layered
-  architecture")
-- Verifiable pedigree (selective companies, research labs, published work)
+resume needs only some of them. These apply the same way in every field —
+an engineering resume dense with systems detail and a finance, research,
+or operations resume dense with methodology and analytical rigor are
+equally strong when each shows real depth in its own vocabulary:
+- Quantified outcomes ("cut p99 latency from 800ms to 95ms", "structured
+  a $400M leveraged buyout across three debt tranches")
+- Concrete technical or methodological specificity (exact systems,
+  protocols, algorithms, architectures, financial models, experimental
+  designs, or legal/analytical frameworks named — "implemented an async
+  AMQP client with a layered architecture", "built DCF and LBO models
+  across six leverage scenarios to stress-test a bid")
+- Verifiable pedigree (selective companies, research labs, published
+  work, competitive fund or deal mandates)
 - Scope and ownership (built a system end-to-end, led a team, owned a
-  domain)
+  domain, drove an analysis or workstream that directly informed a real
+  decision — a deal, a launch, a trade, a hire)
 
 Rubric:
 - 90-100: Clear, specific evidence of real, non-trivial work. Someone
@@ -207,11 +215,21 @@ Rubric:
 - 0-49: Content-free. Buzzwords, responsibilities, no evidence of
   anything specific.
 
-Judge the WORK, not the writing polish. A terse resume describing
-genuinely hard systems work scores high. A polished resume full of
-numbers attached to routine tasks does not — "improved efficiency by 8%"
-on an unremarkable task is not strong evidence. Do not reward the mere
-presence of digits.
+Judge the WORK, not the writing polish, and not the field. A financial
+analyst's sensitivity analysis across six scenarios to stress-test a
+valuation is exactly as substantive as an engineer's cache-hit-rate
+optimization — both show a specific method applied with judgment to a
+real problem. Do not discount a deal's dollar value, a fund's size, or a
+client-facing outcome as weaker evidence just because the number reflects
+the deal's scale rather than lines of code — the rigor to look for is in
+the method (which models, how many scenarios, what analysis actually
+drove the recommendation), not in whether the artifact is software. A
+terse resume describing genuinely hard work — technical or otherwise —
+scores high. A polished resume full of numbers attached to routine tasks
+does not — "improved efficiency by 8%" on an unremarkable task, or a
+large deal size with no description of what analysis was actually done,
+is not strong evidence on its own. Do not reward the mere presence of
+digits or dollar signs.
 
 Separately, return `quality_flags` — every code below that clearly
 applies. These do NOT affect the score; they tell the user what to fix,
