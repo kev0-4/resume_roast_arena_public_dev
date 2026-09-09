@@ -35,11 +35,26 @@ Both real published CVs scored MID, matching the human label they were given ind
 
 Mean run-to-run change in substance score: **3.6 points**; max 17; **1 of 27** stamp flips (a resume sitting directly on the SOLID boundary). Tier-level assignment was identical across both runs. Good enough to ship; the same resume can still move a few points between uploads, which is worth remembering before treating the number as precise.
 
-### Known limitation, not fixed
-
-**Vertical skew persists.** Top-tier substance medians: SWE 85, HFT/Quant 74–82, IB 62–72. The gap narrowed versus the flag-based design but did not close — the model still reads SWE accomplishment language as stronger evidence than deal-sheet or research phrasing. All verticals still separate correctly from the mid/bad tiers, so this affects the score's precision within the strong tier, not its ability to tell good from bad. Closing it needs vertical-aware calibration examples in the rubric, deliberately left out here to avoid overfitting the prompt to this fixture set.
-
 `SHALLOW_CONTENT` also fires on nearly every synthetic strong resume, which is a fixture artifact — they are short bullet excerpts, not full documents. It costs nothing now that flags are explanatory-only.
+
+---
+
+## FOLLOW-UP — vertical skew narrowed with a rubric fix, not fully closed
+
+Top-tier substance medians before this fix: SWE 85, HFT/Quant 74–82, IB 62–72 (2 runs). Root cause, on inspection of the actual fixture bullets: the rubric's two most concrete example evidence types ("cut p99 latency from 800ms to 95ms", "implemented an async AMQP client with a layered architecture") were both SWE-flavored, and the IB fixtures already contain real quantified rigor (deal sizes, valuation moves, multi-scenario sensitivity analysis) that the model was nonetheless discounting relative to those exemplars — treating a dollar-denominated deal outcome as inherently weaker evidence than a latency number, independent of the actual analytical depth behind it.
+
+Fix (`workers/scoring/pipeline/prompt_builder.py`): added a parallel finance-style exemplar to each of the four evidence types, and one explicit instruction — "do not discount a deal's dollar value... as weaker evidence just because the number reflects the deal's scale rather than lines of code — the rigor to look for is in the method... not in whether the artifact is software." Deliberately original wording, not lifted from the eval fixtures, so this isn't just fitting the test.
+
+Verified over 2 more full runs (27 resumes each, 54 more real Gemini calls):
+
+| | SWE | HFT/Quant | IB | SWE-vs-worst-vertical gap |
+|---|---|---|---|---|
+| before, run 1 | 85 | 78.5 | 68.5 | 16.5 |
+| before, run 2 | 85 | 69.5 | 62.0 | 23.0 |
+| after, run 1 | 85 | 75.0 | 71.5 | 13.5 |
+| after, run 2 | 82 | 75.0 | 73.0 | 9.0 |
+
+Gap roughly halved (16.5–23 → 9–13.5 points) and both after-runs held **27/27 tier/stamp agreement** — the fix narrowed the skew without weakening good-vs-bad separation. Not fully closed: SWE still reads several points stronger on median, and this is 2 runs against one 27-resume fixture set, not a large-sample claim. Worth revisiting again once there's real user volume across verticals to check against.
 
 ---
 

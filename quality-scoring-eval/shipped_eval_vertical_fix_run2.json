@@ -1,0 +1,745 @@
+{
+  "results": [
+    {
+      "name": "faang_backend_1",
+      "tier": "top",
+      "vertical": "SWE",
+      "substance_score": 92,
+      "substance_reasoning": "The resume provides concrete, verifiable technical evidence including exact systems, protocols, scale metrics, and hard architectural outcomes that clearly demonstrate high-level engineering capability.",
+      "word_count": 137,
+      "structural_codes": [
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT",
+        "LONG_SENTENCES"
+      ],
+      "structural_deduction": 17,
+      "composite_score": 77,
+      "stamp": "SOLID",
+      "quality_flags": [
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This backend engineer resume packs exceptional technical depth and hard metrics into an alarmingly sparse, single-section format.",
+      "highlights_kept": 2,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1640,
+        "output_tokens": 439
+      }
+    },
+    {
+      "name": "faang_frontend_1",
+      "tier": "top",
+      "vertical": "SWE",
+      "substance_score": 82,
+      "substance_reasoning": "The resume boasts exceptionally high-density technical metrics and specific tooling choices that prove heavy-duty engineering capability, but its extreme brevity leaves major gaps in overall context and scope.",
+      "word_count": 111,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT"
+      ],
+      "structural_deduction": 22,
+      "composite_score": 67,
+      "stamp": "MID",
+      "quality_flags": [
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "Technically elite yet shockingly bare, this resume reads like a brilliant code snippet pasted into an empty document.",
+      "highlights_kept": 2,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1597,
+        "output_tokens": 459
+      }
+    },
+    {
+      "name": "faang_fullstack_1",
+      "tier": "top",
+      "vertical": "SWE",
+      "substance_score": 75,
+      "substance_reasoning": "The resume includes genuine technical depth, specific systems (Elasticsearch, PostgreSQL, Segment), and strong quantified outcomes, but it is heavily undersold and lacks any structural context, company background, or career timeline.",
+      "word_count": 108,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT"
+      ],
+      "structural_deduction": 22,
+      "composite_score": 60,
+      "stamp": "MID",
+      "quality_flags": [
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This resume reads like a solitary bullet list that forgot it needs a life story to back it up.",
+      "highlights_kept": 2,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1579,
+        "output_tokens": 471
+      }
+    },
+    {
+      "name": "faang_devops_1",
+      "tier": "top",
+      "vertical": "SWE",
+      "substance_score": 85,
+      "substance_reasoning": "The resume is remarkably dense with specific tools, architectures, and hard quantitative metrics, providing clear evidence of difficult infrastructure work, though it suffers from extreme brevity and lacks foundational sections.",
+      "word_count": 118,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT",
+        "LONG_SENTENCES"
+      ],
+      "structural_deduction": 27,
+      "composite_score": 70,
+      "stamp": "MID",
+      "quality_flags": [
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "Technically dense and remarkably metrics-driven, but frustratingly short and missing crucial context like education and projects.",
+      "highlights_kept": 2,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1596,
+        "output_tokens": 437
+      }
+    },
+    {
+      "name": "faang_newgrad_1",
+      "tier": "top",
+      "vertical": "SWE",
+      "substance_score": 88,
+      "substance_reasoning": "The resume shows high technical specificity, exact protocols, and quantified metrics across every single line of work, though it suffers from extreme brevity and lacks contextual depth.",
+      "word_count": 92,
+      "structural_codes": [
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT"
+      ],
+      "structural_deduction": 12,
+      "composite_score": 76,
+      "stamp": "SOLID",
+      "quality_flags": [
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This resume reads like a brilliant core jammed into a skeleton frame.",
+      "highlights_kept": 2,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1563,
+        "output_tokens": 407
+      }
+    },
+    {
+      "name": "faang_backend_2",
+      "tier": "top",
+      "vertical": "SWE",
+      "substance_score": 75,
+      "substance_reasoning": "The actual work described is dense, highly specific, and backed by hard metrics, but the score is capped due to extreme brevity and a lack of broader career context.",
+      "word_count": 80,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT"
+      ],
+      "structural_deduction": 22,
+      "composite_score": 60,
+      "stamp": "MID",
+      "quality_flags": [
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This resume reads like a high-performing backend engineer who forgot to write a full career history.",
+      "highlights_kept": 3,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1527,
+        "output_tokens": 468
+      }
+    },
+    {
+      "name": "faang_frontend_2",
+      "tier": "top",
+      "vertical": "SWE",
+      "substance_score": 75,
+      "substance_reasoning": "The resume shows high technical specificity and genuine engineering metrics, but its extreme brevity leaves the broader context, career trajectory, and ownership scope entirely invisible.",
+      "word_count": 79,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT"
+      ],
+      "structural_deduction": 22,
+      "composite_score": 60,
+      "stamp": "MID",
+      "quality_flags": [
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This resume reads like a high-signal highlights reel that forgot to include a career.",
+      "highlights_kept": 2,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1531,
+        "output_tokens": 405
+      }
+    },
+    {
+      "name": "hft_quant_researcher_1",
+      "tier": "top",
+      "vertical": "HFT/Quant",
+      "substance_score": 72,
+      "substance_reasoning": "The resume shows high-caliber, mathematically rigorous work with concrete numerical outcomes and specific methodologies, but its extreme brevity leaves too much of the candidate's overall professional background invisible.",
+      "word_count": 77,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT"
+      ],
+      "structural_deduction": 22,
+      "composite_score": 57,
+      "stamp": "MID",
+      "quality_flags": [
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This resume reads like an elite quantitative trading snippet dropped into a vacuum, suffering from a severe lack of context and professional breadth.",
+      "highlights_kept": 2,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1538,
+        "output_tokens": 461
+      }
+    },
+    {
+      "name": "hft_quant_dev_1",
+      "tier": "top",
+      "vertical": "HFT/Quant",
+      "substance_score": 88,
+      "substance_reasoning": "The resume provides exceptional technical specificity and hard quantified outcomes in its few bullet points, proving real mastery of low-latency systems, but loses points for extreme brevity and missing structural sections like education and projects.",
+      "word_count": 74,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT",
+        "LONG_SENTENCES"
+      ],
+      "structural_deduction": 27,
+      "composite_score": 73,
+      "stamp": "MID",
+      "quality_flags": [
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "Technically elite yet shockingly bare-bones, this resume reads like three killer bullet points trapped in an unfinished skeleton.",
+      "highlights_kept": 2,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1539,
+        "output_tokens": 479
+      }
+    },
+    {
+      "name": "hft_quant_strat_1",
+      "tier": "top",
+      "vertical": "HFT/Quant",
+      "substance_score": 75,
+      "substance_reasoning": "Real, highly specific financial and risk metrics are present and indicate high-stakes work, but the extreme brevity leaves out methodological depth and architectural context.",
+      "word_count": 72,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT"
+      ],
+      "structural_deduction": 22,
+      "composite_score": 60,
+      "stamp": "MID",
+      "quality_flags": [
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This resume reads like an elite quant trading performance report missing its entire supporting cast.",
+      "highlights_kept": 2,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1516,
+        "output_tokens": 432
+      }
+    },
+    {
+      "name": "hft_quant_researcher_2",
+      "tier": "top",
+      "vertical": "HFT/Quant",
+      "substance_score": 75,
+      "substance_reasoning": "The resume contains explicit, highly technical metrics (22% fill rate improvement, 14 bps slippage reduction across 3 years of tick data) demonstrating real quantitative work, but the extreme brevity and lack of broader context hold it back.",
+      "word_count": 55,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT",
+        "LONG_SENTENCES"
+      ],
+      "structural_deduction": 27,
+      "composite_score": 60,
+      "stamp": "MID",
+      "quality_flags": [
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This resume reads like two strong bullet points wrapped in a ghost town.",
+      "highlights_kept": 2,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1494,
+        "output_tokens": 421
+      }
+    },
+    {
+      "name": "ib_ma_analyst_1",
+      "tier": "top",
+      "vertical": "IB",
+      "substance_score": 74,
+      "substance_reasoning": "The resume includes verifiable high-value deal mandates and specific financial methodologies, but it is far too brief and relies heavily on transaction scale rather than deep analytical context.",
+      "word_count": 75,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT"
+      ],
+      "structural_deduction": 22,
+      "composite_score": 59,
+      "stamp": "MID",
+      "quality_flags": [
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This resume reads like an elite transaction list compressed into a stub, offering strong deal credentials but starving the reader of contextual depth.",
+      "highlights_kept": 2,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1523,
+        "output_tokens": 458
+      }
+    },
+    {
+      "name": "ib_sellside_1",
+      "tier": "top",
+      "vertical": "IB",
+      "substance_score": 58,
+      "substance_reasoning": "The resume names actual financial transaction scales and targets, providing some context on deal size, but the actual work described is standard administrative duty execution rather than complex analytical breakdown.",
+      "word_count": 69,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT",
+        "LONG_SENTENCES"
+      ],
+      "structural_deduction": 27,
+      "composite_score": 43,
+      "stamp": "MID",
+      "quality_flags": [
+        "GENERIC_BULLETS",
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This is a dangerously sparse resume that reads like a three-bullet skeleton rather than a professional profile.",
+      "highlights_kept": 2,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1514,
+        "output_tokens": 403
+      }
+    },
+    {
+      "name": "ib_lbo_1",
+      "tier": "top",
+      "vertical": "IB",
+      "substance_score": 75,
+      "substance_reasoning": "The resume shows genuine, high-stakes ownership of major financial transactions with specific methodologies (DCF, LBO, sensitivity analysis) and clear scale ($150M-$400M), but it is heavily penalized in overall depth and completeness by its extreme brevity and missing foundational sections.",
+      "word_count": 75,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT",
+        "LONG_SENTENCES"
+      ],
+      "structural_deduction": 27,
+      "composite_score": 60,
+      "stamp": "MID",
+      "quality_flags": [
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This resume reads like an elite deal-sheet trapped in an identity crisis\u2014dense with high-stakes finance work, yet bizarrely microscopic and devoid of a proper career foundation.",
+      "highlights_kept": 3,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1525,
+        "output_tokens": 497
+      }
+    },
+    {
+      "name": "ib_generalist_1",
+      "tier": "top",
+      "vertical": "IB",
+      "substance_score": 72,
+      "substance_reasoning": "The resume shows genuine, verifiable deal exposure and specific technical deliverables like merger consequence modeling, but it is far too brief and lacks methodological depth to score higher.",
+      "word_count": 55,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT"
+      ],
+      "structural_deduction": 22,
+      "composite_score": 57,
+      "stamp": "MID",
+      "quality_flags": [
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "You have a solid foundation with actual deal experience, but your resume is criminally short and lacks any educational depth beyond a single line.",
+      "highlights_kept": 2,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1491,
+        "output_tokens": 432
+      }
+    },
+    {
+      "name": "mid_swe_support_1",
+      "tier": "mid",
+      "vertical": "SWE",
+      "substance_score": 35,
+      "substance_reasoning": "The resume consists entirely of shallow duty descriptions and passive participation markers with virtually no evidence of independent ownership, architectural complexity, or meaningful technical output.",
+      "word_count": 100,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT",
+        "LONG_SENTENCES"
+      ],
+      "structural_deduction": 27,
+      "composite_score": 20,
+      "stamp": "ROASTED",
+      "quality_flags": [
+        "GENERIC_BULLETS",
+        "WEAK_ACTION_LANGUAGE",
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This resume reads like a ghost wrote it\u2014thin, timid, and entirely devoid of technical depth.",
+      "highlights_kept": 3,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1557,
+        "output_tokens": 538
+      }
+    },
+    {
+      "name": "mid_swe_2",
+      "tier": "mid",
+      "vertical": "SWE",
+      "substance_score": 35,
+      "substance_reasoning": "The resume consists entirely of shallow duty descriptions and passive participation ('attended', 'worked with'), offering zero evidence of independent ownership, architectural depth, or complex problem-solving.",
+      "word_count": 51,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT"
+      ],
+      "structural_deduction": 22,
+      "composite_score": 20,
+      "stamp": "ROASTED",
+      "quality_flags": [
+        "GENERIC_BULLETS",
+        "WEAK_ACTION_LANGUAGE",
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This resume reads less like a software developer's track record and more like a minimalist grocery list.",
+      "highlights_kept": 2,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1465,
+        "output_tokens": 482
+      }
+    },
+    {
+      "name": "mid_finance_analyst_1",
+      "tier": "mid",
+      "vertical": "IB",
+      "substance_score": 38,
+      "substance_reasoning": "The resume consists entirely of vague, high-level duties without naming specific financial models, datasets, or analytical frameworks, offering no proof of independent execution or impact.",
+      "word_count": 54,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT",
+        "LONG_SENTENCES"
+      ],
+      "structural_deduction": 27,
+      "composite_score": 23,
+      "stamp": "ROASTED",
+      "quality_flags": [
+        "GENERIC_BULLETS",
+        "WEAK_ACTION_LANGUAGE",
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This resume reads less like a professional track record and more like a brief job description outline.",
+      "highlights_kept": 2,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1479,
+        "output_tokens": 427
+      }
+    },
+    {
+      "name": "mid_quant_1",
+      "tier": "mid",
+      "vertical": "HFT/Quant",
+      "substance_score": 35,
+      "substance_reasoning": "The resume consists entirely of vague task descriptions and passive language without naming specific technical architectures, analytical methods, or verifiable metrics, leaving no real evidence of rigorous work.",
+      "word_count": 54,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT",
+        "LONG_SENTENCES"
+      ],
+      "structural_deduction": 27,
+      "composite_score": 20,
+      "stamp": "ROASTED",
+      "quality_flags": [
+        "GENERIC_BULLETS",
+        "WEAK_ACTION_LANGUAGE",
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This resume reads like a vague job description rather than an impactful record of analytical work.",
+      "highlights_kept": 3,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1477,
+        "output_tokens": 537
+      }
+    },
+    {
+      "name": "mid_swe_3",
+      "tier": "mid",
+      "vertical": "SWE",
+      "substance_score": 25,
+      "substance_reasoning": "The resume consists entirely of vague duty descriptions with no technical depth, specific metrics, named systems, or evidence of independent ownership.",
+      "word_count": 54,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT",
+        "LONG_SENTENCES"
+      ],
+      "structural_deduction": 27,
+      "composite_score": 10,
+      "stamp": "ROASTED",
+      "quality_flags": [
+        "GENERIC_BULLETS",
+        "NO_QUANTIFIED_IMPACT",
+        "WEAK_ACTION_LANGUAGE",
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This resume reads like a stub file, offering zero proof of technical competence or actual engineering output.",
+      "highlights_kept": 2,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1477,
+        "output_tokens": 470
+      }
+    },
+    {
+      "name": "bad_swe_1",
+      "tier": "bad",
+      "vertical": "SWE",
+      "substance_score": 5,
+      "substance_reasoning": "The resume is entirely devoid of specific methodologies, projects, metrics, or ownership scope, functioning purely as a collection of generic duty descriptions and buzzwords.",
+      "word_count": 65,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT",
+        "LONG_SENTENCES"
+      ],
+      "structural_deduction": 27,
+      "composite_score": 0,
+      "stamp": "ROASTED",
+      "quality_flags": [
+        "GENERIC_BULLETS",
+        "BUZZWORD_FILLER",
+        "WEAK_ACTION_LANGUAGE",
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This resume reads like a parody of corporate buzzwords rather than a record of professional achievement.",
+      "highlights_kept": 3,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1508,
+        "output_tokens": 477
+      }
+    },
+    {
+      "name": "bad_swe_2",
+      "tier": "bad",
+      "vertical": "SWE",
+      "substance_score": 15,
+      "substance_reasoning": "The resume is overwhelmingly content-free, consisting of four ultra-vague duty bullets and generic skill words that provide zero evidence of actual engineering work or technical depth.",
+      "word_count": 27,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT"
+      ],
+      "structural_deduction": 22,
+      "composite_score": 0,
+      "stamp": "ROASTED",
+      "quality_flags": [
+        "GENERIC_BULLETS",
+        "NO_QUANTIFIED_IMPACT",
+        "WEAK_ACTION_LANGUAGE",
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This resume reads like a ghost profile rather than an actual engineer's career history.",
+      "highlights_kept": 3,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1436,
+        "output_tokens": 477
+      }
+    },
+    {
+      "name": "bad_swe_3",
+      "tier": "bad",
+      "vertical": "SWE",
+      "substance_score": 10,
+      "substance_reasoning": "The resume is entirely content-free, consisting solely of vague duties and generic personal traits with no specific technical details, metrics, or evidence of actual work.",
+      "word_count": 31,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT",
+        "LONG_SENTENCES"
+      ],
+      "structural_deduction": 27,
+      "composite_score": 0,
+      "stamp": "ROASTED",
+      "quality_flags": [
+        "GENERIC_BULLETS",
+        "NO_QUANTIFIED_IMPACT",
+        "BUZZWORD_FILLER",
+        "WEAK_ACTION_LANGUAGE",
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This resume reads like a generic job description template rather than a record of professional achievement.",
+      "highlights_kept": 3,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1452,
+        "output_tokens": 551
+      }
+    },
+    {
+      "name": "bad_finance_1",
+      "tier": "bad",
+      "vertical": "IB",
+      "substance_score": 10,
+      "substance_reasoning": "The resume completely lacks any evidence of real work, specific methodologies, deal values, or analytical depth, consisting entirely of vague duty descriptions.",
+      "word_count": 31,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT",
+        "LONG_SENTENCES"
+      ],
+      "structural_deduction": 27,
+      "composite_score": 0,
+      "stamp": "ROASTED",
+      "quality_flags": [
+        "GENERIC_BULLETS",
+        "WEAK_ACTION_LANGUAGE",
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This resume is a ghost town of empty placeholders that tells recruiters absolutely nothing about your capabilities.",
+      "highlights_kept": 2,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1450,
+        "output_tokens": 444
+      }
+    },
+    {
+      "name": "bad_quant_1",
+      "tier": "bad",
+      "vertical": "HFT/Quant",
+      "substance_score": 15,
+      "substance_reasoning": "The resume consists entirely of shallow, generic duty descriptions with no technical specifics, methodologies, or verifiable proof of analytical work.",
+      "word_count": 30,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY",
+        "RESUME_TOO_SHORT"
+      ],
+      "structural_deduction": 22,
+      "composite_score": 0,
+      "stamp": "ROASTED",
+      "quality_flags": [
+        "GENERIC_BULLETS",
+        "WEAK_ACTION_LANGUAGE",
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "This thirty-word outline offers zero evidence of actual quantitative capability, hiding behind passive duties and an absence of domain specifics.",
+      "highlights_kept": 2,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1437,
+        "output_tokens": 460
+      }
+    },
+    {
+      "name": "real_swe_technical_depth_1",
+      "tier": "real_top",
+      "vertical": "SWE",
+      "substance_score": 75,
+      "substance_reasoning": "The resume includes strong technical specificity naming actual frameworks, protocols, and architectures (OpenDDS, AMQP, ROS, MongoDB), but suffers from under-sold impact and run-on phrasing that obscures individual ownership.",
+      "word_count": 283,
+      "structural_codes": [
+        "NO_SUMMARY",
+        "LONG_SENTENCES"
+      ],
+      "structural_deduction": 7,
+      "composite_score": 68,
+      "stamp": "MID",
+      "quality_flags": [
+        "NO_QUANTIFIED_IMPACT"
+      ],
+      "verdict": "This resume reads like an academic textbook of buzzwords wrapped in impenetrable run-on sentences that hide what you actually built.",
+      "highlights_kept": 1,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1796,
+        "output_tokens": 434
+      }
+    },
+    {
+      "name": "real_swe_narrative_style_1",
+      "tier": "real_top",
+      "vertical": "SWE",
+      "substance_score": 65,
+      "substance_reasoning": "The resume lists elite employers and genuinely complex problem domains (recommendation systems, TPUs, data warehousing), but the complete lack of quantified impact, architectural depth, or specific engineering decisions leaves the actual work buried under textbook definitions.",
+      "word_count": 242,
+      "structural_codes": [
+        "NO_PROJECTS",
+        "NO_SUMMARY"
+      ],
+      "structural_deduction": 12,
+      "composite_score": 53,
+      "stamp": "MID",
+      "quality_flags": [
+        "GENERIC_BULLETS",
+        "NO_QUANTIFIED_IMPACT",
+        "WEAK_ACTION_LANGUAGE",
+        "SHALLOW_CONTENT"
+      ],
+      "verdict": "You have top-tier pedigree at Google and Coursera, but your resume reads like a textbook glossary instead of a record of your engineering impact.",
+      "highlights_kept": 3,
+      "model": "gemini-3.5-flash-lite",
+      "usage": {
+        "input_tokens": 1717,
+        "output_tokens": 531
+      }
+    }
+  ],
+  "failures": []
+}
