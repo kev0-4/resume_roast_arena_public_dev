@@ -24,8 +24,12 @@ from ..config import (
     REDIS_SSL,
     INGEST_RATE_LIMIT_MAX,
     INGEST_RATE_LIMIT_WINDOW_SECONDS,
+    INTERVIEW_START_RATE_LIMIT_MAX,
+    INTERVIEW_START_RATE_LIMIT_WINDOW_SECONDS,
+    INTERVIEW_TURN_RATE_LIMIT_MAX,
+    INTERVIEW_TURN_RATE_LIMIT_WINDOW_SECONDS,
 )
-from ..dependencies.auth import get_current_user_optional
+from ..dependencies.auth import get_current_user_optional, get_current_user
 from ..utils.telemetry import emit_event
 
 logger = logging.getLogger(__name__)
@@ -110,3 +114,68 @@ async def check_ingest_rate_limit(
             detail=f"Rate limit exceeded. Try again in {retry_after} seconds.",
             headers={"Retry-After": str(retry_after)},
         )
+
+
+async def _check_interview_rate_limit(
+    curr_user, max_requests: int, window_seconds: int, key_prefix: str, route_label: str
+) -> None:
+    """
+    Shared body for the two interview rate limits below -- both keyed by
+    user:{id} only (unlike check_ingest_rate_limit, no IP branch: auth is
+    mandatory for every interview route, there's no anonymous case).
+    """
+    identifier = f"user:{curr_user.id}"
+    redis_key = f"ratelimit:{key_prefix}:{identifier}"
+
+    try:
+        client = _get_redis_client()
+        allowed, retry_after = check_and_increment(client, redis_key, max_requests, window_seconds)
+    except redis.RedisError as e:
+        logger.warning(f"Rate limit check failed (Redis unreachable), failing open: {e}")
+        emit_event(
+            "ratelimit.redis_unavailable",
+            {"identifier": identifier, "reason": str(e), "status": "WARNING", "route": route_label},
+        )
+        return
+
+    if not allowed:
+        emit_event(
+            "ratelimit.exceeded",
+            {"identifier": identifier, "retry_after": retry_after, "status": "WARNING", "route": route_label},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Rate limit exceeded. Try again in {retry_after} seconds.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+async def check_interview_start_rate_limit(curr_user=Depends(get_current_user)) -> None:
+    """
+    Guards the cost of STARTING new interviews -- each start is 1 Gemini
+    text call + 1 TTS call. Distinct from check_interview_turn_rate_limit,
+    which guards per-turn request frequency, not how many interviews a
+    user can begin.
+    """
+    await _check_interview_rate_limit(
+        curr_user,
+        INTERVIEW_START_RATE_LIMIT_MAX,
+        INTERVIEW_START_RATE_LIMIT_WINDOW_SECONDS,
+        "interview_start",
+        "POST /v1/interview/start",
+    )
+
+
+async def check_interview_turn_rate_limit(curr_user=Depends(get_current_user)) -> None:
+    """
+    Guards raw request frequency at the turn endpoint across all of a
+    user's interviews -- distinct from InterviewSessions.max_turns, which
+    caps one single interview's length, not calling rate across many.
+    """
+    await _check_interview_rate_limit(
+        curr_user,
+        INTERVIEW_TURN_RATE_LIMIT_MAX,
+        INTERVIEW_TURN_RATE_LIMIT_WINDOW_SECONDS,
+        "interview_turn",
+        "POST /v1/interview/{id}/turn",
+    )
