@@ -186,12 +186,22 @@ export default function Home() {
               take a live, brutally honest mock interview against your own resume and climb the Interview Arena
             </p>
           </div>
-          <Link
-            href="/interview-leaderboard"
-            className="shrink-0 rounded-full border-[1.5px] border-white bg-brand-lime px-6 py-2.5 font-display text-xs uppercase tracking-tight text-black shadow-sm transition-transform hover:-translate-y-0.5 md:text-sm"
-          >
-            Interview Arena
-          </Link>
+          <div className="flex shrink-0 items-center gap-3">
+            {/* Primary action is starting one, not browsing rankings --
+                the arena link is secondary. */}
+            <Link
+              href="/interview/new"
+              className="rounded-full border-[1.5px] border-white bg-brand-lime px-6 py-2.5 font-display text-xs uppercase tracking-tight text-black shadow-sm transition-transform hover:-translate-y-0.5 md:text-sm"
+            >
+              Take Interview
+            </Link>
+            <Link
+              href="/interview-leaderboard"
+              className="rounded-full border border-white/40 px-5 py-2.5 font-display text-xs uppercase tracking-tight text-white transition-colors hover:bg-white/10 md:text-sm"
+            >
+              Arena
+            </Link>
+          </div>
         </div>
       </section>
     </div>

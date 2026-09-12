@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { Mic } from "lucide-react";
 import { Navbar } from "@/components/site/navbar";
 import { HeroPanel } from "@/components/interview-leaderboard/hero-panel";
 import { LeaderboardList } from "@/components/interview-leaderboard/leaderboard-list";
@@ -69,6 +71,20 @@ export default function InterviewLeaderboardPage() {
         <Navbar />
 
         <main className="mx-auto flex w-full max-w-2xl flex-col gap-5 px-4 pb-16">
+          {/* Always rendered, outside every loading/error/empty branch --
+              this page is a main navbar destination, and previously none
+              of its states offered a way to actually start an interview
+              (the only entry point was a CTA on your own roast page). */}
+          <div className="flex justify-center pt-2">
+            <Link
+              href="/interview/new"
+              className="flex items-center gap-2 rounded-full border-[1.5px] border-white bg-brand-lime px-7 py-3 font-display text-sm uppercase tracking-wide text-black shadow-[4px_4px_0_#000] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0_#000] md:text-base"
+            >
+              <Mic size={18} strokeWidth={2.5} />
+              Take an interview
+            </Link>
+          </div>
+
           {loading ? (
             <InterviewLeaderboardSkeleton />
           ) : error ? (
