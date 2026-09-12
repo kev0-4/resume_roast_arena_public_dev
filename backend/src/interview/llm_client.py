@@ -54,7 +54,7 @@ def _usage_from(response) -> dict:
     }
 
 
-async def create_ephemeral_token() -> Tuple[str, datetime.datetime]:
+async def create_ephemeral_token(system_instruction: str) -> Tuple[str, datetime.datetime]:
     """
     Mints a single-use Live API credential for one interview.
 
@@ -62,16 +62,28 @@ async def create_ephemeral_token() -> Tuple[str, datetime.datetime]:
     passes as its API key; our real GEMINI_API_KEY never leaves this
     process.
 
-    What actually protects this token, verified against the live API rather
-    than taken from docs:
+    The constraints MUST carry the whole config, not just the model. This
+    is not a preference -- it was found by probing:
+
+      - constraints naming only the model: the session is rejected at
+        connect with "The requested combination of response modalities
+        (TEXT) is not supported by the model", because a constrained token
+        with no config makes the server apply its own TEXT default and
+        ignore what the client asked for. Reproduced every time.
+      - constraints carrying model + config: connects and speaks.
+      - no constraints at all: also connects, but locks nothing down.
+
+    So pinning the full config is simultaneously the fix and the control.
+
+    What protects this token, likewise verified against the live API:
 
     - uses=1 IS enforced. A second connection attempt with the same token
       is rejected with "Token has been used too many times".
-    - The two expiry times are enforced.
-    - live_connect_constraints is NOT enforced. A token minted naming this
-      model was able to open a session on a different, more expensive one.
-      It is therefore set as a statement of intent, not a control, and the
-      short lifetimes above are what actually bound the damage.
+    - Both expiry times are enforced.
+    - The MODEL field of the constraints is not, on its own, a hard lock:
+      a token naming one model was previously able to open a session on a
+      different, pricier one. Blast radius stays one session per token,
+      which is what the short lifetimes are for.
 
     Raises:
         google.genai.errors.APIError -- caller turns this into a 503.
@@ -85,7 +97,15 @@ async def create_ephemeral_token() -> Tuple[str, datetime.datetime]:
             uses=1,
             expire_time=expire_time,
             new_session_expire_time=now + datetime.timedelta(seconds=INTERVIEW_TOKEN_NEW_SESSION_SECONDS),
-            live_connect_constraints=genai.types.LiveConnectConstraints(model=GEMINI_LIVE_MODEL),
+            live_connect_constraints=genai.types.LiveConnectConstraints(
+                model=GEMINI_LIVE_MODEL,
+                config=genai.types.LiveConnectConfig(
+                    response_modalities=["AUDIO"],
+                    system_instruction=system_instruction,
+                    input_audio_transcription=genai.types.AudioTranscriptionConfig(),
+                    output_audio_transcription=genai.types.AudioTranscriptionConfig(),
+                ),
+            ),
         )
     )
     if not token.name:

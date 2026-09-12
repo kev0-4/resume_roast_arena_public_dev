@@ -86,9 +86,32 @@ export class LiveInterviewSession {
     });
   }
 
+  /**
+   * Makes the interviewer open the conversation.
+   *
+   * This is required, and finding that out took probing the real API. A
+   * system instruction telling the model to "open the interview yourself,
+   * immediately" is NOT enough: connected and left alone the model says
+   * nothing at all, and a second of silence on the mic doesn't wake it
+   * either. Both were measured -- twenty seconds of dead air, zero audio
+   * chunks. Without this seed the candidate joins and sits in silence,
+   * waiting for an interviewer that is itself waiting for them.
+   *
+   * The seed is a text turn rather than audio because it costs nothing to
+   * send and never reaches the transcript: only spoken audio produces
+   * inputTranscription, so this line stays out of what gets scored.
+   */
+  kickoff(): void {
+    this.session?.sendClientContent({
+      turns: [{ role: "user", parts: [{ text: "I'm here and ready. Please begin the interview." }] }],
+      turnComplete: true,
+    });
+  }
+
   sendAudio(base64Pcm: string): void {
-    // sendRealtimeInput, never sendClientContent: the latter is only for
-    // seeding initial history and won't drive a live turn.
+    // sendRealtimeInput for the live mic stream -- it's the streaming
+    // path, and unlike sendClientContent it doesn't commit a turn on
+    // every call.
     this.session?.sendRealtimeInput({
       audio: { data: base64Pcm, mimeType: MIC_MIME_TYPE },
     });

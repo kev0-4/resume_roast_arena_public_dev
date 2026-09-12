@@ -197,6 +197,11 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
       const mic = new MicCapture((b64) => sessionRef.current?.sendAudio(b64));
       await mic.start();
       micRef.current = mic;
+
+      // Only now ask the interviewer to open -- if it spoke before the mic
+      // was live, an eager candidate could answer into a dead microphone.
+      // Measured at ~0.6s from this call to its first audio.
+      session.kickoff();
     } catch (err) {
       const message =
         err instanceof DOMException && err.name === "NotAllowedError"

@@ -112,8 +112,11 @@ def _patch_gemini(monkeypatch, *, score=7):
     tests can assert scoring is NOT paid for twice."""
     calls = {"score": 0, "token": 0}
 
-    async def fake_create_ephemeral_token():
+    async def fake_create_ephemeral_token(system_instruction):
+        # Captured so a test can assert the interview context is pinned
+        # into the TOKEN, not merely handed to the client.
         calls["token"] += 1
+        calls["instruction"] = system_instruction
         expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=11)
         return FAKE_TOKEN, expires_at
 
@@ -166,6 +169,30 @@ A_REAL_CONVERSATION = _chunks(
 
 
 class TestStartInterview:
+    def test_pins_the_instruction_into_the_token(self, monkeypatch):
+        # Regression guard for a bug found by probing the real API: minting
+        # a token whose constraints name only the model makes the server
+        # apply its own TEXT default and reject the AUDIO session at
+        # connect. The config -- and so the instruction -- has to be pinned
+        # into the token itself.
+        calls = _patch_gemini(monkeypatch)
+        holder = {}
+
+        async def setup():
+            async with AsyncSessionLocal() as db:
+                user_id = await _make_user_id(db, f"pin-{uuid.uuid4().hex[:6]}")
+                holder["user_id"] = user_id
+                holder["resume_session_id"] = await _make_done_resume_session_id(db, user_id)
+
+        _run(setup)
+
+        app = create_app()
+        body = _start_interview(app, holder["user_id"], holder["resume_session_id"])
+
+        assert calls["token"] == 1
+        assert calls["instruction"] == body["system_instruction"]
+        assert "caching layer" in calls["instruction"]
+
     def test_returns_a_token_and_system_instruction(self, monkeypatch):
         _patch_gemini(monkeypatch)
         holder = {}

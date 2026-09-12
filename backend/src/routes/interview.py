@@ -177,7 +177,7 @@ async def start_interview(
     # clean up, and the user gets a 503 rather than an orphaned interview
     # they can never connect to.
     async with _gemini_call_guard():
-        token, expires_at = await interview_llm.create_ephemeral_token()
+        token, expires_at = await interview_llm.create_ephemeral_token(system_instruction)
 
     interview = await interview_service.create_interview_session(
         db=db,
