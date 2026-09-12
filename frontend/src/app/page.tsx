@@ -172,6 +172,27 @@ export default function Home() {
             </div>
           </div>
         </div>
+
+        {/* Interview Arena teaser -- deliberately kept inside this same
+            white section (not a new top-level section with its own
+            background) since this page has hit a real flex/background-
+            boundary bug from stacking differently-colored sections before. */}
+        <div className="mx-auto mt-8 flex max-w-6xl flex-col items-center justify-between gap-4 rounded-[2rem] bg-brand-blue px-6 py-8 text-center md:mt-10 md:flex-row md:px-10 md:text-left">
+          <div>
+            <h3 className="font-display text-lg uppercase leading-tight text-white md:text-xl">
+              Got Roasted? Defend It.
+            </h3>
+            <p className="mt-1 font-mono text-[11px] font-semibold text-white/70 md:text-xs">
+              take a live, brutally honest mock interview against your own resume and climb the Interview Arena
+            </p>
+          </div>
+          <Link
+            href="/interview-leaderboard"
+            className="shrink-0 rounded-full border-[1.5px] border-white bg-brand-lime px-6 py-2.5 font-display text-xs uppercase tracking-tight text-black shadow-sm transition-transform hover:-translate-y-0.5 md:text-sm"
+          >
+            Interview Arena
+          </Link>
+        </div>
       </section>
     </div>
   );
