@@ -222,6 +222,27 @@ jobs:
             --image "ghcr.io/kev0-4/rra-renderer:${{ github.sha }}" \
             --revision-suffix "gha${{ github.run_number }}"
 
+      # Nothing here ever applied migrations to the production database --
+      # the `test` job above migrates its own throwaway Postgres, and these
+      # deploy steps only roll images. That gap stayed invisible until the
+      # mock-interview feature added a table: the code deployed green, then
+      # every query against it 500'd in production because the table didn't
+      # exist. Found by a user, not by CI.
+      #
+      # Runs AFTER the image roll on purpose: the migration files ship inside
+      # the image, so the container has to be running the new code before it
+      # can apply them. That leaves a brief window (seconds, however long the
+      # migration takes) where new code serves against the old schema -- the
+      # tradeoff of migrating via the deployed container rather than a
+      # separate pre-deploy job. Acceptable for additive migrations; revisit
+      # with a dedicated Container App Job if a destructive one is ever needed.
+      #
+      # Why not just run alembic from this runner: production Postgres is
+      # firewalled to Azure services only, so the runner cannot reach it.
+      # See scripts/azure_migrate.py for the rest of the mechanics.
+      - name: Apply database migrations (inside ca-backend)
+        run: python3 scripts/azure_migrate.py --resource-group rg-resume-roast-arena --app ca-backend
+
   # Everything above rolls the backend/workers -- it never touched the
   # frontend. Real gap found live: three merges to main shipped UI fixes
   # (mobile nav, a text-rendering bug, a layout overlap) that `deploy`
