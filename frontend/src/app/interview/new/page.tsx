@@ -8,6 +8,7 @@ import { Navbar } from "@/components/site/navbar";
 import { stackedShadow } from "@/lib/text-shadow";
 import { useAuth } from "@/lib/auth-context";
 import { ApiError, startInterview } from "@/lib/interview-api";
+import { stashInterviewStart } from "@/lib/interview-handoff";
 import { getMySessions, type MySession } from "@/lib/api";
 
 const HEADLINE_SHADOW = stackedShadow(10, "#001A99");
@@ -84,7 +85,22 @@ function NewInterviewForm() {
         setSubmitting(false);
         return;
       }
+      // Ask for the mic BEFORE minting the token. The token's session must
+      // open within ~2 minutes of being issued, and a permission prompt the
+      // user leaves sitting there will burn that window and kill an
+      // interview they were never told they'd started.
+      try {
+        const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+        probe.getTracks().forEach((t) => t.stop());
+      } catch {
+        setError("We need your microphone for a live interview. Allow it, then start again.");
+        setSubmitting(false);
+        return;
+      }
+
       const result = await startInterview(selectedSessionId, jobDescription.trim(), idToken);
+      // The token is single-use and must not travel in the URL.
+      stashInterviewStart(result);
       router.push(`/interview/${result.interview_id}`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 429) {
