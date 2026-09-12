@@ -46,6 +46,18 @@ GEMINI_ROAST_MODEL = os.getenv("GEMINI_ROAST_MODEL", "gemini-3.5-flash-lite")
 GEMINI_INTERVIEW_MODEL = os.getenv("GEMINI_INTERVIEW_MODEL", GEMINI_ROAST_MODEL)
 GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview")
 
+# OpenAI is the TTS *fallback only* -- Gemini stays the primary voice. This
+# exists because Gemini's TTS model has a genuinely tight free-tier quota
+# (10 requests/day, confirmed live -- and it behaves more like a short
+# rolling window than a clean daily reset), which is roughly one interview's
+# worth. Without a fallback, the interviewer simply loses its voice partway
+# through and the whole feature 503s. See interview/tts_client.py.
+# Unset OPENAI_API_KEY simply disables the fallback -- Gemini failures then
+# surface as they did before, no silent behaviour change.
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_TTS_MODEL = os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
+OPENAI_TTS_VOICE = os.getenv("OPENAI_TTS_VOICE", "cedar")
+
 INGEST_RATE_LIMIT_MAX = int(os.getenv("INGEST_RATE_LIMIT_MAX", "5"))
 INGEST_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("INGEST_RATE_LIMIT_WINDOW_SECONDS", "3600"))
 
