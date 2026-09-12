@@ -25,8 +25,10 @@ the turn-based (not real-time-streaming) architecture decision.
 import asyncio
 import json
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, File, Form, status
+from google.genai import errors as genai_errors
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -106,10 +108,10 @@ async def start_interview(
     system_context = interview_prompts.build_interview_system_context(anonymized, roast, body.job_description)
     opening_prompt = interview_prompts.build_opening_prompt(system_context)
 
-    opening_response, _usage, _model = await interview_llm.generate_opening_question(opening_prompt)
-    question_text = interview_validator.validate_opening_question(opening_response)
-
-    audio_bytes, content_type = await tts_client.synthesize_speech(question_text)
+    async with _gemini_call_guard():
+        opening_response, _usage, _model = await interview_llm.generate_opening_question(opening_prompt)
+        question_text = interview_validator.validate_opening_question(opening_response)
+        audio_bytes, content_type = await tts_client.synthesize_speech(question_text)
 
     interview = await interview_service.create_interview_session(
         db=db,
@@ -132,6 +134,43 @@ async def start_interview(
         question_text=question_text,
         question_audio_url=_audio_url(interview.id, 0, "prompt"),
     )
+
+
+@asynccontextmanager
+async def _gemini_call_guard():
+    """
+    Wraps a single Gemini or TTS call, not a whole route body -- these
+    routes interleave real Gemini calls with real DB/blob writes, and a
+    broad try/except would mislabel an actual bug in that surrounding
+    code as "the interviewer is temporarily unavailable."
+
+    Confirmed live during this feature's own end-to-end verification:
+    Gemini's TTS model free tier caps at just 10 requests/day (far
+    tighter than the interview LLM's own quota) -- exhausting it mid-
+    interview previously surfaced as a raw, unhandled 500. This turns any
+    google.genai APIError (quota, rate limit, transient server error)
+    into a clean 503 instead, so a user mid-interview gets a real
+    "try again" message, not a stack trace.
+
+    This makes the immediate HTTP response graceful -- it does NOT by
+    itself fix every state-consistency edge case. In particular: the
+    end-of-interview scoring call (generate_score) runs AFTER
+    advance_turn_count has already moved turn_count to max_turns, so a
+    failure there still leaves the interview stuck IN_PROGRESS with no
+    score and no way to submit another turn (turn_number will never match
+    turn_count again). That gap is real and still open -- see this
+    feature's own plan doc's "Stuck-IN_PROGRESS failure mode" risk. Every
+    OTHER Gemini call in these routes does run before its turn's DB
+    writes, so a caught failure anywhere else leaves the interview
+    exactly where it was before the call -- safely retriable.
+    """
+    try:
+        yield
+    except genai_errors.APIError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The interviewer is temporarily unavailable. Please try again in a moment.",
+        ) from e
 
 
 async def _get_owned_interview(interview_id: str, curr_user: Users, db: AsyncSession) -> InterviewSessions:
@@ -191,9 +230,10 @@ async def submit_interview_turn(
     system_context = interview_prompts.build_interview_system_context(anonymized, roast, interview.job_description)
     turn_prompt = interview_prompts.build_turn_prompt(system_context, transcript)
 
-    raw_response, _usage, _model = await interview_llm.generate_turn_response(
-        turn_prompt, answer_audio_bytes, answer_mime_type
-    )
+    async with _gemini_call_guard():
+        raw_response, _usage, _model = await interview_llm.generate_turn_response(
+            turn_prompt, answer_audio_bytes, answer_mime_type
+        )
     validated = interview_validator.validate_turn_response(
         raw_response, turn_count=interview.turn_count, max_turns=interview.max_turns
     )
@@ -208,14 +248,16 @@ async def submit_interview_turn(
 
     if validated.is_final_turn:
         response_text = validated.reaction_text
-        response_audio_bytes, response_content_type = await tts_client.synthesize_speech(response_text)
+        async with _gemini_call_guard():
+            response_audio_bytes, response_content_type = await tts_client.synthesize_speech(response_text)
         response_audio_path = upload_interview_audio(
             str(interview.id), turn_number, "closing", response_audio_bytes, response_content_type
         )
         response_audio_url = _audio_url(interview.id, turn_number, "closing")
     else:
         response_text = f"{validated.reaction_text} {validated.next_question}".strip()
-        response_audio_bytes, response_content_type = await tts_client.synthesize_speech(response_text)
+        async with _gemini_call_guard():
+            response_audio_bytes, response_content_type = await tts_client.synthesize_speech(response_text)
         next_turn_number = turn_number + 1
         response_audio_path = upload_interview_audio(
             str(interview.id), next_turn_number, "prompt", response_audio_bytes, response_content_type
@@ -235,7 +277,8 @@ async def submit_interview_turn(
     score_payload = {}
     if validated.is_final_turn:
         scoring_prompt = interview_prompts.build_scoring_prompt(system_context, transcript)
-        raw_score, _usage2, _model2 = await interview_llm.generate_score(scoring_prompt)
+        async with _gemini_call_guard():
+            raw_score, _usage2, _model2 = await interview_llm.generate_score(scoring_prompt)
         validated_score = interview_validator.validate_score_response(raw_score)
         interview = await interview_service.finalize_interview(db, interview, validated_score)
         score_payload = {
