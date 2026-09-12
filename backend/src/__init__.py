@@ -8,6 +8,7 @@ from src.routes.auth import auth_router
 from src.routes.injest import injest_router
 from src.routes.public import public_router
 from src.routes.leaderboard import leaderboard_router
+from src.routes.interview import interview_router, interview_leaderboard_router
 
 
 @asynccontextmanager
@@ -46,6 +47,8 @@ def create_app()-> FastAPI:
     app.include_router(injest_router, prefix="/api/v1")
     app.include_router(public_router)
     app.include_router(leaderboard_router)
+    app.include_router(interview_router, prefix="/api/v1")
+    app.include_router(interview_leaderboard_router)
     @app.get("/")
     def get_root():
         return {"message":" Welcome to resume roast arena"}

@@ -7,6 +7,7 @@ import { AuthMenu } from "./auth-menu";
 
 const NAV_LINKS = [
   { label: "Leaderboard", href: "/leaderboard" },
+  { label: "Interview Arena", href: "/interview-leaderboard" },
   { label: "How it works", href: "/how-it-works" },
 ];
 

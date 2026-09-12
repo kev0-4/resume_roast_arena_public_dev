@@ -38,9 +38,39 @@ AZURE_SERVICE_BUS_RENDER_QUEUE_NAME = os.getenv("AZURE_SERVICE_BUS_RENDER_QUEUE_
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_ROAST_MODEL = os.getenv("GEMINI_ROAST_MODEL", "gemini-3.5-flash-lite")
+# Same model as the roast by default -- confirmed via a real call this
+# session that it supports audio input + response_schema together in one
+# call. TTS needs a genuinely different, dedicated model: flash-lite
+# silently ignores response_modalities=["AUDIO"] and just returns text
+# instead of erroring, so a TTS-capable model has to be named explicitly.
+GEMINI_INTERVIEW_MODEL = os.getenv("GEMINI_INTERVIEW_MODEL", GEMINI_ROAST_MODEL)
+GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview")
+
+# OpenAI is the TTS *fallback only* -- Gemini stays the primary voice. This
+# exists because Gemini's TTS model has a genuinely tight free-tier quota
+# (10 requests/day, confirmed live -- and it behaves more like a short
+# rolling window than a clean daily reset), which is roughly one interview's
+# worth. Without a fallback, the interviewer simply loses its voice partway
+# through and the whole feature 503s. See interview/tts_client.py.
+# Unset OPENAI_API_KEY simply disables the fallback -- Gemini failures then
+# surface as they did before, no silent behaviour change.
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_TTS_MODEL = os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
+OPENAI_TTS_VOICE = os.getenv("OPENAI_TTS_VOICE", "cedar")
 
 INGEST_RATE_LIMIT_MAX = int(os.getenv("INGEST_RATE_LIMIT_MAX", "5"))
 INGEST_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("INGEST_RATE_LIMIT_WINDOW_SECONDS", "3600"))
+
+# Hard cap on one interview's length, snapshotted onto InterviewSessions.max_turns
+# at creation time -- a later change here never retroactively affects an
+# in-flight interview. Distinct from the two rate limits below, which cap
+# request *frequency*, not a single interview's turn count.
+INTERVIEW_MAX_TURNS = int(os.getenv("INTERVIEW_MAX_TURNS", "7"))
+
+INTERVIEW_START_RATE_LIMIT_MAX = int(os.getenv("INTERVIEW_START_RATE_LIMIT_MAX", "3"))
+INTERVIEW_START_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("INTERVIEW_START_RATE_LIMIT_WINDOW_SECONDS", "86400"))
+INTERVIEW_TURN_RATE_LIMIT_MAX = int(os.getenv("INTERVIEW_TURN_RATE_LIMIT_MAX", "40"))
+INTERVIEW_TURN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("INTERVIEW_TURN_RATE_LIMIT_WINDOW_SECONDS", "3600"))
 
 RAW_UPLOAD_TTL_HOURS = int(os.getenv("RAW_UPLOAD_TTL_HOURS", "24"))
 ANONYMOUS_ROAST_TTL_DAYS = int(os.getenv("ANONYMOUS_ROAST_TTL_DAYS", "30"))

@@ -12,6 +12,7 @@ import { RoastPanel } from "@/components/result/roast-panel";
 import { HighlightsList } from "@/components/result/highlights-list";
 import { FixesList } from "@/components/result/fixes-list";
 import { ExpiredView } from "@/components/result/expired-view";
+import { InterviewCta } from "@/components/result/interview-cta";
 import { ApiError, getRoastAnalysis, publicRoastCardUrl } from "@/lib/api";
 
 type PageParams = { params: Promise<{ slug: string }> };
@@ -96,7 +97,13 @@ export default async function ResultPage({ params }: PageParams) {
           <HighlightsList highlights={data.highlights} />
           <FixesList fixes={data.fixes} />
 
-          <div className="flex flex-col items-center gap-3 border-t border-black/10 pt-8 text-center">
+          <div className="flex flex-col items-center gap-4 border-t border-black/10 pt-8 text-center">
+            {/* Silent for signed-out/non-owner viewers -- see the
+                component's own docstring. Most visitors of a shared link
+                are exactly that, so this renders above the "roast your
+                own" CTA only when it actually applies. */}
+            <InterviewCta slug={slug} />
+
             <p className="font-mono text-xs text-smoke">Think you can do better?</p>
             <Link
               href="/roast"
