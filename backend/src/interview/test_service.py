@@ -14,8 +14,8 @@ being committed, so touching user.id again after a *later* commit (e.g.
 create_resume_session's own internal commit) raises MissingGreenlet
 outside an awaited context.
 
-The pure transcript-list helpers (new_transcript_entry, record_turn_answer,
-append_question_turn) need no DB at all and are tested directly.
+The pure transcript helpers (merge_transcript_chunks, merge_into_utterances)
+need no DB at all and are tested directly.
 """
 
 import asyncio
@@ -66,67 +66,69 @@ async def _make_resume_session_id(db, user_id):
 # ---------------------------------------------------------------------------
 
 
-class TestNewTranscriptEntry:
-    def test_shape(self):
-        entry = interview_service.new_transcript_entry(0, "Q text", "path/to/audio.wav")
-        assert entry["turn"] == 0
-        assert entry["question_text"] == "Q text"
-        assert entry["question_audio_path"] == "path/to/audio.wav"
-        assert entry["answer_transcript"] is None
-        assert entry["answer_audio_path"] is None
-        assert entry["reaction_text"] is None
+def _chunk(seq, speaker, text, at="2026-01-01T00:00:00Z"):
+    return {"seq": seq, "speaker": speaker, "text": text, "is_final": True, "at": at}
 
 
-class TestRecordTurnAnswer:
-    def test_fills_in_matching_turn(self):
-        transcript = [interview_service.new_transcript_entry(0, "Q0", "a0.wav")]
-        updated = interview_service.record_turn_answer(
-            transcript, 0, answer_transcript="My answer", answer_audio_path="ans0.wav", reaction_text="Reaction"
-        )
-        assert updated[0]["answer_transcript"] == "My answer"
-        assert updated[0]["answer_audio_path"] == "ans0.wav"
-        assert updated[0]["reaction_text"] == "Reaction"
+class TestMergeTranscriptChunks:
+    def test_appends_new_chunks(self):
+        existing = [_chunk(0, "interviewer", "Hello.")]
+        merged = interview_service.merge_transcript_chunks(existing, [_chunk(1, "candidate", "Hi.")])
+        assert [c["seq"] for c in merged] == [0, 1]
+
+    def test_deduplicates_replayed_seq(self):
+        # The browser re-sends a batch it failed to deliver, so the same
+        # seq genuinely arrives twice. First write must win.
+        existing = [_chunk(0, "interviewer", "Original.")]
+        merged = interview_service.merge_transcript_chunks(existing, [_chunk(0, "interviewer", "Replayed.")])
+        assert len(merged) == 1
+        assert merged[0]["text"] == "Original."
+
+    def test_orders_by_seq_regardless_of_arrival_order(self):
+        merged = interview_service.merge_transcript_chunks([], [_chunk(5, "candidate", "b"), _chunk(2, "candidate", "a")])
+        assert [c["seq"] for c in merged] == [2, 5]
 
     def test_does_not_mutate_input(self):
-        transcript = [interview_service.new_transcript_entry(0, "Q0", "a0.wav")]
-        interview_service.record_turn_answer(
-            transcript, 0, answer_transcript="X", answer_audio_path="y", reaction_text="z"
-        )
-        assert transcript[0]["answer_transcript"] is None
+        existing = [_chunk(0, "interviewer", "Hello.")]
+        interview_service.merge_transcript_chunks(existing, [_chunk(1, "candidate", "Hi.")])
+        assert len(existing) == 1
 
-    def test_only_targets_the_matching_turn(self):
-        transcript = [
-            interview_service.new_transcript_entry(0, "Q0", "a0.wav"),
-            interview_service.new_transcript_entry(1, "Q1", "a1.wav"),
+    def test_skips_chunks_with_no_seq(self):
+        merged = interview_service.merge_transcript_chunks([], [{"speaker": "candidate", "text": "orphan"}])
+        assert merged == []
+
+
+class TestMergeIntoUtterances:
+    def test_merges_consecutive_same_speaker_fragments(self):
+        # This is the real shape the Live API emits: one sentence arriving
+        # as several fragments, already carrying their own spacing.
+        chunks = [
+            _chunk(0, "interviewer", "So you say"),
+            _chunk(1, "interviewer", " you led that migration."),
+            _chunk(2, "candidate", "I did."),
         ]
-        updated = interview_service.record_turn_answer(
-            transcript, 1, answer_transcript="Ans1", answer_audio_path="ans1.wav", reaction_text="R1"
-        )
-        assert updated[0]["answer_transcript"] is None
-        assert updated[1]["answer_transcript"] == "Ans1"
+        merged = interview_service.merge_into_utterances(chunks)
+        assert len(merged) == 2
+        assert merged[0] == {"speaker": "interviewer", "text": "So you say you led that migration.", "at": merged[0]["at"]}
+        assert merged[1]["text"] == "I did."
 
-    def test_raises_on_unknown_turn(self):
-        transcript = [interview_service.new_transcript_entry(0, "Q0", "a0.wav")]
-        with pytest.raises(ValueError):
-            interview_service.record_turn_answer(
-                transcript, 5, answer_transcript="X", answer_audio_path="y", reaction_text="z"
-            )
+    def test_starts_a_new_utterance_when_the_speaker_changes_back(self):
+        chunks = [
+            _chunk(0, "interviewer", "Q1"),
+            _chunk(1, "candidate", "A1"),
+            _chunk(2, "interviewer", "Q2"),
+        ]
+        merged = interview_service.merge_into_utterances(chunks)
+        assert [u["speaker"] for u in merged] == ["interviewer", "candidate", "interviewer"]
 
+    def test_drops_whitespace_only_fragments(self):
+        chunks = [_chunk(0, "candidate", "   "), _chunk(1, "candidate", "Real answer.")]
+        merged = interview_service.merge_into_utterances(chunks)
+        assert len(merged) == 1
+        assert merged[0]["text"] == "Real answer."
 
-class TestAppendQuestionTurn:
-    def test_appends_new_entry(self):
-        transcript = [interview_service.new_transcript_entry(0, "Q0", "a0.wav")]
-        updated = interview_service.append_question_turn(
-            transcript, turn=1, question_text="Q1", question_audio_path="a1.wav"
-        )
-        assert len(updated) == 2
-        assert updated[1]["turn"] == 1
-        assert updated[1]["question_text"] == "Q1"
-
-    def test_does_not_mutate_input(self):
-        transcript = [interview_service.new_transcript_entry(0, "Q0", "a0.wav")]
-        interview_service.append_question_turn(transcript, turn=1, question_text="Q1", question_audio_path="a1.wav")
-        assert len(transcript) == 1
+    def test_empty_transcript(self):
+        assert interview_service.merge_into_utterances([]) == []
 
 
 # ---------------------------------------------------------------------------
@@ -145,12 +147,12 @@ def test_create_and_get_interview_session():
                 user_id=user_id,
                 resume_session_id=resume_session_id,
                 job_description="Backend engineer role.",
-                max_turns=7,
             )
             interview_id = interview.id
             assert interview.status == InterviewStatusEnum.IN_PROGRESS.value
             assert interview.turn_count == 0
-            assert interview.max_turns == 7
+            # Vestigial column, written as zero -- no turns exist any more.
+            assert interview.max_turns == 0
 
             fetched = await interview_service.get_interview_session(db, interview_id)
             assert fetched is not None
@@ -168,16 +170,35 @@ def test_get_interview_session_returns_none_for_unknown_id():
     _run(run)
 
 
-def test_advance_turn_count_increments():
+def test_mark_interview_abandoned():
     async def run():
         async with AsyncSessionLocal() as db:
-            user_id = await _make_user_id(db, f"advance-{uuid.uuid4().hex[:6]}")
+            user_id = await _make_user_id(db, f"abandon-{uuid.uuid4().hex[:6]}")
             resume_session_id = await _make_resume_session_id(db, user_id)
             interview = await interview_service.create_interview_session(
-                db=db, user_id=user_id, resume_session_id=resume_session_id, job_description="JD", max_turns=7
+                db=db, user_id=user_id, resume_session_id=resume_session_id, job_description="JD"
             )
-            updated = await interview_service.advance_turn_count(db, interview)
-            assert updated.turn_count == 1
+            updated = await interview_service.mark_interview_abandoned(db, interview)
+            assert updated.status == InterviewStatusEnum.ABANDONED.value
+            assert updated.completed_at is not None
+            assert updated.score is None
+
+    _run(run)
+
+
+def test_leaderboard_excludes_abandoned_interviews():
+    async def run():
+        async with AsyncSessionLocal() as db:
+            user_id = await _make_user_id(db, f"abandon-lb-{uuid.uuid4().hex[:6]}")
+            resume_session_id = await _make_resume_session_id(db, user_id)
+            interview = await interview_service.create_interview_session(
+                db=db, user_id=user_id, resume_session_id=resume_session_id, job_description="JD"
+            )
+            abandoned = await interview_service.mark_interview_abandoned(db, interview)
+            abandoned_id = abandoned.id
+
+            rows, _total = await interview_service.get_interview_leaderboard(db=db, limit=1000, offset=0)
+            assert abandoned_id not in [r["id"] for r in rows]
 
     _run(run)
 
@@ -190,7 +211,7 @@ def test_finalize_interview_sets_completed_status_and_score():
             user_id = await _make_user_id(db, f"finalize-{uuid.uuid4().hex[:6]}")
             resume_session_id = await _make_resume_session_id(db, user_id)
             interview = await interview_service.create_interview_session(
-                db=db, user_id=user_id, resume_session_id=resume_session_id, job_description="JD", max_turns=7
+                db=db, user_id=user_id, resume_session_id=resume_session_id, job_description="JD"
             )
             score = InterviewScoreResponse(
                 score=8, strengths=["Specific."], weaknesses=["Could be terser."], next_steps=["Practice."]
@@ -210,7 +231,7 @@ def test_mark_interview_failed():
             user_id = await _make_user_id(db, f"fail-{uuid.uuid4().hex[:6]}")
             resume_session_id = await _make_resume_session_id(db, user_id)
             interview = await interview_service.create_interview_session(
-                db=db, user_id=user_id, resume_session_id=resume_session_id, job_description="JD", max_turns=7
+                db=db, user_id=user_id, resume_session_id=resume_session_id, job_description="JD"
             )
             updated = await interview_service.mark_interview_failed(
                 db, interview, error_code="GEMINI_ERROR", error_message="boom"
@@ -225,7 +246,7 @@ async def _make_completed_interview_id(db, user_id, resume_session_id, *, score,
     from .schemas import InterviewScoreResponse
 
     interview = await interview_service.create_interview_session(
-        db=db, user_id=user_id, resume_session_id=resume_session_id, job_description="JD", max_turns=7
+        db=db, user_id=user_id, resume_session_id=resume_session_id, job_description="JD"
     )
     updated = await interview_service.finalize_interview(
         db, interview, InterviewScoreResponse(score=score, strengths=["s"], weaknesses=["w"], next_steps=["n"])
@@ -264,7 +285,7 @@ def test_leaderboard_excludes_in_progress_interviews():
             resume_session_id = await _make_resume_session_id(db, user_id)
 
             in_progress = await interview_service.create_interview_session(
-                db=db, user_id=user_id, resume_session_id=resume_session_id, job_description="JD", max_turns=7
+                db=db, user_id=user_id, resume_session_id=resume_session_id, job_description="JD"
             )
             in_progress_id = in_progress.id
             rows, _total = await interview_service.get_interview_leaderboard(db=db, limit=1000, offset=0)

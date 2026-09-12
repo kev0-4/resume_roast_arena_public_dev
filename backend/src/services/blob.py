@@ -187,27 +187,13 @@ def upload_interview_transcript(interview_id: str, data: dict) -> str:
     return blob_path
 
 
-# Not part of _ALL_SESSION_BLOB_PREFIXES above -- interview blobs live under
-# a different ID namespace (InterviewSessions.id, not Sessions.id), and
-# interviews require real sign-in so they're never swept by
-# workers/cleanup/sweep.py's anonymous-only TTL deletion. If logged-in-user
-# retention is ever configured (see sweep.py's own docstring), a parallel
-# interview-blob deletion path will need to be added at that time.
-def upload_interview_audio(
-    interview_id: str, turn: int, kind: str, audio_bytes: bytes, content_type: str
-) -> str:
-    """
-    kind is "user" (the interviewee's recorded answer) or "prompt" (the
-    interviewer's TTS'd question/reaction) -- same turn number, two audio
-    files, matching how each turn has one of each.
-    """
-    ext = "wav" if content_type == "audio/wav" else content_type.split("/")[-1].split(";")[0]
-    blob_path = f"interview-audio/{interview_id}/turn_{turn}_{kind}.{ext}"
-    blob_client = get_blob_client(blob_path=blob_path)
-    blob_client.upload_blob(
-        audio_bytes, overwrite=True, content_settings=ContentSettings(content_type=content_type)
-    )
-    return blob_path
+# Interview transcript blobs are not part of _ALL_SESSION_BLOB_PREFIXES
+# above -- they live under a different ID namespace (InterviewSessions.id,
+# not Sessions.id), and interviews require real sign-in so they're never
+# swept by workers/cleanup/sweep.py's anonymous-only TTL deletion. If
+# logged-in-user retention is ever configured (see sweep.py's own
+# docstring), a parallel interview-blob deletion path will need to be added
+# at that time.
 
 
 def initialize_blob_storage() -> None:

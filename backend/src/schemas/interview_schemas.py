@@ -4,41 +4,40 @@ from datetime import datetime
 
 
 class InterviewStartResponse(BaseModel):
-    interview_id: str
-    status: str
-    turn_number: int
-    max_turns: int
-    question_text: str
-    question_audio_url: str
-
-
-class InterviewTurnApiResponse(BaseModel):
     """
-    response_audio_url is ONE combined clip -- the reaction to the answer
-    just given, spoken together with the next question (or, on the final
-    turn, just the closing reaction alone) -- matching the one-TTS-call-
-    per-turn design. Not two separate audio files.
+    Everything the browser needs to run the interview itself.
+
+    `token` is a single-use ephemeral Gemini credential, NOT our API key.
+    It cannot be re-minted for the same interview, which is why a refresh
+    of the live page can never resume a session.
     """
     interview_id: str
-    turn_number: int
-    reaction_text: str
-    next_question: str
-    response_audio_url: str
-    is_final: bool
+    token: str
+    model: str
+    system_instruction: str
+    expires_at: datetime
+
+
+class InterviewTranscriptAck(BaseModel):
+    accepted: int
+    total_chunks: int
+
+
+class InterviewScoreResult(BaseModel):
+    interview_id: str
     status: str
-    score: Optional[int] = None
-    strengths: Optional[list[str]] = None
-    weaknesses: Optional[list[str]] = None
-    next_steps: Optional[list[str]] = None
+    score: int
+    strengths: list[str]
+    weaknesses: list[str]
+    next_steps: list[str]
 
 
-class TranscriptTurnEntry(BaseModel):
-    turn: int
-    question_text: str
-    question_audio_url: str
-    answer_transcript: Optional[str] = None
-    answer_audio_url: Optional[str] = None
-    reaction_text: Optional[str] = None
+class TranscriptEntry(BaseModel):
+    """One merged speaker turn, not a raw streamed fragment."""
+    seq: int
+    speaker: str
+    text: str
+    at: Optional[str] = None
 
 
 class InterviewDetailResponse(BaseModel):
@@ -47,9 +46,7 @@ class InterviewDetailResponse(BaseModel):
     resume_session_id: str
     roast_slug: Optional[str] = None
     job_description: str
-    turn_count: int
-    max_turns: int
-    transcript: list[TranscriptTurnEntry]
+    transcript: list[TranscriptEntry]
     score: Optional[int] = None
     strengths: Optional[list[str]] = None
     weaknesses: Optional[list[str]] = None

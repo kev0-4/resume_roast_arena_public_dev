@@ -11,17 +11,20 @@ backend/src/routes/public.py does its own asyncio.to_thread(read_blob, ...)
 directly rather than through session_service.py -- this module owns the
 database, not blob storage.
 
-Transcript entry shape (a plain dict, stored as a JSON list in
-transcript.json):
+Transcript chunk shape (a plain dict, stored as a JSON list in
+transcript.json). These are streamed up by the browser DURING the live
+call, because the conversation itself happens between the browser and
+Gemini and never passes through this server:
     {
-        "turn": int,
-        "question_text": str,
-        "question_audio_path": str,
-        "answer_transcript": str | None,   # filled in once answered
-        "answer_audio_path": str | None,
-        "reaction_text": str | None,
-        "created_at": str (ISO),
+        "seq": int,          # client-assigned, monotonic within one interview
+        "speaker": str,      # "interviewer" | "candidate"
+        "text": str,
+        "at": str (ISO),
     }
+
+Chunks are fragments, not whole utterances -- the Live API emits
+transcription in small pieces as it goes. merge_transcript_chunks below is
+what turns them back into readable speaker turns.
 """
 
 import datetime
@@ -40,58 +43,52 @@ from .schemas import InterviewScoreResponse
 # ---------------------------------------------------------------------------
 
 
-def new_transcript_entry(turn: int, question_text: str, question_audio_path: str) -> Dict[str, Any]:
-    return {
-        "turn": turn,
-        "question_text": question_text,
-        "question_audio_path": question_audio_path,
-        "answer_transcript": None,
-        "answer_audio_path": None,
-        "reaction_text": None,
-        "created_at": datetime.datetime.utcnow().isoformat(),
-    }
-
-
-def record_turn_answer(
-    transcript: List[Dict[str, Any]],
-    turn_number: int,
-    *,
-    answer_transcript: str,
-    answer_audio_path: str,
-    reaction_text: str,
-) -> List[Dict[str, Any]]:
+def merge_transcript_chunks(existing: List[Dict[str, Any]], incoming: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Returns a NEW list with the entry at `turn_number` filled in -- does
-    not mutate the input, so callers always work from the return value
-    (same immutable-update style the rest of this codebase's transcript/
-    artifact handling uses).
+    Adds new chunks to the stored transcript, de-duplicated by seq and kept
+    in seq order. Returns a NEW list (same immutable-update style as the
+    rest of this codebase's artifact handling).
 
-    Raises:
-        ValueError: if no entry with that turn number exists (shouldn't
-                    happen given the route's own turn_number == turn_count
-                    check, but this function doesn't trust that alone).
+    De-duplication is what makes the endpoint safe to retry: the browser
+    keeps a failed batch and re-sends it on the next flush, so the same seq
+    genuinely does arrive twice. First write wins -- a replayed seq never
+    overwrites what was already recorded.
     """
-    updated = []
-    found = False
-    for entry in transcript:
-        if entry["turn"] == turn_number:
-            entry = {
-                **entry,
-                "answer_transcript": answer_transcript,
-                "answer_audio_path": answer_audio_path,
-                "reaction_text": reaction_text,
-            }
-            found = True
-        updated.append(entry)
-    if not found:
-        raise ValueError(f"No transcript entry for turn {turn_number}")
-    return updated
+    by_seq: Dict[int, Dict[str, Any]] = {}
+    for chunk in [*existing, *incoming]:
+        seq = chunk.get("seq")
+        if seq is None or seq in by_seq:
+            continue
+        by_seq[seq] = chunk
+    return [by_seq[seq] for seq in sorted(by_seq)]
 
 
-def append_question_turn(
-    transcript: List[Dict[str, Any]], *, turn: int, question_text: str, question_audio_path: str
-) -> List[Dict[str, Any]]:
-    return [*transcript, new_transcript_entry(turn, question_text, question_audio_path)]
+def merge_into_utterances(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Collapses fragment chunks into one entry per speaker turn.
+
+    The Live API transcribes continuously, so a single spoken sentence
+    arrives as several chunks. Scoring (and anyone reading the transcript
+    back) wants utterances, not fragments.
+
+    Fragments carry their own leading/trailing spacing from the API, so
+    they are concatenated as-is and stripped once at the end rather than
+    joined on a separator -- joining on " " double-spaces most sentences
+    and inserts spaces before punctuation.
+    """
+    utterances: List[Dict[str, Any]] = []
+    for chunk in chunks:
+        speaker = chunk.get("speaker")
+        text = chunk.get("text") or ""
+        if not text.strip():
+            continue
+        if utterances and utterances[-1]["speaker"] == speaker:
+            utterances[-1]["text"] += text
+        else:
+            utterances.append({"speaker": speaker, "text": text, "at": chunk.get("at")})
+    for utterance in utterances:
+        utterance["text"] = utterance["text"].strip()
+    return utterances
 
 
 # ---------------------------------------------------------------------------
@@ -100,8 +97,14 @@ def append_question_turn(
 
 
 async def create_interview_session(
-    db: AsyncSession, *, user_id: str | uuid.UUID, resume_session_id: str | uuid.UUID, job_description: str, max_turns: int
+    db: AsyncSession, *, user_id: str | uuid.UUID, resume_session_id: str | uuid.UUID, job_description: str
 ) -> InterviewSessions:
+    # turn_count / max_turns are vestigial: a live conversation has no
+    # turns to count, and its length is bounded by the token's expiry
+    # instead. The columns are written as zeroes rather than dropped --
+    # max_turns is NOT NULL, and a destructive migration is the wrong risk
+    # to take while production's automated migration path is this new.
+    # Flagged for a later cleanup migration.
     interview = InterviewSessions(
         id=uuid.uuid4(),
         user_id=user_id,
@@ -109,7 +112,7 @@ async def create_interview_session(
         status=InterviewStatusEnum.IN_PROGRESS.value,
         job_description=job_description,
         turn_count=0,
-        max_turns=max_turns,
+        max_turns=0,
         started_at=datetime.datetime.utcnow(),
     )
     db.add(interview)
@@ -140,8 +143,15 @@ async def set_transcript_blob_path(db: AsyncSession, interview: InterviewSession
     return interview
 
 
-async def advance_turn_count(db: AsyncSession, interview: InterviewSessions) -> InterviewSessions:
-    interview.turn_count += 1
+async def mark_interview_abandoned(db: AsyncSession, interview: InterviewSessions) -> InterviewSessions:
+    """
+    For a session that produced no candidate speech at all -- joined and
+    left, or never unmuted. Deliberately NOT scored: it would cost a Gemini
+    call to grade silence, and a score off an empty transcript has no
+    business on the leaderboard.
+    """
+    interview.status = InterviewStatusEnum.ABANDONED.value
+    interview.completed_at = datetime.datetime.utcnow()
     interview.updated_at = datetime.datetime.utcnow()
     try:
         await db.commit()

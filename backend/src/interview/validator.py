@@ -7,61 +7,16 @@ guarantees *shape*, not that a field is meaningful or in range.
 
 Deliberately lenient rather than raising on empty/malformed feedback
 fields (unlike parse_roast_output's "fixes has no actionable items"
-ValueError): an interview's final scoring call failing would strand the
-session at turn_count == max_turns with no way to submit another turn and
-no score (the "stuck IN_PROGRESS" failure mode the implementation plan
-flags explicitly) -- a fallback string is a much better outcome for a
-user who just spent several minutes on a live interview than an error
-page. Falls back to a generic string per empty list, not silently empty
-content and not a hard failure.
+ValueError): the scoring call happens after the candidate has already
+spent real minutes talking, and there is nothing left to retry by then --
+a fallback string is a far better outcome for them than an error page.
+Falls back to a generic string per empty list, not silently empty content
+and not a hard failure.
 """
 
 from typing import List
 
-from .schemas import InterviewTurnResponse, InterviewScoreResponse, SCORE_MIN, SCORE_MAX
-
-_FALLBACK_REACTION = "Noted."
-_FALLBACK_NEXT_QUESTION = "Let's move on -- walk me through another part of your resume."
-_FALLBACK_CLOSING = "That's a wrap. Let's see how you did."
-
-
-def validate_turn_response(
-    response: InterviewTurnResponse, *, turn_count: int, max_turns: int
-) -> InterviewTurnResponse:
-    """
-    turn_count is the interview's turn_count BEFORE this turn is recorded
-    (i.e. the turn currently being answered) -- is_final_turn is
-    force-set True once answering this turn would bring turn_count to
-    max_turns, regardless of what the model itself returned. This is the
-    actual hard-cap enforcement point: the model's own is_final_turn is
-    only ever allowed to end an interview EARLY, never to extend it past
-    the cap.
-    """
-    is_final = response.is_final_turn or (turn_count + 1 >= max_turns)
-
-    reaction_text = response.reaction_text.strip() or _FALLBACK_REACTION
-    next_question = response.next_question.strip()
-    if not next_question:
-        next_question = _FALLBACK_CLOSING if is_final else _FALLBACK_NEXT_QUESTION
-
-    return InterviewTurnResponse(
-        answer_transcript=response.answer_transcript.strip(),
-        reaction_text=reaction_text,
-        next_question=next_question,
-        is_final_turn=is_final,
-    )
-
-
-_FALLBACK_OPENING_QUESTION = "Walk me through the most recent thing on your resume -- what did you actually do?"
-
-
-def validate_opening_question(response: InterviewTurnResponse) -> str:
-    """
-    The opening call has no prior answer to react to or transcribe, so
-    only next_question is meaningful here -- returns the validated
-    question text alone rather than a full InterviewTurnResponse.
-    """
-    return response.next_question.strip() or _FALLBACK_OPENING_QUESTION
+from .schemas import InterviewScoreResponse, SCORE_MIN, SCORE_MAX
 
 
 def _non_empty_or_fallback(items: List[str], fallback: str) -> List[str]:

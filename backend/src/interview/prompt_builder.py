@@ -155,70 +155,68 @@ Flagged issues: {quality_flags_text}
 """
 
 
-def build_opening_prompt(system_context: str) -> str:
+def build_live_system_instruction(system_context: str) -> str:
+    """
+    The systemInstruction handed to the Live API session.
+
+    build_interview_system_context above is shared verbatim with scoring so
+    the two calls can never disagree about who this candidate is. What gets
+    added here is everything specific to the fact that this output will be
+    SPOKEN, in real time, to someone who can interrupt it -- direction that
+    would be meaningless in the scoring call.
+
+    The "speak first" instruction matters more than it looks: without it
+    the model waits for the candidate, the candidate waits for the model,
+    and the interview opens with both sides silent.
+    """
     return f"""\
 {system_context}
 
 ---
-TASK: This interview is just starting. Ask your opening question -- one \
-sharp, specific question that gets straight at the weakest or vaguest \
-part of this resume relative to the job description above, not a generic \
-"tell me about yourself." Leave reaction_text empty (there's no answer \
-yet to react to). Set is_final_turn to false.\
+HOW THIS CONVERSATION WORKS:
+
+You are speaking out loud, live, to the candidate right now. This is a \
+voice conversation, not writing.
+
+- Open the interview yourself, immediately, without waiting to be \
+prompted. Introduce yourself in one short line, then go straight to your \
+first question -- a sharp, specific one aimed at the weakest or vaguest \
+part of their resume relative to the job description, never a generic \
+"tell me about yourself."
+- Speak in short conversational turns. A couple of sentences, then stop \
+and let them answer. Never deliver a monologue or a list.
+- Ask exactly one question at a time, then actually wait.
+- React to what they genuinely just said, quoting their own words back at \
+them where it lands. If an answer is vague, evasive, or unsupported, say \
+so plainly and press again on the same point rather than politely moving \
+on.
+- Never read out headings, bullet points, or anything that only makes \
+sense written down. Everything you say gets spoken aloud.
+- The candidate can and will interrupt you. If they start talking, stop \
+and listen.
+- Stay in character as the interviewer for the whole session. Do not \
+break to explain that you are an AI, and do not narrate what you are \
+doing.\
 """
 
 
-def build_turn_prompt(system_context: str, transcript_so_far: List[Dict[str, Any]]) -> str:
+def build_scoring_prompt(system_context: str, utterances: List[Dict[str, Any]]) -> str:
     """
-    transcript_so_far: list of turn dicts (see interview/service.py for the
-    exact shape) -- only fully-answered turns' question/answer_transcript
-    pairs are rendered; the current (unanswered) turn's question is the
-    caller's responsibility to make clear separately (it's implicit: it's
-    the most recent question_text in transcript_so_far).
-    """
-    history_lines = []
-    for turn in transcript_so_far:
-        history_lines.append(f"Q{turn['turn']}: {turn['question_text']}")
-        if turn.get("answer_transcript"):
-            history_lines.append(f"A{turn['turn']}: {turn['answer_transcript']}")
-    history_text = "\n".join(history_lines) if history_lines else "(no prior turns)"
+    Scores the finished live conversation.
 
-    return f"""\
-{system_context}
-
----
-CONVERSATION SO FAR:
-
-{history_text}
-
----
-TASK: Listen to the attached audio -- it's the candidate's spoken answer \
-to the most recent question above. First, transcribe what they actually \
-said into answer_transcript (a faithful transcription, not a summary). \
-Then react briefly and sharply to that specific answer (reaction_text), \
-grounded in what they actually said -- not a generic response. Then ask \
-exactly one focused follow-up question (next_question) that digs into a \
-gap, a vague claim, or something worth pressing on -- either from this \
-answer or another weak spot in the resume/roast context not yet covered. \
-Set is_final_turn to true only if you genuinely judge this interview has \
-covered enough ground; otherwise false.\
-"""
-
-
-def build_scoring_prompt(system_context: str, transcript: List[Dict[str, Any]]) -> str:
-    """
-    A separate call/prompt from the per-turn one, over the FULL transcript,
-    so scoring always reasons over the complete conversation rather than
-    just the final exchange.
+    utterances: merged speaker-tagged turns, as produced by
+    interview/service.py's merge_transcript_chunks -- [{"speaker": ...,
+    "text": ...}], where speaker is "interviewer" or "candidate". This is
+    the Live API's own transcription of what was actually said on both
+    sides, not a separate speech-to-text pass.
     """
     history_lines = []
-    for turn in transcript:
-        history_lines.append(f"Q{turn['turn']}: {turn['question_text']}")
-        if turn.get("answer_transcript"):
-            history_lines.append(f"A{turn['turn']}: {turn['answer_transcript']}")
-        if turn.get("reaction_text"):
-            history_lines.append(f"Interviewer reaction: {turn['reaction_text']}")
-    history_text = "\n".join(history_lines) if history_lines else "(no turns recorded)"
+    for utterance in utterances:
+        label = "INTERVIEWER" if utterance.get("speaker") == "interviewer" else "CANDIDATE"
+        text = (utterance.get("text") or "").strip()
+        if text:
+            history_lines.append(f"{label}: {text}")
+    history_text = "\n".join(history_lines) if history_lines else "(nothing was said)"
 
     return f"""\
 {system_context}
