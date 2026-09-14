@@ -177,7 +177,7 @@ def build_resume_display_text(anonymized: Dict[str, Any]) -> str:
     return _format_resume_sections(blocks)
 
 
-def build_live_system_instruction(system_context: str) -> str:
+def build_live_system_instruction(system_context: str, minutes: int = 10) -> str:
     """
     The systemInstruction handed to the Live API session.
 
@@ -211,6 +211,25 @@ and let them answer. Never deliver a monologue or a list.
 - React to what they genuinely just said, quoting their own words back at \
 them where it lands. If an answer is vague, evasive, or unsupported, say \
 so plainly and press again on the same point.
+
+---
+COVER GROUND -- YOU HAVE ABOUT {minutes} MINUTES, NOT AN HOUR:
+
+The most common way this interview fails is spending the whole time \
+grinding one bullet point. Do not do that.
+
+- Aim to cover FOUR OR FIVE distinct areas of their resume and the job \
+description. Breadth is the point: you are testing whether the whole CV \
+holds up, not auditing a single project.
+- Press at most TWICE on any one point. If the second answer is still \
+vague, say so bluntly, note it as a gap, and MOVE ON anyway -- "that's \
+still hand-wavy, but let's move on" is a complete and acceptable ending \
+to a thread. A third attempt at the same question teaches nobody anything.
+- Keep a rough clock in your head. If you are several minutes in and \
+still on the first topic, you are too deep -- change subject immediately.
+- Prefer a new area of the resume over a deeper layer of the current one. \
+If they have three roles and a projects section, all of them are fair \
+game and none of them should swallow the whole interview.
 - Never read out headings, bullet points, or anything that only makes \
 sense written down. Everything you say gets spoken aloud.
 - The candidate can and will interrupt you. If they start talking, stop \
@@ -432,10 +451,29 @@ Their submission:
 {submission.strip() or "(they submitted nothing)"}
 {review_block}{conduct_block}
 ---
-TASK: Open the debrief by going straight at the weakest part of that
-submission. Do not praise it first and do not ask them to walk through it
-from the top -- you have read it. One short spoken question, and make it
-the one they would least like to be asked.
+TASK: Debrief the code. This is the part of the interview the exercise
+exists for -- do not skip past it in one question and return to the
+resume.
+
+Open by going straight at the weakest part of the submission. Do not
+praise it first and do not ask them to walk through it from the top --
+you have read it. One short spoken question, and make it the one they
+would least like to be asked.
+
+Then actually discuss the solution, covering three or four of these
+before you move on, one question at a time:
+
+- the complexity they claimed versus what the code actually does;
+- an edge case it does not handle, asked as a scenario rather than a
+  hint ("what happens if the same key is inserted twice?" not "you forgot
+  to handle re-insertion");
+- the design choice they made and what the alternative would cost;
+- what breaks first when the input gets very large.
+
+Same rules as the rest of the interview: at most two presses on any one
+of these, then move on. If a hidden test failed, probe the behaviour
+around it WITHOUT naming the case or telling them a test failed -- find
+out whether they can reason their way to it.
 """
 
 

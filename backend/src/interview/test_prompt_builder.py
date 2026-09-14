@@ -178,3 +178,51 @@ class TestSkipAndEndInstructions:
         instruction = pb.build_live_system_instruction("CTX")
         assert "end_interview" in instruction
         assert "without actually calling the tool" in instruction
+
+
+class TestBreadth:
+    """
+    The observed failure was the interviewer grinding one resume bullet for
+    the whole ten minutes. Breadth has to be instructed; it does not happen
+    on its own.
+    """
+
+    def test_states_the_actual_time_budget(self):
+        # A constant would drift from whatever the planner allocated.
+        assert "ABOUT 7 MINUTES" in pb.build_live_system_instruction("CTX", 7)
+        assert "ABOUT 12 MINUTES" in pb.build_live_system_instruction("CTX", 12)
+
+    def test_asks_for_several_areas_not_one(self):
+        instruction = pb.build_live_system_instruction("CTX")
+        assert "FOUR OR FIVE distinct areas" in instruction
+
+    def test_caps_follow_ups_and_says_to_move_on_regardless(self):
+        instruction = pb.build_live_system_instruction("CTX")
+        assert "at most TWICE" in instruction
+        assert "MOVE ON anyway" in instruction
+
+
+class TestDebriefDiscussesTheSolution:
+    def _addendum(self, review=None, conduct=""):
+        question = {"format": "CODE", "prompt": "Design an LRU cache.", "difficulty": "medium"}
+        return pb.build_debrief_addendum([], question, "class LRUCache: pass", review, conduct)
+
+    def test_asks_for_a_real_discussion_not_a_single_jab(self):
+        text = self._addendum()
+        assert "three or four" in text
+        assert "complexity they claimed" in text
+        assert "what breaks first when the input gets very large" in text
+
+    def test_edge_cases_are_asked_as_scenarios_not_hints(self):
+        assert "not \"you forgot" in self._addendum()
+
+    def test_never_reveals_that_a_hidden_test_failed(self):
+        text = self._addendum()
+        assert "WITHOUT naming the case" in text
+
+    def test_carries_conduct_through(self):
+        text = self._addendum(conduct="- They PASTED code in.")
+        assert "They PASTED code in." in text
+        # Asserted on one line rather than the whole sentence -- the
+        # template wraps, and a wrap is not a behaviour change.
+        assert "never to be read out as an" in text

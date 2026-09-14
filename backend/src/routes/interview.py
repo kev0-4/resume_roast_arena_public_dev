@@ -179,7 +179,6 @@ async def start_interview(
 
     anonymized, roast = await _load_resume_context(resume_session.id)
     system_context = interview_prompts.build_interview_system_context(anonymized, roast, body.job_description)
-    system_instruction = interview_prompts.build_live_system_instruction(system_context)
     resume_text = interview_prompts.build_resume_display_text(anonymized)
 
     # Plan the round structure before anything expensive happens. A failure
@@ -196,6 +195,15 @@ async def start_interview(
             {"reason": str(e)[:200], "status": "WARNING", "route": "POST /v1/interview/start"},
         )
         plan = interview_planner.conversation_only_plan()
+
+    # Pace against the conversation round's own budget rather than a
+    # constant: the planner decides how long it gets.
+    conversation_minutes = next(
+        (r.minutes for r in plan.rounds if r.kind == "CONVERSATION"), 10
+    )
+    system_instruction = interview_prompts.build_live_system_instruction(
+        system_context, conversation_minutes
+    )
 
     # The id is generated here rather than by the DB so the voice -- which
     # is derived from it -- is known before the token is minted, while the
@@ -638,7 +646,9 @@ async def mint_voice_token(
     system_context = interview_prompts.build_interview_system_context(
         anonymized, roast, interview.job_description
     )
-    instruction = interview_prompts.build_live_system_instruction(system_context)
+    plan_now = _plan_of(interview)
+    remaining_minutes = next((r.minutes for r in plan_now.rounds if r.kind == "CONVERSATION"), 10)
+    instruction = interview_prompts.build_live_system_instruction(system_context, remaining_minutes)
 
     chunks = await _read_transcript(interview)
     utterances = interview_service.merge_into_utterances(chunks)
