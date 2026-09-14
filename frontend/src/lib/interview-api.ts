@@ -49,6 +49,12 @@ export interface McqQuestion {
   options: string[];
 }
 
+export interface WorkedExample {
+  input: string;
+  output: string;
+  explanation?: string;
+}
+
 /** A question as the candidate may see it -- the answer key and rubric are
  *  stripped server-side and never reach the browser. */
 export interface RoundQuestion {
@@ -58,6 +64,8 @@ export interface RoundQuestion {
   topics: string[];
   minutes: number;
   prompt?: string;
+  examples?: WorkedExample[];
+  constraints?: string[];
   starter?: Record<string, string>;
   schema?: SqlTable[];
   questions?: McqQuestion[];

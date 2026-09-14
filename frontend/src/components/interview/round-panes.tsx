@@ -26,8 +26,11 @@ export function Panel({
   className?: string;
 }) {
   return (
+    // h-full, not content height: these sit in stretch-aligned flex tracks
+    // and without it every panel shrank to its text and left the rest of
+    // the screen empty.
     <div
-      className={`flex min-h-0 flex-col overflow-hidden rounded-[1.25rem] border-[3px] border-black bg-white shadow-[5px_5px_0_#000] ${className}`}
+      className={`flex h-full min-h-0 flex-col overflow-hidden rounded-[1.25rem] border-[3px] border-black bg-white shadow-[5px_5px_0_#000] ${className}`}
     >
       <div className="flex shrink-0 items-center justify-between gap-3 border-b-[3px] border-black px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
@@ -67,6 +70,41 @@ export function ProblemPanel({
 
         {question.schema ? <SchemaBlock tables={question.schema} /> : null}
 
+        {question.examples?.length ? (
+          <div className="mt-5 flex flex-col gap-3">
+            {question.examples.map((example, index) => (
+              <div key={index} className="rounded-xl border-2 border-black/12 bg-black/[0.025] p-3">
+                <p className="mb-2 font-mono text-[9px] font-black uppercase tracking-wider text-black/45">
+                  Example {index + 1}
+                </p>
+                <ExampleRow label="Input" value={example.input} />
+                <ExampleRow label="Output" value={example.output} accent />
+                {example.explanation ? (
+                  <p className="mt-2 font-mono text-[11.5px] leading-relaxed text-black/55">
+                    {example.explanation}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {question.constraints?.length ? (
+          <div className="mt-5">
+            <p className="mb-1.5 font-mono text-[9px] font-black uppercase tracking-wider text-black/45">
+              Constraints
+            </p>
+            <ul className="flex flex-col gap-1">
+              {question.constraints.map((constraint, index) => (
+                <li key={index} className="flex gap-2 font-mono text-[11.5px] leading-snug text-black/60">
+                  <span className="text-black/25">&bull;</span>
+                  {constraint}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         <div className="mt-5 flex flex-wrap gap-1.5">
           {question.topics.map((topic) => (
             <span
@@ -79,6 +117,24 @@ export function ProblemPanel({
         </div>
       </div>
     </Panel>
+  );
+}
+
+/** Input/output on a worked example. Pre-wrapped because multi-line
+ *  examples (a sequence of calls, a table) are the norm, not the exception. */
+function ExampleRow({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div className="mb-1.5 last:mb-0">
+      <span className="font-mono text-[10px] font-bold uppercase tracking-wide text-black/35">{label}</span>
+      <pre
+        className={[
+          "mt-0.5 overflow-x-auto whitespace-pre-wrap break-words rounded-lg px-2 py-1.5 font-mono text-[11.5px] leading-snug",
+          accent ? "bg-brand-lime/20 text-black" : "bg-white text-black/75",
+        ].join(" ")}
+      >
+        {value}
+      </pre>
+    </div>
   );
 }
 

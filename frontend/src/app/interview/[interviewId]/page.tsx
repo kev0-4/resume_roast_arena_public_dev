@@ -167,7 +167,7 @@ export default function InterviewRoomPage({ params }: { params: Promise<{ interv
 
   if (live.phase === "exercise" && live.round) {
     return (
-      <RoomShell>
+      <RoomShell wide>
         <RoundStage
           question={live.round.question}
           secondsLeft={live.roundSecondsLeft}
@@ -284,11 +284,21 @@ export default function InterviewRoomPage({ params }: { params: Promise<{ interv
 
 // Deliberately no Navbar: this is a call, and a nav rail full of exits is
 // the wrong shape for one. Matches Meet, which hides its own chrome too.
-function RoomShell({ children }: { children: React.ReactNode }) {
+function RoomShell({ children, wide = false }: { children: React.ReactNode; wide?: boolean }) {
   return (
     <div className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-brand-blue font-mono selection:bg-brand-lime selection:text-brand-blue">
       <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(to_right,#ffffff15_1px,transparent_1px),linear-gradient(to_bottom,#ffffff15_1px,transparent_1px)] bg-[size:4rem_4rem]" />
-      <div className="relative z-10 mx-auto flex h-full w-full max-w-6xl flex-col px-4 md:px-8">{children}</div>
+      {/* A conversation reads better in a column; an IDE does not. The
+          exercise round gets close to the full viewport, because a 28%
+          problem panel inside a 1152px box is a column of six words. */}
+      <div
+        className={[
+          "relative z-10 mx-auto flex h-full w-full flex-col px-4",
+          wide ? "max-w-[2000px] md:px-6" : "max-w-6xl md:px-8",
+        ].join(" ")}
+      >
+        {children}
+      </div>
     </div>
   );
 }

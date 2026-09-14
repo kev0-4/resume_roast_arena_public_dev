@@ -48,6 +48,14 @@ GEMINI_INTERVIEW_MODEL = os.getenv("GEMINI_INTERVIEW_MODEL", GEMINI_ROAST_MODEL)
 # models accept bidiGenerateContent at all.
 GEMINI_LIVE_MODEL = os.getenv("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview")
 
+# The interviewer's voice, pinned explicitly.
+#
+# Without this the API picks a default per session, and a multi-round
+# interview opens several sessions -- so the interviewer audibly became a
+# different person after the coding round. One interviewer has to sound
+# like one interviewer.
+GEMINI_LIVE_VOICE = os.getenv("GEMINI_LIVE_VOICE", "Charon")
+
 # Ephemeral-token lifetimes, both deliberately short.
 #
 # NEW_SESSION is the window in which the browser must OPEN its socket; once

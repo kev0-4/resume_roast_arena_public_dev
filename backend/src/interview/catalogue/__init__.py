@@ -142,6 +142,10 @@ def public_question(entry: Dict[str, Any]) -> Dict[str, Any]:
         ]
     else:
         public["prompt"] = entry["prompt"]
+        # Worked examples and constraints are the difference between a
+        # question you can answer and one you have to guess at.
+        public["examples"] = entry.get("examples", [])
+        public["constraints"] = entry.get("constraints", [])
     if entry["format"] == "CODE":
         public["starter"] = entry["starter"]
     if entry["format"] == "SQL":

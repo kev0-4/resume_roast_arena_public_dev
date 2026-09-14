@@ -2,93 +2,245 @@
   {
     "id": "lru-cache-design",
     "format": "CODE",
-    "verticals": ["swe", "etl"],
+    "verticals": [
+      "swe",
+      "etl"
+    ],
     "difficulty": "medium",
-    "topics": ["hashmap", "linked-list", "design", "caching"],
+    "topics": [
+      "hashmap",
+      "linked-list",
+      "design",
+      "caching"
+    ],
     "minutes": 12,
-    "prompt": "Design an LRU cache supporting get(key) and put(key, value), both in O(1) average time. Evicting the least-recently-used entry when the cache is full is the whole point -- get counts as a use.",
+    "prompt": "Design a data structure that follows the constraints of a Least Recently Used (LRU) cache.\n\nImplement the LRUCache class:\n  - LRUCache(capacity) initialises the cache with a positive capacity.\n  - get(key) returns the value of the key if it exists, otherwise -1.\n  - put(key, value) updates the value of the key if it exists, otherwise adds the key-value pair. If inserting would exceed the capacity, evict the least recently used key first.\n\nBoth get and put must run in O(1) average time complexity. A successful get counts as a use and makes that key the most recently used.",
     "starter": {
       "python": "class LRUCache:\n    def __init__(self, capacity: int):\n        pass\n\n    def get(self, key: int) -> int:\n        \"\"\"Return the value, or -1 if absent.\"\"\"\n        pass\n\n    def put(self, key: int, value: int) -> None:\n        pass\n",
       "javascript": "class LRUCache {\n  constructor(capacity) {}\n\n  /** @returns {number} value, or -1 if absent */\n  get(key) {}\n\n  put(key, value) {}\n}\n",
       "java": "class LRUCache {\n    public LRUCache(int capacity) {\n    }\n\n    public int get(int key) {\n        return -1;\n    }\n\n    public void put(int key, int value) {\n    }\n}\n",
       "cpp": "class LRUCache {\npublic:\n    LRUCache(int capacity) {}\n\n    int get(int key) { return -1; }\n\n    void put(int key, int value) {}\n};\n"
     },
-    "rubric": "Strong: hashmap plus doubly-linked list, both operations genuinely O(1), eviction correct, get promotes recency. Weak: a list or array scanned linearly (O(n) hiding behind an O(1) claim), eviction that drops the most recent instead of least, or get that does not count as a use. Press hard on the complexity claim -- this is the most common place candidates overstate."
+    "rubric": "Strong: hashmap plus doubly-linked list, both operations genuinely O(1), eviction correct, get promotes recency. Weak: a list or array scanned linearly (O(n) hiding behind an O(1) claim), eviction that drops the most recent instead of least, or get that does not count as a use. Press hard on the complexity claim -- this is the most common place candidates overstate.",
+    "examples": [
+      {
+        "input": "LRUCache(2)\nput(1, 1)\nput(2, 2)\nget(1)\nput(3, 3)\nget(2)\nget(3)",
+        "output": "get(1) -> 1\nget(2) -> -1\nget(3) -> 3",
+        "explanation": "After put(1,1) and put(2,2) the cache is at capacity. get(1) returns 1 and promotes key 1, so key 2 is now least recently used. put(3,3) evicts key 2, which is why get(2) returns -1."
+      },
+      {
+        "input": "LRUCache(1)\nput(1, 1)\nput(2, 2)\nget(1)",
+        "output": "get(1) -> -1",
+        "explanation": "With capacity 1, put(2,2) evicts key 1 immediately."
+      }
+    ],
+    "constraints": [
+      "1 <= capacity <= 3000",
+      "0 <= key <= 10^4",
+      "0 <= value <= 10^5",
+      "Up to 2 * 10^5 calls to get and put combined.",
+      "Both operations must be O(1) average -- a linear scan will not pass."
+    ]
   },
   {
     "id": "merge-intervals",
     "format": "CODE",
-    "verticals": ["swe"],
+    "verticals": [
+      "swe"
+    ],
     "difficulty": "easy",
-    "topics": ["sorting", "arrays", "greedy"],
+    "topics": [
+      "sorting",
+      "arrays",
+      "greedy"
+    ],
     "minutes": 10,
-    "prompt": "Given a list of intervals [start, end], merge all overlapping intervals and return them sorted by start. Intervals that merely touch (end == next start) count as overlapping.",
+    "prompt": "You are given an array of intervals where intervals[i] = [start_i, end_i].\n\nMerge all overlapping intervals and return an array of the non-overlapping intervals that cover all the intervals in the input, sorted by start.\n\nTwo intervals overlap if they share any point, INCLUDING touching at the boundary: [1, 4] and [4, 5] overlap and must merge into [1, 5]. The input is not guaranteed to be sorted.",
     "starter": {
       "python": "def merge_intervals(intervals: list[list[int]]) -> list[list[int]]:\n    pass\n",
       "javascript": "function mergeIntervals(intervals) {\n}\n",
       "java": "class Solution {\n    public int[][] mergeIntervals(int[][] intervals) {\n        return new int[0][];\n    }\n}\n",
       "cpp": "vector<vector<int>> mergeIntervals(vector<vector<int>>& intervals) {\n}\n"
     },
-    "rubric": "Strong: sort by start then single pass, O(n log n), handles touching intervals and the empty input. Weak: nested-loop merging, mutating while iterating, or missing that [1,4] and [4,5] merge. Ask what happens on an already-sorted million-element input."
+    "rubric": "Strong: sort by start then single pass, O(n log n), handles touching intervals and the empty input. Weak: nested-loop merging, mutating while iterating, or missing that [1,4] and [4,5] merge. Ask what happens on an already-sorted million-element input.",
+    "examples": [
+      {
+        "input": "intervals = [[1,3],[2,6],[8,10],[15,18]]",
+        "output": "[[1,6],[8,10],[15,18]]",
+        "explanation": "[1,3] and [2,6] overlap, so they merge into [1,6]. The rest are disjoint."
+      },
+      {
+        "input": "intervals = [[1,4],[4,5]]",
+        "output": "[[1,5]]",
+        "explanation": "They only touch at 4, but touching counts as overlapping here."
+      },
+      {
+        "input": "intervals = [[5,6],[1,3]]",
+        "output": "[[1,3],[5,6]]",
+        "explanation": "Input is unsorted and nothing overlaps, but the output must still be sorted by start."
+      }
+    ],
+    "constraints": [
+      "0 <= intervals.length <= 10^4",
+      "intervals[i].length == 2",
+      "-10^5 <= start_i <= end_i <= 10^5",
+      "Return an empty list for empty input."
+    ]
   },
   {
     "id": "rate-limiter-sliding-window",
     "format": "CODE",
-    "verticals": ["swe", "backend"],
+    "verticals": [
+      "swe",
+      "backend"
+    ],
     "difficulty": "medium",
-    "topics": ["design", "time", "hashmap", "rate-limiting"],
+    "topics": [
+      "design",
+      "time",
+      "hashmap",
+      "rate-limiting"
+    ],
     "minutes": 12,
-    "prompt": "Implement a sliding-window rate limiter: allow(user_id, timestamp) returns True if this user has made fewer than N requests in the last W seconds, and records the request when allowed.",
+    "prompt": "Implement a sliding-window rate limiter.\n\nRateLimiter(max_requests, window_seconds) creates a limiter allowing at most max_requests per user within any window_seconds-long window.\n\nallow(user_id, timestamp) returns True if this request is permitted -- that is, the user has made fewer than max_requests in the half-open window (timestamp - window_seconds, timestamp] -- and records it. It returns False and records nothing otherwise.\n\nThis is a genuine sliding window, not a fixed one: a fixed window resetting on the clock would let a user make 2 * max_requests across a boundary.\n\nTimestamps arrive in non-decreasing order. Different users are independent.",
     "starter": {
       "python": "class RateLimiter:\n    def __init__(self, max_requests: int, window_seconds: int):\n        pass\n\n    def allow(self, user_id: str, timestamp: float) -> bool:\n        pass\n",
       "javascript": "class RateLimiter {\n  constructor(maxRequests, windowSeconds) {}\n\n  allow(userId, timestamp) {}\n}\n",
       "java": "class RateLimiter {\n    public RateLimiter(int maxRequests, int windowSeconds) {\n    }\n\n    public boolean allow(String userId, double timestamp) {\n        return false;\n    }\n}\n",
       "cpp": "class RateLimiter {\npublic:\n    RateLimiter(int maxRequests, int windowSeconds) {}\n    bool allow(const string& userId, double timestamp) { return false; }\n};\n"
     },
-    "rubric": "Strong: per-user deque with expiry pruned from the front, notes unbounded memory growth across many users and how they would evict. Weak: a fixed window mislabelled as sliding (allows 2N at a boundary), or never pruning old timestamps. Ask about memory when a million users each hit it once."
+    "rubric": "Strong: per-user deque with expiry pruned from the front, notes unbounded memory growth across many users and how they would evict. Weak: a fixed window mislabelled as sliding (allows 2N at a boundary), or never pruning old timestamps. Ask about memory when a million users each hit it once.",
+    "examples": [
+      {
+        "input": "RateLimiter(max_requests=2, window_seconds=10)\nallow('a', 1)\nallow('a', 2)\nallow('a', 5)\nallow('a', 12)",
+        "output": "True\nTrue\nFalse\nTrue",
+        "explanation": "The third call is refused because 'a' already has 2 requests inside the last 10 seconds. By t=12 the request at t=1 has aged out, so there is room again."
+      },
+      {
+        "input": "RateLimiter(1, 5)\nallow('a', 1)\nallow('b', 1)",
+        "output": "True\nTrue",
+        "explanation": "Limits are per user, so 'b' is unaffected by 'a'."
+      }
+    ],
+    "constraints": [
+      "1 <= max_requests <= 10^4",
+      "1 <= window_seconds <= 3600",
+      "Timestamps are non-decreasing floats (seconds).",
+      "Be ready to say what happens to memory when a million distinct users each call once."
+    ]
   },
   {
     "id": "scd-type-2-merge",
     "format": "SQL",
-    "verticals": ["etl", "data"],
+    "verticals": [
+      "etl",
+      "data"
+    ],
     "difficulty": "medium",
-    "topics": ["slowly-changing-dimension", "merge", "history", "warehousing"],
+    "topics": [
+      "slowly-changing-dimension",
+      "merge",
+      "history",
+      "warehousing"
+    ],
     "minutes": 12,
-    "prompt": "Late-arriving updates are overwriting customer history instead of versioning it. Write the SQL that loads stg_customer into dim_customer as a Type 2 slowly-changing dimension: close the current row when a tracked attribute changes, and insert a new current row. Assume Postgres.",
+    "prompt": "Late-arriving updates are overwriting customer history instead of versioning it.\n\nWrite SQL (Postgres) that loads stg_customer into dim_customer as a Type 2 slowly-changing dimension:\n  - When a tracked attribute (email or segment) changes for an existing customer, close the current row by setting valid_to and is_current = false, then insert a new row as the current version.\n  - When a customer is new, insert their first row as current.\n  - When nothing tracked has changed, do nothing.\n\nThe job is re-run on failure, so running the same batch twice must not create duplicate versions.",
     "schema": [
       {
         "table": "stg_customer",
-        "columns": ["customer_id INT", "email TEXT", "segment TEXT", "updated_at TIMESTAMP"]
+        "columns": [
+          "customer_id INT",
+          "email TEXT",
+          "segment TEXT",
+          "updated_at TIMESTAMP"
+        ]
       },
       {
         "table": "dim_customer",
-        "columns": ["surrogate_key BIGSERIAL", "customer_id INT", "email TEXT", "segment TEXT", "valid_from TIMESTAMP", "valid_to TIMESTAMP", "is_current BOOLEAN"]
+        "columns": [
+          "surrogate_key BIGSERIAL",
+          "customer_id INT",
+          "email TEXT",
+          "segment TEXT",
+          "valid_from TIMESTAMP",
+          "valid_to TIMESTAMP",
+          "is_current BOOLEAN"
+        ]
       }
     ],
-    "rubric": "Strong: closes the prior row (valid_to, is_current = false) and inserts the new version in one transaction, compares only tracked attributes, handles a first-ever load, and is idempotent on re-run. Weak: a plain UPDATE that destroys history, no is_current maintenance, or a solution that double-inserts when replayed. Ask what happens if the same batch runs twice."
+    "rubric": "Strong: closes the prior row (valid_to, is_current = false) and inserts the new version in one transaction, compares only tracked attributes, handles a first-ever load, and is idempotent on re-run. Weak: a plain UPDATE that destroys history, no is_current maintenance, or a solution that double-inserts when replayed. Ask what happens if the same batch runs twice.",
+    "examples": [
+      {
+        "input": "dim_customer:\n  (1, 'a@x.com', 'retail', 2026-01-01, NULL, true)\n\nstg_customer:\n  (1, 'a@x.com', 'wholesale', 2026-06-01)",
+        "output": "dim_customer:\n  (1, 'a@x.com', 'retail',    2026-01-01, 2026-06-01, false)\n  (1, 'a@x.com', 'wholesale', 2026-06-01, NULL,       true)",
+        "explanation": "segment changed, so the old row is closed and a new current row is inserted."
+      },
+      {
+        "input": "Same batch applied a second time, with no new changes.",
+        "output": "dim_customer is unchanged -- still exactly two rows.",
+        "explanation": "The load must be idempotent; a retry cannot fork the history."
+      }
+    ],
+    "constraints": [
+      "valid_to and is_current must always agree: exactly one current row per customer_id.",
+      "Assume stg_customer holds one row per customer per batch.",
+      "Postgres syntax; MERGE or INSERT ... SELECT are both acceptable."
+    ]
   },
   {
     "id": "sessionise-events",
     "format": "SQL",
-    "verticals": ["etl", "data", "analytics"],
+    "verticals": [
+      "etl",
+      "data",
+      "analytics"
+    ],
     "difficulty": "medium",
-    "topics": ["window-functions", "sessionisation", "aggregation"],
+    "topics": [
+      "window-functions",
+      "sessionisation",
+      "aggregation"
+    ],
     "minutes": 10,
-    "prompt": "Group raw page events into sessions: a new session starts when a user has been inactive for more than 30 minutes. Return one row per session with the user, session start, session end, and event count.",
+    "prompt": "Group raw page events into sessions.\n\nA session is a run of consecutive events from one user where each event is at most 30 minutes after the previous one. A gap of more than 30 minutes starts a new session.\n\nReturn one row per session: the user, the session start, the session end, and the number of events in it, ordered by user then session start.",
     "schema": [
       {
         "table": "page_events",
-        "columns": ["user_id INT", "event_at TIMESTAMP", "path TEXT"]
+        "columns": [
+          "user_id INT",
+          "event_at TIMESTAMP",
+          "path TEXT"
+        ]
       }
     ],
-    "rubric": "Strong: LAG over a user-partitioned window to detect the gap, a cumulative SUM to build a session id, then aggregate. Weak: self-joins that blow up on volume, or a correlated subquery per row. Ask about performance on a billion rows and whether the window is partitioned correctly."
+    "rubric": "Strong: LAG over a user-partitioned window to detect the gap, a cumulative SUM to build a session id, then aggregate. Weak: self-joins that blow up on volume, or a correlated subquery per row. Ask about performance on a billion rows and whether the window is partitioned correctly.",
+    "examples": [
+      {
+        "input": "page_events:\n  (7, 2026-01-01 09:00, '/')\n  (7, 2026-01-01 09:20, '/pricing')\n  (7, 2026-01-01 10:05, '/')\n  (9, 2026-01-01 09:00, '/')",
+        "output": "  7 | 09:00 | 09:20 | 2\n  7 | 10:05 | 10:05 | 1\n  9 | 09:00 | 09:00 | 1",
+        "explanation": "User 7's third event is 45 minutes after the second, so it opens a second session. Users never share a session."
+      }
+    ],
+    "constraints": [
+      "Table may hold billions of rows -- a self-join per row will not do.",
+      "A single event is a valid session of length 1.",
+      "Postgres window functions are available."
+    ]
   },
   {
     "id": "market-sizing-uk-coffee",
     "format": "WRITTEN",
-    "verticals": ["ib", "consulting", "finance"],
+    "verticals": [
+      "ib",
+      "consulting",
+      "finance"
+    ],
     "difficulty": "medium",
-    "topics": ["market-sizing", "estimation", "structuring"],
+    "topics": [
+      "market-sizing",
+      "estimation",
+      "structuring"
+    ],
     "minutes": 10,
     "prompt": "Estimate the annual revenue of the UK takeaway coffee market. State your assumptions explicitly and show the structure of your calculation -- the number matters far less than how you get there.",
     "rubric": "Strong: a clear top-down or bottom-up structure, stated assumptions with rough justification, sanity-checks the result against something known, and names which assumption the answer is most sensitive to. Weak: a number with no working, assumptions pulled from nowhere, or arithmetic that does not reconcile. Press on the single assumption that most moves the answer."
@@ -96,9 +248,16 @@
   {
     "id": "dcf-walkthrough",
     "format": "WRITTEN",
-    "verticals": ["ib", "finance"],
+    "verticals": [
+      "ib",
+      "finance"
+    ],
     "difficulty": "medium",
-    "topics": ["valuation", "dcf", "wacc"],
+    "topics": [
+      "valuation",
+      "dcf",
+      "wacc"
+    ],
     "minutes": 10,
     "prompt": "Walk through how you would value a stable, cash-generative business using a DCF. Be specific about what you forecast, how you discount it, and where the terminal value comes from -- and say which input you would least trust.",
     "rubric": "Strong: unlevered free cash flow, explicit forecast horizon, WACC built from its components, terminal value via Gordon growth or exit multiple with a sanity check on what fraction of value it represents. Weak: reciting steps without understanding, discounting the wrong cash flow, or a terminal growth rate above long-run GDP. The last part of the question is the real test."
@@ -106,9 +265,16 @@
   {
     "id": "sjt-manager-complaint",
     "format": "WRITTEN",
-    "verticals": ["hr", "people-ops"],
+    "verticals": [
+      "hr",
+      "people-ops"
+    ],
     "difficulty": "medium",
-    "topics": ["employee-relations", "investigation", "judgement"],
+    "topics": [
+      "employee-relations",
+      "investigation",
+      "judgement"
+    ],
     "minutes": 10,
     "prompt": "An employee tells you, in confidence, that their manager has been excluding them from meetings since they returned from parental leave. They ask you not to act on it. Walk through your next three steps and what you would say to them.",
     "rubric": "Strong: recognises the confidentiality request cannot be honoured unconditionally where there is a potential discrimination issue, says so honestly to the employee, documents, and escalates on a defined path. Weak: promising blanket confidentiality, going straight to the manager, or treating it as an informal misunderstanding. Press on exactly what they would say when the employee asks them to keep it quiet."
@@ -116,9 +282,16 @@
   {
     "id": "brainteaser-broken-bat",
     "format": "WRITTEN",
-    "verticals": ["quant", "hft"],
+    "verticals": [
+      "quant",
+      "hft"
+    ],
     "difficulty": "hard",
-    "topics": ["probability", "expectation", "reasoning"],
+    "topics": [
+      "probability",
+      "expectation",
+      "reasoning"
+    ],
     "minutes": 10,
     "prompt": "A stick of length 1 is broken at two points chosen uniformly at random. What is the probability the three pieces form a triangle? Show your reasoning -- the argument is the answer.",
     "rubric": "Strong: sets up the unit square or simplex, states the triangle inequality as three constraints, identifies the feasible region, arrives at 1/4 with a geometric or symmetry argument. Weak: a guessed fraction, or an argument that forgets one of the three inequalities. Ask them to justify the answer a second way."
@@ -126,9 +299,18 @@
   {
     "id": "mcq-sql-fundamentals",
     "format": "MCQ",
-    "verticals": ["etl", "data", "analytics"],
+    "verticals": [
+      "etl",
+      "data",
+      "analytics"
+    ],
     "difficulty": "medium",
-    "topics": ["sql", "joins", "null-semantics", "windows"],
+    "topics": [
+      "sql",
+      "joins",
+      "null-semantics",
+      "windows"
+    ],
     "minutes": 4,
     "questions": [
       {
@@ -166,7 +348,12 @@
       },
       {
         "prompt": "NULL = NULL in standard SQL evaluates to:",
-        "options": ["TRUE", "FALSE", "NULL (unknown)", "It depends on the database"],
+        "options": [
+          "TRUE",
+          "FALSE",
+          "NULL (unknown)",
+          "It depends on the database"
+        ],
         "answer": 2,
         "why": "NULL comparisons yield unknown, which is why IS NULL exists. A WHERE clause treats unknown as not-true and filters the row out."
       }
@@ -176,26 +363,48 @@
   {
     "id": "mcq-quant-probability",
     "format": "MCQ",
-    "verticals": ["quant", "hft"],
+    "verticals": [
+      "quant",
+      "hft"
+    ],
     "difficulty": "hard",
-    "topics": ["probability", "statistics", "expectation"],
+    "topics": [
+      "probability",
+      "statistics",
+      "expectation"
+    ],
     "minutes": 4,
     "questions": [
       {
         "prompt": "You flip a fair coin until the first head. What is the expected number of flips?",
-        "options": ["1", "1.5", "2", "Infinite"],
+        "options": [
+          "1",
+          "1.5",
+          "2",
+          "Infinite"
+        ],
         "answer": 2,
         "why": "Geometric with p = 0.5, so the expectation is 1/p = 2."
       },
       {
         "prompt": "Two fair dice are rolled. Given that the sum is 7, the probability one die shows a 3 is:",
-        "options": ["1/6", "1/3", "1/2", "2/11"],
+        "options": [
+          "1/6",
+          "1/3",
+          "1/2",
+          "2/11"
+        ],
         "answer": 1,
         "why": "Six ordered outcomes sum to 7; two of them contain a 3 ((3,4) and (4,3)), giving 2/6 = 1/3."
       },
       {
         "prompt": "A test is 99% accurate for a disease affecting 1 in 10,000. Someone tests positive. Roughly what is the chance they have it?",
-        "options": ["About 99%", "About 50%", "About 1%", "About 0.01%"],
+        "options": [
+          "About 99%",
+          "About 50%",
+          "About 1%",
+          "About 0.01%"
+        ],
         "answer": 2,
         "why": "Base rates dominate: roughly 100 false positives per true positive at these numbers, so around 1%."
       },
@@ -216,9 +425,16 @@
   {
     "id": "mcq-ib-technicals",
     "format": "MCQ",
-    "verticals": ["ib", "finance"],
+    "verticals": [
+      "ib",
+      "finance"
+    ],
     "difficulty": "medium",
-    "topics": ["valuation", "accounting", "m-and-a"],
+    "topics": [
+      "valuation",
+      "accounting",
+      "m-and-a"
+    ],
     "minutes": 4,
     "questions": [
       {
@@ -245,7 +461,12 @@
       },
       {
         "prompt": "Depreciation increases by 10. Ignoring all else, at a 25% tax rate, cash flow changes by:",
-        "options": ["-10", "-7.5", "+2.5", "0"],
+        "options": [
+          "-10",
+          "-7.5",
+          "+2.5",
+          "0"
+        ],
         "answer": 2,
         "why": "Depreciation is non-cash: net income falls 7.5, then adding back 10 leaves cash up 2.5 -- the tax shield."
       },
@@ -266,9 +487,16 @@
   {
     "id": "mcq-hr-employment",
     "format": "MCQ",
-    "verticals": ["hr", "people-ops"],
+    "verticals": [
+      "hr",
+      "people-ops"
+    ],
     "difficulty": "medium",
-    "topics": ["employment-practice", "policy", "process"],
+    "topics": [
+      "employment-practice",
+      "policy",
+      "process"
+    ],
     "minutes": 4,
     "questions": [
       {

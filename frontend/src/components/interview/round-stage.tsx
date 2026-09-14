@@ -192,7 +192,10 @@ export function RoundStage({
               <Clock seconds={secondsLeft} urgent={urgent} />
             </div>
           }
-          className={isEditor ? "bg-[#282c34]" : ""}
+          // flex-1 rather than h-full here: the submit button is a sibling
+          // below, so the panel takes the remaining height instead of the
+          // full column.
+          className={`min-h-0 flex-1 ${isEditor ? "bg-[#282c34]" : ""}`}
         >
           {question.format === "MCQ" ? (
             <McqPane

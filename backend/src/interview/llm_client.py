@@ -30,6 +30,7 @@ from ..config import (
     GEMINI_API_KEY,
     GEMINI_INTERVIEW_MODEL,
     GEMINI_LIVE_MODEL,
+    GEMINI_LIVE_VOICE,
     INTERVIEW_TOKEN_EXPIRE_SECONDS,
     INTERVIEW_TOKEN_NEW_SESSION_SECONDS,
 )
@@ -103,6 +104,17 @@ async def create_ephemeral_token(system_instruction: str) -> Tuple[str, datetime
                 config=genai.types.LiveConnectConfig(
                     response_modalities=["AUDIO"],
                     system_instruction=system_instruction,
+                    # Pinned, because a multi-round interview opens several
+                    # sessions and an unpinned voice changes between them --
+                    # the interviewer audibly became someone else after the
+                    # coding round.
+                    speech_config=genai.types.SpeechConfig(
+                        voice_config=genai.types.VoiceConfig(
+                            prebuilt_voice_config=genai.types.PrebuiltVoiceConfig(
+                                voice_name=GEMINI_LIVE_VOICE
+                            )
+                        )
+                    ),
                     input_audio_transcription=genai.types.AudioTranscriptionConfig(),
                     output_audio_transcription=genai.types.AudioTranscriptionConfig(),
                     # Pinned here as well as sent by the client, because the
