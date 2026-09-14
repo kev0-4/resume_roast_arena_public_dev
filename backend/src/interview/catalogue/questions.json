@@ -185,7 +185,42 @@
       "valid_to and is_current must always agree: exactly one current row per customer_id.",
       "Assume stg_customer holds one row per customer per batch.",
       "Postgres syntax; MERGE or INSERT ... SELECT are both acceptable."
-    ]
+    ],
+    "harness": {
+      "setup": [
+        "CREATE TABLE dim_customer (\n                 surrogate_key BIGSERIAL PRIMARY KEY,\n                 customer_id   INT NOT NULL,\n                 email         TEXT,\n                 segment       TEXT,\n                 valid_from    TIMESTAMP NOT NULL,\n                 valid_to      TIMESTAMP,\n                 is_current    BOOLEAN NOT NULL\n               );",
+        "CREATE TABLE stg_customer (\n                 customer_id INT NOT NULL,\n                 email       TEXT,\n                 segment     TEXT,\n                 updated_at  TIMESTAMP NOT NULL\n               );",
+        "INSERT INTO dim_customer (customer_id, email, segment, valid_from, valid_to, is_current) VALUES\n                 (1, 'a@x.com', 'retail',  '2026-01-01', NULL, true),\n                 (2, 'b@x.com', 'smb',     '2026-01-01', NULL, true);",
+        "INSERT INTO stg_customer (customer_id, email, segment, updated_at) VALUES\n                 (1, 'a@x.com', 'wholesale', '2026-06-01'),\n                 (2, 'b@x.com', 'smb',       '2026-06-01'),\n                 (3, 'c@x.com', 'retail',    '2026-06-01');"
+      ],
+      "verify": "SELECT customer_id, segment, valid_to IS NULL AS open_ended, is_current FROM dim_customer ORDER BY customer_id, valid_from;",
+      "expected": [
+        [
+          1,
+          "retail",
+          false,
+          false
+        ],
+        [
+          1,
+          "wholesale",
+          true,
+          true
+        ],
+        [
+          2,
+          "smb",
+          true,
+          true
+        ],
+        [
+          3,
+          "retail",
+          true,
+          true
+        ]
+      ]
+    }
   },
   {
     "id": "sessionise-events",
@@ -225,7 +260,35 @@
       "Table may hold billions of rows -- a self-join per row will not do.",
       "A single event is a valid session of length 1.",
       "Postgres window functions are available."
-    ]
+    ],
+    "harness": {
+      "setup": [
+        "CREATE TABLE page_events (\n                 user_id  INT NOT NULL,\n                 event_at TIMESTAMP NOT NULL,\n                 path     TEXT\n               );",
+        "INSERT INTO page_events (user_id, event_at, path) VALUES\n                 (7, '2026-01-01 09:00', '/'),\n                 (7, '2026-01-01 09:20', '/pricing'),\n                 (7, '2026-01-01 10:05', '/'),\n                 (9, '2026-01-01 09:00', '/');"
+      ],
+      "wrap_candidate_as_view": true,
+      "verify": "SELECT user_id, session_start, session_end, event_count FROM candidate_answer ORDER BY user_id, session_start;",
+      "expected": [
+        [
+          7,
+          "2026-01-01 09:00:00",
+          "2026-01-01 09:20:00",
+          2
+        ],
+        [
+          7,
+          "2026-01-01 10:05:00",
+          "2026-01-01 10:05:00",
+          1
+        ],
+        [
+          9,
+          "2026-01-01 09:00:00",
+          "2026-01-01 09:00:00",
+          1
+        ]
+      ]
+    }
   },
   {
     "id": "market-sizing-uk-coffee",

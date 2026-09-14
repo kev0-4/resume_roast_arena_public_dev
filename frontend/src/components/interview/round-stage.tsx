@@ -20,6 +20,7 @@ import { Check, Clipboard, Loader2, Send } from "lucide-react";
 import type { RoundQuestion } from "@/lib/interview-api";
 import { CollapsedProblemTab, McqPane, Panel, ProblemPanel, WrittenPane } from "./round-panes";
 import { LANGUAGE_LABELS } from "./code-editor";
+import { SqlRunPanel } from "./run-panel";
 
 // CodeMirror and its grammars are several hundred KB and most interviews --
 // every HR, IB and conversation-only session -- never open an editor. Keep
@@ -220,6 +221,14 @@ export function RoundStage({
             </div>
           )}
         </Panel>
+
+        {/* Self-check before submitting. Only where we can actually run the
+            answer in the browser -- the score still comes from the server. */}
+        {question.format === "SQL" && question.harness ? (
+          <div className="mt-3">
+            <SqlRunPanel sql={code} harness={question.harness} />
+          </div>
+        ) : null}
 
         <motion.button
           layout

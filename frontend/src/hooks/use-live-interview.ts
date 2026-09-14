@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MicCapture, PcmPlayer } from "@/lib/live-audio";
+import { disposeRuntimes, warmRuntime } from "@/lib/runners/runtime";
 import { LiveInterviewSession } from "@/lib/live-session";
 import {
   advanceInterviewRound,
@@ -49,6 +50,16 @@ const FLUSH_INTERVAL_MS = 5000;
 
 /** Cap on waiting for a closing line, so a stuck queue can't hang the room. */
 const MAX_DRAIN_WAIT_MS = 12000;
+
+/**
+ * How long after the conversation starts before warming a code runtime.
+ *
+ * Long enough that the opening exchange -- connect, first audio, the
+ * candidate's first answer -- is well clear before any speculative
+ * download begins. There are minutes of conversation before an exercise,
+ * so there is no reason to rush it.
+ */
+const WARM_DELAY_MS = 25000;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function useLiveInterview(start: InterviewStartResponse | null, getIdToken: () => Promise<string | null>) {
@@ -553,8 +564,41 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
     return () => window.removeEventListener("pagehide", onHide);
   }, [flush]);
 
-  // Unmount (back button, route change) must not leave the mic light on.
-  useEffect(() => () => void teardown(), [teardown]);
+  /**
+   * Warm the code runtime during the conversation, so the editor opens
+   * ready instead of downloading five megabytes while the candidate waits.
+   *
+   * Three deliberate constraints, because this must never cost the
+   * interview anything:
+   *
+   *  - it starts only once the session is LIVE and has settled, so it
+   *    cannot compete with connecting or with the opening question;
+   *  - the loader waits for browser idle and runs in a worker, so neither
+   *    the download nor the WASM init touches the thread handling audio;
+   *  - failures are swallowed. A speculative warm-up that fails must never
+   *    surface mid-interview -- the round will load it properly, with
+   *    progress, if it actually needs it.
+   */
+  useEffect(() => {
+    if (phase !== "live" || !start?.agenda?.length) return;
+    // Only warm what this interview will actually use. A conversation-only
+    // or MCQ interview downloads nothing at all.
+    const needsSql = start.agenda.some((item) => item.label === "SQL");
+    if (!needsSql) return;
+
+    const timer = setTimeout(() => warmRuntime("sql"), WARM_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [phase, start]);
+
+  // Unmount (back button, route change) must not leave the mic light on,
+  // or a WASM heap alive after the interview is over.
+  useEffect(
+    () => () => {
+      void teardown();
+      disposeRuntimes();
+    },
+    [teardown],
+  );
 
   return {
     phase,

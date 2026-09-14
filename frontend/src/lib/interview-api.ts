@@ -49,6 +49,15 @@ export interface McqQuestion {
   options: string[];
 }
 
+/** Everything needed to run a SQL answer in the candidate's own browser. */
+export interface SqlHarness {
+  setup: string[];
+  verify: string;
+  expected: unknown[][];
+  /** The candidate's statement is a SELECT, so wrap it as a view first. */
+  wrap_candidate_as_view?: boolean;
+}
+
 export interface WorkedExample {
   input: string;
   output: string;
@@ -68,6 +77,7 @@ export interface RoundQuestion {
   constraints?: string[];
   starter?: Record<string, string>;
   schema?: SqlTable[];
+  harness?: SqlHarness;
   questions?: McqQuestion[];
 }
 

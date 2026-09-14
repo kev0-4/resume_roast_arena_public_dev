@@ -150,4 +150,12 @@ def public_question(entry: Dict[str, Any]) -> Dict[str, Any]:
         public["starter"] = entry["starter"]
     if entry["format"] == "SQL":
         public["schema"] = entry["schema"]
+        # The run harness ships to the client because running happens in
+        # the candidate's own browser. Its expected rows are the same
+        # information the worked examples already state on screen, so this
+        # gives nothing away -- and the SCORE is never computed here: a
+        # submission still goes to the server to be reviewed. The rubric,
+        # which is what actually drives grading, stays server-side.
+        if entry.get("harness"):
+            public["harness"] = entry["harness"]
     return public
