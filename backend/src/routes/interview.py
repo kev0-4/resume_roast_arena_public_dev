@@ -33,7 +33,7 @@ import asyncio
 import json
 import uuid
 from contextlib import asynccontextmanager
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from google.genai import errors as genai_errors
@@ -53,11 +53,16 @@ from ..interview import service as interview_service
 from ..interview import prompt_builder as interview_prompts
 from ..interview import llm_client as interview_llm
 from ..interview import validator as interview_validator
+from ..interview import planner as interview_planner
+from ..interview import catalogue
 from ..interview.tools import INTERVIEW_TOOLS
+from ..utils.telemetry import emit_event
 from ..schemas.interview_schemas import (
     InterviewStartResponse,
     InterviewTranscriptAck,
     InterviewCompleteRequest,
+    InterviewRoundResponse,
+    InterviewRoundResult,
     InterviewScoreResult,
     InterviewDetailResponse,
     TranscriptEntry,
@@ -176,6 +181,21 @@ async def start_interview(
     system_instruction = interview_prompts.build_live_system_instruction(system_context)
     resume_text = interview_prompts.build_resume_display_text(anonymized)
 
+    # Plan the round structure before anything expensive happens. A failure
+    # here degrades to the conversation-only interview that shipped in #19
+    # rather than blocking a candidate who has already waited for a roast.
+    try:
+        raw_plan, _usage, _model = await interview_llm.generate_plan(
+            interview_planner.build_planning_prompt(resume_text, body.job_description)
+        )
+        plan = interview_planner.validate_plan(raw_plan)
+    except Exception as e:  # noqa: BLE001 -- any planner failure is non-fatal by design
+        emit_event(
+            "interview.plan_failed",
+            {"reason": str(e)[:200], "status": "WARNING", "route": "POST /v1/interview/start"},
+        )
+        plan = interview_planner.conversation_only_plan()
+
     # Minted before the DB row exists: if this fails there is nothing to
     # clean up, and the user gets a 503 rather than an orphaned interview
     # they can never connect to.
@@ -188,6 +208,7 @@ async def start_interview(
         resume_session_id=resume_session.id,
         job_description=body.job_description,
     )
+    interview = await interview_service.set_plan(db, interview, plan.model_dump())
 
     return InterviewStartResponse(
         interview_id=str(interview.id),
@@ -196,6 +217,7 @@ async def start_interview(
         system_instruction=system_instruction,
         tools=INTERVIEW_TOOLS,
         resume_text=resume_text,
+        agenda=interview_planner.plan_summary(plan),
         expires_at=expires_at,
     )
 
@@ -282,6 +304,260 @@ async def post_interview_transcript(
         await interview_service.set_transcript_blob_path(db, interview, blob_path)
 
     return InterviewTranscriptAck(accepted=len(merged) - len(existing), total_chunks=len(merged))
+
+
+# ---------------------------------------------------------------------------
+# Rounds: the exercise the interviewer switched the screen to
+# ---------------------------------------------------------------------------
+
+
+def _plan_of(interview: InterviewSessions) -> interview_planner.InterviewPlan:
+    """
+    An interview with no stored plan predates rounds entirely. Treating it
+    as conversation-only means every interview created before this feature
+    still works, with no backfill.
+    """
+    if not interview.plan:
+        return interview_planner.conversation_only_plan("interview predates round planning")
+    try:
+        return interview_planner.InterviewPlan(**interview.plan)
+    except Exception:
+        return interview_planner.conversation_only_plan("stored plan unreadable")
+
+
+@interview_router.get("/interview/{interview_id}/round/{index}", response_model=InterviewRoundResponse)
+async def get_interview_round(
+    interview_id: str,
+    index: int,
+    db: AsyncSession = Depends(get_db_sqlalchemy),
+    curr_user: Users = Depends(get_current_user),
+):
+    """
+    The question for one round, as the candidate may see it.
+
+    The answer key and the grading rubric never appear in this response --
+    `public_question` strips them. The client is untrusted, and an MCQ
+    whose answers ship to the browser is not a test.
+    """
+    interview = await _get_owned_interview(interview_id, curr_user, db)
+    plan = _plan_of(interview)
+
+    # Server holds the pointer, so a client cannot jump to a round it likes
+    # the look of or replay one it already answered.
+    if index != (interview.current_round or 0):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"You're on round {interview.current_round}, not {index}.",
+        )
+
+    planned = interview_planner.find_round(plan, index)
+    if planned is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such round")
+    if planned.kind != "EXERCISE":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That round is a conversation, not an exercise")
+
+    entry = catalogue.get_question(planned.question_id)
+    if entry is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That question is no longer available")
+
+    return InterviewRoundResponse(
+        index=index,
+        minutes=planned.minutes,
+        question=catalogue.public_question(entry),
+    )
+
+
+@interview_router.post("/interview/{interview_id}/advance", response_model=InterviewRoundResult)
+async def advance_interview_round(
+    interview_id: str,
+    db: AsyncSession = Depends(get_db_sqlalchemy),
+    curr_user: Users = Depends(get_current_user),
+):
+    """
+    Leaves a conversation round and moves to whatever the plan has next.
+
+    Driven by the interviewer's own `begin_round` tool call: the plan fixes
+    WHAT the rounds are, the interviewer decides WHEN to move. Conversation
+    rounds have nothing to grade, so this only moves the pointer.
+    """
+    interview = await _get_owned_interview(interview_id, curr_user, db)
+    if interview.status != InterviewStatusEnum.IN_PROGRESS.value:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Interview is {interview.status}")
+
+    plan = _plan_of(interview)
+    index = interview.current_round or 0
+    planned = interview_planner.find_round(plan, index)
+
+    if planned is None or planned.kind != "CONVERSATION":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only a conversation round can be advanced -- an exercise is finished by submitting it.",
+        )
+
+    next_planned = interview_planner.find_round(plan, index + 1)
+    if next_planned is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="There is no next round -- this interview ends here.",
+        )
+
+    interview = await interview_service.record_round_result(
+        db, interview, {"index": index, "kind": "CONVERSATION"}
+    )
+
+    return InterviewRoundResult(
+        index=index,
+        score=0,
+        strengths=[],
+        problems=[],
+        next_round_kind=next_planned.kind,
+        next_round_index=index + 1,
+    )
+
+
+class RoundSubmitRequest(BaseModel):
+    # CODE / SQL / WRITTEN answer text, or MCQ selected option indexes.
+    answer: str = Field(default="", max_length=20000)
+    mcq_answers: List[int] = Field(default_factory=list, max_length=50)
+    language: Optional[str] = Field(default=None, max_length=20)
+    seconds_taken: int = Field(default=0, ge=0, le=7200)
+    # Recorded, never blocked. A read-only editor cannot stop someone
+    # pasting from another tab, so this becomes a signal for the debrief
+    # rather than a gate the product pretends to enforce.
+    pasted: bool = False
+
+
+@interview_router.post("/interview/{interview_id}/round/{index}/submit", response_model=InterviewRoundResult)
+async def submit_interview_round(
+    interview_id: str,
+    index: int,
+    body: RoundSubmitRequest,
+    db: AsyncSession = Depends(get_db_sqlalchemy),
+    curr_user: Users = Depends(get_current_user),
+):
+    """
+    Grades one exercise and advances to the next round.
+
+    MCQ is scored here, deterministically, against the key that never left
+    this process. Everything else goes to one cheap text call -- no
+    sandbox, no execution. The review's real product is `interviewer_notes`,
+    which arms the debrief.
+    """
+    interview = await _get_owned_interview(interview_id, curr_user, db)
+
+    if interview.status != InterviewStatusEnum.IN_PROGRESS.value:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Interview is {interview.status}")
+    if index != (interview.current_round or 0):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Round {index} is not the current round ({interview.current_round}).",
+        )
+
+    plan = _plan_of(interview)
+    planned = interview_planner.find_round(plan, index)
+    if planned is None or planned.kind != "EXERCISE":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such exercise round")
+
+    entry = catalogue.get_question(planned.question_id)
+    if entry is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That question is no longer available")
+
+    if entry["format"] == "MCQ":
+        review = interview_service.score_mcq(entry, body.mcq_answers)
+        submission = json.dumps(body.mcq_answers)
+    else:
+        async with _gemini_call_guard():
+            raw_review, _usage, _model = await interview_llm.review_submission(
+                interview_prompts.build_review_prompt(entry, body.answer, body.language)
+            )
+        review = raw_review.model_dump()
+        submission = body.answer
+
+    interview = await interview_service.record_round_result(
+        db,
+        interview,
+        {
+            "index": index,
+            "question_id": entry["id"],
+            "format": entry["format"],
+            "language": body.language,
+            "submission": submission,
+            "seconds_taken": body.seconds_taken,
+            "pasted": body.pasted,
+            "review": review,
+        },
+    )
+
+    next_planned = interview_planner.find_round(plan, index + 1)
+    return InterviewRoundResult(
+        index=index,
+        # Deliberately partial: the candidate sees how they did, not the
+        # notes the interviewer is about to use on them.
+        score=review["score"],
+        strengths=review.get("strengths", []),
+        problems=review.get("problems", []),
+        mcq_detail=review.get("detail"),
+        next_round_kind=next_planned.kind if next_planned else None,
+        next_round_index=index + 1 if next_planned else None,
+    )
+
+
+@interview_router.post("/interview/{interview_id}/voice-token", response_model=InterviewStartResponse)
+async def mint_voice_token(
+    interview_id: str,
+    db: AsyncSession = Depends(get_db_sqlalchemy),
+    curr_user: Users = Depends(get_current_user),
+):
+    """
+    Re-opens voice after an exercise round.
+
+    Not a rate-limited route: it does not start a new interview, it resumes
+    one already paid for. Capping it would strand a candidate mid-session.
+
+    Why a whole new token rather than resuming the old socket: ephemeral
+    tokens silently ignore session resumption handles. Verified twice --
+    with a fresh uses=1 token and with a single uses=2 token used for both
+    connections, the model reconnected with no memory and replayed its
+    opening question. The same test passes on a raw API key. So the
+    conversation is carried by re-seeding the instruction from the
+    transcript we already store, which also costs no measurable latency:
+    a 6,237-char instruction reached first audio in 2.09s against a 2.0s
+    baseline.
+    """
+    interview = await _get_owned_interview(interview_id, curr_user, db)
+    if interview.status != InterviewStatusEnum.IN_PROGRESS.value:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Interview is {interview.status}")
+
+    anonymized, roast = await _load_resume_context(interview.resume_session_id)
+    system_context = interview_prompts.build_interview_system_context(
+        anonymized, roast, interview.job_description
+    )
+    instruction = interview_prompts.build_live_system_instruction(system_context)
+
+    chunks = await _read_transcript(interview)
+    utterances = interview_service.merge_into_utterances(chunks)
+
+    last = (interview.round_results or [])[-1] if interview.round_results else None
+    if last:
+        entry = catalogue.get_question(last["question_id"])
+        if entry:
+            instruction += interview_prompts.build_debrief_addendum(
+                utterances, entry, last.get("submission", ""), last.get("review")
+            )
+
+    async with _gemini_call_guard():
+        token, expires_at = await interview_llm.create_ephemeral_token(instruction)
+
+    return InterviewStartResponse(
+        interview_id=str(interview.id),
+        token=token,
+        model=GEMINI_LIVE_MODEL,
+        system_instruction=instruction,
+        tools=INTERVIEW_TOOLS,
+        resume_text=interview_prompts.build_resume_display_text(anonymized),
+        agenda=interview_planner.plan_summary(_plan_of(interview)),
+        expires_at=expires_at,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -119,6 +119,52 @@ async def create_ephemeral_token(system_instruction: str) -> Tuple[str, datetime
     return token.name, expire_time
 
 
+async def generate_plan(prompt: str) -> Tuple["InterviewPlan", dict, str]:
+    """
+    Plans the interview's round structure. One cheap text call at /start,
+    on the same model as scoring -- deciding logistics is not work for the
+    expensive live model.
+    """
+    from .planner import InterviewPlan  # local import: planner imports nothing from here
+
+    client = _get_client()
+    response = await client.aio.models.generate_content(
+        model=GEMINI_INTERVIEW_MODEL,
+        contents=prompt,
+        config=genai.types.GenerateContentConfig(
+            max_output_tokens=_MAX_OUTPUT_TOKENS,
+            response_mime_type="application/json",
+            response_schema=InterviewPlan,
+        ),
+    )
+    if response.parsed is None:
+        raise ValueError(f"Gemini plan did not match response_schema: {response.text!r}")
+    return response.parsed, _usage_from(response), (response.model_version or GEMINI_INTERVIEW_MODEL)
+
+
+async def review_submission(prompt: str) -> Tuple["ExerciseReview", dict, str]:
+    """
+    Grades one exercise submission. Deliberately a cheap text call rather
+    than an execution sandbox: its real job is to arm the interviewer for
+    the debrief, where the actual signal comes from.
+    """
+    from .schemas import ExerciseReview
+
+    client = _get_client()
+    response = await client.aio.models.generate_content(
+        model=GEMINI_INTERVIEW_MODEL,
+        contents=prompt,
+        config=genai.types.GenerateContentConfig(
+            max_output_tokens=_MAX_OUTPUT_TOKENS,
+            response_mime_type="application/json",
+            response_schema=ExerciseReview,
+        ),
+    )
+    if response.parsed is None:
+        raise ValueError(f"Gemini review did not match response_schema: {response.text!r}")
+    return response.parsed, _usage_from(response), (response.model_version or GEMINI_INTERVIEW_MODEL)
+
+
 async def generate_score(prompt: str) -> Tuple[InterviewScoreResponse, dict, str]:
     """The one end-of-interview scoring call, over the full transcript as text."""
     client = _get_client()

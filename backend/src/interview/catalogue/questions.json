@@ -1,0 +1,321 @@
+[
+  {
+    "id": "lru-cache-design",
+    "format": "CODE",
+    "verticals": ["swe", "etl"],
+    "difficulty": "medium",
+    "topics": ["hashmap", "linked-list", "design", "caching"],
+    "minutes": 12,
+    "prompt": "Design an LRU cache supporting get(key) and put(key, value), both in O(1) average time. Evicting the least-recently-used entry when the cache is full is the whole point -- get counts as a use.",
+    "starter": {
+      "python": "class LRUCache:\n    def __init__(self, capacity: int):\n        pass\n\n    def get(self, key: int) -> int:\n        \"\"\"Return the value, or -1 if absent.\"\"\"\n        pass\n\n    def put(self, key: int, value: int) -> None:\n        pass\n",
+      "javascript": "class LRUCache {\n  constructor(capacity) {}\n\n  /** @returns {number} value, or -1 if absent */\n  get(key) {}\n\n  put(key, value) {}\n}\n",
+      "java": "class LRUCache {\n    public LRUCache(int capacity) {\n    }\n\n    public int get(int key) {\n        return -1;\n    }\n\n    public void put(int key, int value) {\n    }\n}\n",
+      "cpp": "class LRUCache {\npublic:\n    LRUCache(int capacity) {}\n\n    int get(int key) { return -1; }\n\n    void put(int key, int value) {}\n};\n"
+    },
+    "rubric": "Strong: hashmap plus doubly-linked list, both operations genuinely O(1), eviction correct, get promotes recency. Weak: a list or array scanned linearly (O(n) hiding behind an O(1) claim), eviction that drops the most recent instead of least, or get that does not count as a use. Press hard on the complexity claim -- this is the most common place candidates overstate."
+  },
+  {
+    "id": "merge-intervals",
+    "format": "CODE",
+    "verticals": ["swe"],
+    "difficulty": "easy",
+    "topics": ["sorting", "arrays", "greedy"],
+    "minutes": 10,
+    "prompt": "Given a list of intervals [start, end], merge all overlapping intervals and return them sorted by start. Intervals that merely touch (end == next start) count as overlapping.",
+    "starter": {
+      "python": "def merge_intervals(intervals: list[list[int]]) -> list[list[int]]:\n    pass\n",
+      "javascript": "function mergeIntervals(intervals) {\n}\n",
+      "java": "class Solution {\n    public int[][] mergeIntervals(int[][] intervals) {\n        return new int[0][];\n    }\n}\n",
+      "cpp": "vector<vector<int>> mergeIntervals(vector<vector<int>>& intervals) {\n}\n"
+    },
+    "rubric": "Strong: sort by start then single pass, O(n log n), handles touching intervals and the empty input. Weak: nested-loop merging, mutating while iterating, or missing that [1,4] and [4,5] merge. Ask what happens on an already-sorted million-element input."
+  },
+  {
+    "id": "rate-limiter-sliding-window",
+    "format": "CODE",
+    "verticals": ["swe", "backend"],
+    "difficulty": "medium",
+    "topics": ["design", "time", "hashmap", "rate-limiting"],
+    "minutes": 12,
+    "prompt": "Implement a sliding-window rate limiter: allow(user_id, timestamp) returns True if this user has made fewer than N requests in the last W seconds, and records the request when allowed.",
+    "starter": {
+      "python": "class RateLimiter:\n    def __init__(self, max_requests: int, window_seconds: int):\n        pass\n\n    def allow(self, user_id: str, timestamp: float) -> bool:\n        pass\n",
+      "javascript": "class RateLimiter {\n  constructor(maxRequests, windowSeconds) {}\n\n  allow(userId, timestamp) {}\n}\n",
+      "java": "class RateLimiter {\n    public RateLimiter(int maxRequests, int windowSeconds) {\n    }\n\n    public boolean allow(String userId, double timestamp) {\n        return false;\n    }\n}\n",
+      "cpp": "class RateLimiter {\npublic:\n    RateLimiter(int maxRequests, int windowSeconds) {}\n    bool allow(const string& userId, double timestamp) { return false; }\n};\n"
+    },
+    "rubric": "Strong: per-user deque with expiry pruned from the front, notes unbounded memory growth across many users and how they would evict. Weak: a fixed window mislabelled as sliding (allows 2N at a boundary), or never pruning old timestamps. Ask about memory when a million users each hit it once."
+  },
+  {
+    "id": "scd-type-2-merge",
+    "format": "SQL",
+    "verticals": ["etl", "data"],
+    "difficulty": "medium",
+    "topics": ["slowly-changing-dimension", "merge", "history", "warehousing"],
+    "minutes": 12,
+    "prompt": "Late-arriving updates are overwriting customer history instead of versioning it. Write the SQL that loads stg_customer into dim_customer as a Type 2 slowly-changing dimension: close the current row when a tracked attribute changes, and insert a new current row. Assume Postgres.",
+    "schema": [
+      {
+        "table": "stg_customer",
+        "columns": ["customer_id INT", "email TEXT", "segment TEXT", "updated_at TIMESTAMP"]
+      },
+      {
+        "table": "dim_customer",
+        "columns": ["surrogate_key BIGSERIAL", "customer_id INT", "email TEXT", "segment TEXT", "valid_from TIMESTAMP", "valid_to TIMESTAMP", "is_current BOOLEAN"]
+      }
+    ],
+    "rubric": "Strong: closes the prior row (valid_to, is_current = false) and inserts the new version in one transaction, compares only tracked attributes, handles a first-ever load, and is idempotent on re-run. Weak: a plain UPDATE that destroys history, no is_current maintenance, or a solution that double-inserts when replayed. Ask what happens if the same batch runs twice."
+  },
+  {
+    "id": "sessionise-events",
+    "format": "SQL",
+    "verticals": ["etl", "data", "analytics"],
+    "difficulty": "medium",
+    "topics": ["window-functions", "sessionisation", "aggregation"],
+    "minutes": 10,
+    "prompt": "Group raw page events into sessions: a new session starts when a user has been inactive for more than 30 minutes. Return one row per session with the user, session start, session end, and event count.",
+    "schema": [
+      {
+        "table": "page_events",
+        "columns": ["user_id INT", "event_at TIMESTAMP", "path TEXT"]
+      }
+    ],
+    "rubric": "Strong: LAG over a user-partitioned window to detect the gap, a cumulative SUM to build a session id, then aggregate. Weak: self-joins that blow up on volume, or a correlated subquery per row. Ask about performance on a billion rows and whether the window is partitioned correctly."
+  },
+  {
+    "id": "market-sizing-uk-coffee",
+    "format": "WRITTEN",
+    "verticals": ["ib", "consulting", "finance"],
+    "difficulty": "medium",
+    "topics": ["market-sizing", "estimation", "structuring"],
+    "minutes": 10,
+    "prompt": "Estimate the annual revenue of the UK takeaway coffee market. State your assumptions explicitly and show the structure of your calculation -- the number matters far less than how you get there.",
+    "rubric": "Strong: a clear top-down or bottom-up structure, stated assumptions with rough justification, sanity-checks the result against something known, and names which assumption the answer is most sensitive to. Weak: a number with no working, assumptions pulled from nowhere, or arithmetic that does not reconcile. Press on the single assumption that most moves the answer."
+  },
+  {
+    "id": "dcf-walkthrough",
+    "format": "WRITTEN",
+    "verticals": ["ib", "finance"],
+    "difficulty": "medium",
+    "topics": ["valuation", "dcf", "wacc"],
+    "minutes": 10,
+    "prompt": "Walk through how you would value a stable, cash-generative business using a DCF. Be specific about what you forecast, how you discount it, and where the terminal value comes from -- and say which input you would least trust.",
+    "rubric": "Strong: unlevered free cash flow, explicit forecast horizon, WACC built from its components, terminal value via Gordon growth or exit multiple with a sanity check on what fraction of value it represents. Weak: reciting steps without understanding, discounting the wrong cash flow, or a terminal growth rate above long-run GDP. The last part of the question is the real test."
+  },
+  {
+    "id": "sjt-manager-complaint",
+    "format": "WRITTEN",
+    "verticals": ["hr", "people-ops"],
+    "difficulty": "medium",
+    "topics": ["employee-relations", "investigation", "judgement"],
+    "minutes": 10,
+    "prompt": "An employee tells you, in confidence, that their manager has been excluding them from meetings since they returned from parental leave. They ask you not to act on it. Walk through your next three steps and what you would say to them.",
+    "rubric": "Strong: recognises the confidentiality request cannot be honoured unconditionally where there is a potential discrimination issue, says so honestly to the employee, documents, and escalates on a defined path. Weak: promising blanket confidentiality, going straight to the manager, or treating it as an informal misunderstanding. Press on exactly what they would say when the employee asks them to keep it quiet."
+  },
+  {
+    "id": "brainteaser-broken-bat",
+    "format": "WRITTEN",
+    "verticals": ["quant", "hft"],
+    "difficulty": "hard",
+    "topics": ["probability", "expectation", "reasoning"],
+    "minutes": 10,
+    "prompt": "A stick of length 1 is broken at two points chosen uniformly at random. What is the probability the three pieces form a triangle? Show your reasoning -- the argument is the answer.",
+    "rubric": "Strong: sets up the unit square or simplex, states the triangle inequality as three constraints, identifies the feasible region, arrives at 1/4 with a geometric or symmetry argument. Weak: a guessed fraction, or an argument that forgets one of the three inequalities. Ask them to justify the answer a second way."
+  },
+  {
+    "id": "mcq-sql-fundamentals",
+    "format": "MCQ",
+    "verticals": ["etl", "data", "analytics"],
+    "difficulty": "medium",
+    "topics": ["sql", "joins", "null-semantics", "windows"],
+    "minutes": 4,
+    "questions": [
+      {
+        "prompt": "A LEFT JOIN with a filter on the right table's column placed in WHERE rather than ON will:",
+        "options": [
+          "Behave identically -- placement does not matter",
+          "Silently turn the LEFT JOIN into an INNER JOIN",
+          "Raise a syntax error in Postgres",
+          "Return duplicate rows from the left table"
+        ],
+        "answer": 1,
+        "why": "Filtering the right table in WHERE discards the NULL-extended rows the LEFT JOIN produced, so unmatched left rows vanish. This is the single most common silent bug in analytics SQL."
+      },
+      {
+        "prompt": "COUNT(column_name) versus COUNT(*) on a column containing NULLs:",
+        "options": [
+          "Both count every row",
+          "COUNT(column_name) skips NULLs, COUNT(*) does not",
+          "COUNT(*) skips NULLs, COUNT(column_name) does not",
+          "Both skip NULLs"
+        ],
+        "answer": 1,
+        "why": "COUNT(expr) counts non-NULL values; COUNT(*) counts rows regardless."
+      },
+      {
+        "prompt": "ROW_NUMBER() and RANK() differ in that:",
+        "options": [
+          "RANK() is always faster",
+          "ROW_NUMBER() can produce ties, RANK() cannot",
+          "RANK() leaves gaps after ties, ROW_NUMBER() never ties",
+          "They are aliases for the same function"
+        ],
+        "answer": 2,
+        "why": "RANK() gives tied rows the same rank and then skips numbers; ROW_NUMBER() assigns a distinct sequential number regardless."
+      },
+      {
+        "prompt": "NULL = NULL in standard SQL evaluates to:",
+        "options": ["TRUE", "FALSE", "NULL (unknown)", "It depends on the database"],
+        "answer": 2,
+        "why": "NULL comparisons yield unknown, which is why IS NULL exists. A WHERE clause treats unknown as not-true and filters the row out."
+      }
+    ],
+    "rubric": "Auto-scored."
+  },
+  {
+    "id": "mcq-quant-probability",
+    "format": "MCQ",
+    "verticals": ["quant", "hft"],
+    "difficulty": "hard",
+    "topics": ["probability", "statistics", "expectation"],
+    "minutes": 4,
+    "questions": [
+      {
+        "prompt": "You flip a fair coin until the first head. What is the expected number of flips?",
+        "options": ["1", "1.5", "2", "Infinite"],
+        "answer": 2,
+        "why": "Geometric with p = 0.5, so the expectation is 1/p = 2."
+      },
+      {
+        "prompt": "Two fair dice are rolled. Given that the sum is 7, the probability one die shows a 3 is:",
+        "options": ["1/6", "1/3", "1/2", "2/11"],
+        "answer": 1,
+        "why": "Six ordered outcomes sum to 7; two of them contain a 3 ((3,4) and (4,3)), giving 2/6 = 1/3."
+      },
+      {
+        "prompt": "A test is 99% accurate for a disease affecting 1 in 10,000. Someone tests positive. Roughly what is the chance they have it?",
+        "options": ["About 99%", "About 50%", "About 1%", "About 0.01%"],
+        "answer": 2,
+        "why": "Base rates dominate: roughly 100 false positives per true positive at these numbers, so around 1%."
+      },
+      {
+        "prompt": "If X and Y are uncorrelated, then:",
+        "options": [
+          "They must be independent",
+          "They may still be dependent",
+          "Their variances must be equal",
+          "Their joint distribution must be normal"
+        ],
+        "answer": 1,
+        "why": "Zero correlation only rules out linear association. Y = X squared with X symmetric about zero is uncorrelated and fully dependent."
+      }
+    ],
+    "rubric": "Auto-scored."
+  },
+  {
+    "id": "mcq-ib-technicals",
+    "format": "MCQ",
+    "verticals": ["ib", "finance"],
+    "difficulty": "medium",
+    "topics": ["valuation", "accounting", "m-and-a"],
+    "minutes": 4,
+    "questions": [
+      {
+        "prompt": "An all-stock acquisition is accretive to the acquirer's EPS when:",
+        "options": [
+          "The acquirer's P/E is lower than the target's",
+          "The acquirer's P/E is higher than the target's",
+          "Both trade at the same P/E",
+          "The target has more cash than the acquirer"
+        ],
+        "answer": 1,
+        "why": "Issuing shares at a higher multiple than the earnings bought means the acquired earnings exceed the dilution."
+      },
+      {
+        "prompt": "Enterprise value differs from equity value by:",
+        "options": [
+          "Adding cash and subtracting debt",
+          "Adding debt and subtracting cash",
+          "Adding both debt and cash",
+          "Subtracting both debt and cash"
+        ],
+        "answer": 1,
+        "why": "EV = equity value + net debt, so debt is added and cash subtracted -- EV is capital-structure neutral."
+      },
+      {
+        "prompt": "Depreciation increases by 10. Ignoring all else, at a 25% tax rate, cash flow changes by:",
+        "options": ["-10", "-7.5", "+2.5", "0"],
+        "answer": 2,
+        "why": "Depreciation is non-cash: net income falls 7.5, then adding back 10 leaves cash up 2.5 -- the tax shield."
+      },
+      {
+        "prompt": "In a DCF, a terminal growth rate above long-run GDP growth implies:",
+        "options": [
+          "A conservative valuation",
+          "The business eventually exceeds the whole economy",
+          "A lower terminal value",
+          "Nothing unusual for a growth company"
+        ],
+        "answer": 1,
+        "why": "Perpetual growth faster than the economy means the firm asymptotically becomes the entire economy, which is why the rate is capped near long-run GDP or inflation."
+      }
+    ],
+    "rubric": "Auto-scored."
+  },
+  {
+    "id": "mcq-hr-employment",
+    "format": "MCQ",
+    "verticals": ["hr", "people-ops"],
+    "difficulty": "medium",
+    "topics": ["employment-practice", "policy", "process"],
+    "minutes": 4,
+    "questions": [
+      {
+        "prompt": "An employee raises a grievance about their direct manager. The investigation should normally be run by:",
+        "options": [
+          "The manager named in the grievance",
+          "Someone independent of the complaint, typically a more senior or neutral manager with HR support",
+          "The employee's closest colleague",
+          "Nobody -- it should be resolved informally first in all cases"
+        ],
+        "answer": 1,
+        "why": "The subject of a complaint cannot investigate it. Independence is what makes the outcome defensible."
+      },
+      {
+        "prompt": "The main purpose of a structured, scored interview scorecard is to:",
+        "options": [
+          "Speed the process up",
+          "Reduce the influence of unstructured impressions and make decisions comparable and defensible",
+          "Satisfy the ATS vendor",
+          "Let hiring managers skip reference checks"
+        ],
+        "answer": 1,
+        "why": "Structure is the best-evidenced single lever on both predictive validity and bias in hiring."
+      },
+      {
+        "prompt": "A candidate discloses a disability and requests an adjustment for the interview. The correct first response is to:",
+        "options": [
+          "Ask for medical evidence before proceeding",
+          "Discuss and make reasonable adjustments to the process",
+          "Note it for the hiring manager's decision",
+          "Treat the request as a withdrawal"
+        ],
+        "answer": 1,
+        "why": "Reasonable adjustments apply to the recruitment process itself; the default is to discuss and accommodate, not to gatekeep on evidence."
+      },
+      {
+        "prompt": "Pay compression is best described as:",
+        "options": [
+          "Total compensation falling year on year",
+          "New hires being paid close to, or above, longer-tenured staff in the same role",
+          "A narrow band between the lowest and highest paid employee overall",
+          "Bonuses shrinking relative to base pay"
+        ],
+        "answer": 1,
+        "why": "It arises when market rates for new hires outpace internal increases, and it is a common driver of regretted attrition."
+      }
+    ],
+    "rubric": "Auto-scored."
+  }
+]

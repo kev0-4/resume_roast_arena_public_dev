@@ -253,6 +253,124 @@ threaten to end the interview without actually calling the tool: saying \
 """
 
 
+def build_review_prompt(question: Dict[str, Any], submission: str, language: str | None = None) -> str:
+    """
+    Grades one exercise submission without executing it.
+
+    The most important output is not the score, it is interviewer_notes --
+    the specific weakness the interviewer should open the debrief on.
+    Probing showed that feeding this into the live session turns "walk me
+    through your solution" into "you claimed O(1) but you call
+    list.remove, justify that", which is the entire point of the round.
+    """
+    extra = ""
+    if question["format"] == "CODE" and language:
+        extra = f"\nLanguage: {language}\n"
+    if question["format"] == "SQL":
+        tables = "\n".join(
+            f"  {t['table']}({', '.join(t['columns'])})" for t in question.get("schema", [])
+        )
+        extra = f"\nSchema they were given:\n{tables}\n"
+
+    return f"""\
+You are grading one exercise from a mock interview. The submission was NOT \
+executed -- judge it by reading it.
+
+---
+QUESTION ({question["format"]}, {question["difficulty"]}):
+
+{question["prompt"]}
+{extra}
+---
+GRADING RUBRIC -- this is what a strong and a weak answer look like:
+
+{question["rubric"]}
+
+---
+THE CANDIDATE SUBMITTED:
+
+{submission.strip() or "(nothing -- they submitted an empty answer)"}
+
+---
+TASK:
+
+Judge it honestly and specifically.
+
+- `correct`: does it actually solve the stated problem? An empty or \
+irrelevant submission is false.
+- `complexity`: the real time complexity for CODE and SQL (say "n/a" for \
+WRITTEN), regardless of what the candidate claimed.
+- `strengths` and `problems`: concrete, grounded in what they actually \
+wrote. Quote their own identifiers or phrases. No generic advice.
+- `interviewer_notes`: the single sharpest thing to press them on out \
+loud, phrased for an interviewer to act on. This is not shown to the \
+candidate. If they overstated something, say exactly where.
+- `score`: {SCORE_MIN} to {SCORE_MAX} for this exercise alone.\
+"""
+
+
+def build_debrief_addendum(
+    utterances: List[Dict[str, Any]],
+    question: Dict[str, Any],
+    submission: str,
+    review: Dict[str, Any] | None,
+) -> str:
+    """
+    Appended to the live system instruction when voice returns after an
+    exercise round.
+
+    Two jobs. It carries the conversation across a socket the candidate
+    never knew closed -- ephemeral tokens silently ignore session
+    resumption handles, verified twice, so re-seeding is the only way the
+    interviewer remembers anything. And it hands over the automated review
+    so the interviewer opens on the real weakness rather than a warm-up.
+    """
+    history = "\n".join(
+        f"{'INTERVIEWER' if u.get('speaker') == 'interviewer' else 'CANDIDATE'}: {(u.get('text') or '').strip()}"
+        for u in utterances
+        if (u.get("text") or "").strip()
+    ) or "(nothing said yet)"
+
+    review_block = ""
+    if review:
+        problems = "\n".join(f"  - {p}" for p in review.get("problems", [])) or "  - none noted"
+        review_block = f"""\
+
+An automated review of that submission found:
+  correct: {review.get("correct")}
+  complexity: {review.get("complexity")}
+  problems:
+{problems}
+
+The sharpest thing to press on: {review.get("interviewer_notes", "")}
+"""
+
+    return f"""
+
+---
+THE CONVERSATION SO FAR -- you already had this exchange with the
+candidate. Continue naturally. Do NOT reintroduce yourself, do NOT restart
+the interview, and do NOT repeat a question you already asked.
+
+{history}
+
+---
+THEY HAVE JUST FINISHED AN EXERCISE ROUND.
+
+Question set ({question["format"]}): {question.get("prompt", "")}
+
+Their submission:
+
+{submission.strip() or "(they submitted nothing)"}
+{review_block}
+---
+TASK: Open the debrief by going straight at the weakest part of that
+submission. Do not praise it first and do not ask them to walk through it
+from the top -- you have read it. One short spoken question, and make it
+the one they would least like to be asked.
+"""
+
+
 def build_scoring_prompt(
     system_context: str,
     utterances: List[Dict[str, Any]],

@@ -23,6 +23,7 @@ definition serves both sides instead of two that can disagree.
 
 END_INTERVIEW = "end_interview"
 SKIP_QUESTION = "skip_question"
+BEGIN_ROUND = "begin_round"
 
 # Kept as an enum so scoring gets a reliable category rather than having to
 # parse intent back out of a free-text reason.
@@ -57,6 +58,26 @@ INTERVIEW_TOOLS = [
                         },
                     },
                     "required": ["reason", "category"],
+                },
+            },
+            {
+                "name": BEGIN_ROUND,
+                "description": (
+                    "Move the candidate on to the next planned round -- this switches their screen "
+                    "to an exercise. Call it once you have covered enough ground in conversation. "
+                    "Tell them what is coming in one short line BEFORE calling this, because the "
+                    "screen changes the moment you do and silence at that point is disorienting. "
+                    "Only call it when the agenda actually has a next round."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "handoff": {
+                            "type": "STRING",
+                            "description": "One short sentence telling the candidate what they are about to do.",
+                        },
+                    },
+                    "required": ["handoff"],
                 },
             },
             {

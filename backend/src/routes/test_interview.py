@@ -31,6 +31,7 @@ codebase's tests.
 
 import asyncio
 import datetime
+import json
 import uuid
 
 from fastapi.testclient import TestClient
@@ -45,7 +46,8 @@ from backend.src import create_app
 
 from src.dependencies.auth import get_current_user
 from src.interview import llm_client as interview_llm_module
-from src.interview.schemas import InterviewScoreResponse
+from src.interview.schemas import InterviewScoreResponse, ExerciseReview
+from src.interview.planner import InterviewPlan, PlannedRound
 
 
 def _run(coro_fn):
@@ -107,10 +109,18 @@ class _FakeCurrUser:
 FAKE_TOKEN = "auth_tokens/fake-ephemeral-token"
 
 
-def _patch_gemini(monkeypatch, *, score=7):
-    """Replaces both real Gemini interactions. Returns a call counter so
-    tests can assert scoring is NOT paid for twice."""
-    calls = {"score": 0, "token": 0}
+def _patch_gemini(monkeypatch, *, score=7, plan_rounds=None, review_score=6):
+    """
+    Replaces every real Gemini interaction. Returns a call counter so tests
+    can assert scoring is NOT paid for twice.
+
+    generate_plan MUST be patched here even though /start tolerates a
+    planner failure: without it the suite makes a real API call per
+    started interview. That is slow, costs money, and is invisible --
+    /start swallows the failure and falls back, so the tests still pass
+    while quietly depending on a key CI deliberately does not set.
+    """
+    calls = {"score": 0, "token": 0, "plan": 0, "review": 0}
 
     async def fake_create_ephemeral_token(system_instruction):
         # Captured so a test can assert the interview context is pinned
@@ -133,8 +143,38 @@ def _patch_gemini(monkeypatch, *, score=7):
             "fake-model",
         )
 
+    async def fake_generate_plan(prompt):
+        calls["plan"] += 1
+        calls["plan_prompt"] = prompt
+        rounds = plan_rounds if plan_rounds is not None else [
+            {"kind": "CONVERSATION", "question_id": "", "minutes": 8, "focus": "Resume."},
+        ]
+        return (
+            InterviewPlan(vertical="swe", rationale="test plan", rounds=[PlannedRound(**r) for r in rounds]),
+            {"input_tokens": 800, "output_tokens": 200},
+            "fake-model",
+        )
+
+    async def fake_review_submission(prompt):
+        calls["review"] += 1
+        calls["review_prompt"] = prompt
+        return (
+            ExerciseReview(
+                correct=True,
+                complexity="O(n log n)",
+                strengths=["Sorted first."],
+                problems=["Did not handle empty input."],
+                interviewer_notes="Press on the empty-input case.",
+                score=review_score,
+            ),
+            {"input_tokens": 400, "output_tokens": 120},
+            "fake-model",
+        )
+
     monkeypatch.setattr(interview_llm_module, "create_ephemeral_token", fake_create_ephemeral_token)
     monkeypatch.setattr(interview_llm_module, "generate_score", fake_generate_score)
+    monkeypatch.setattr(interview_llm_module, "generate_plan", fake_generate_plan)
+    monkeypatch.setattr(interview_llm_module, "review_submission", fake_review_submission)
     return calls
 
 
@@ -218,7 +258,7 @@ class TestStartInterview:
         # The interviewer needs the authority to end the session and to
         # move past a question; both are tools, so they must reach the client.
         tool_names = {fn["name"] for tool in body["tools"] for fn in tool["function_declarations"]}
-        assert tool_names == {"end_interview", "skip_question"}
+        assert tool_names == {"end_interview", "skip_question", "begin_round"}
 
         # The reference pane shows the resume, and must NOT leak the roast --
         # that would name every weak spot before it's asked about.
@@ -614,6 +654,168 @@ class TestGetInterview:
         with TestClient(app) as client:
             resp = client.get(f"/api/v1/interview/{interview_id}")
         assert resp.status_code == 404
+
+
+CODE_ROUND_PLAN = [
+    {"kind": "CONVERSATION", "question_id": "", "minutes": 8, "focus": "Resume."},
+    {"kind": "EXERCISE", "question_id": "merge-intervals", "minutes": 10, "focus": "Arrays."},
+]
+MCQ_ROUND_PLAN = [
+    {"kind": "CONVERSATION", "question_id": "", "minutes": 8, "focus": "Resume."},
+    {"kind": "EXERCISE", "question_id": "mcq-ib-technicals", "minutes": 4, "focus": "Technicals."},
+]
+
+
+class TestRounds:
+    def _setup(self, monkeypatch, suffix, plan_rounds):
+        calls = _patch_gemini(monkeypatch, plan_rounds=plan_rounds)
+        holder = {"calls": calls}
+
+        async def setup():
+            async with AsyncSessionLocal() as db:
+                user_id = await _make_user_id(db, f"{suffix}-{uuid.uuid4().hex[:6]}")
+                holder["user_id"] = user_id
+                holder["resume_session_id"] = await _make_done_resume_session_id(db, user_id)
+
+        _run(setup)
+        app = create_app()
+        holder["app"] = app
+        holder["start"] = _start_interview(app, holder["user_id"], holder["resume_session_id"])
+        holder["interview_id"] = holder["start"]["interview_id"]
+        return holder
+
+    def test_agenda_is_returned_at_start(self, monkeypatch):
+        h = self._setup(monkeypatch, "agenda", CODE_ROUND_PLAN)
+        agenda = h["start"]["agenda"]
+        assert [a["label"] for a in agenda] == ["Conversation", "Coding"]
+
+    def test_round_question_never_leaks_the_answer_key(self, monkeypatch):
+        # An MCQ whose answers reach the browser is not a test.
+        h = self._setup(monkeypatch, "leak", MCQ_ROUND_PLAN)
+        app = h["app"]
+
+        with TestClient(app) as client:
+            # Round 0 is the conversation; the exercise is round 1.
+            client.post(f"/api/v1/interview/{h['interview_id']}/advance", json={})
+            resp = client.get(f"/api/v1/interview/{h['interview_id']}/round/1")
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        serialized = json.dumps(body)
+        assert '"answer"' not in serialized
+        assert '"why"' not in serialized
+        assert "rubric" not in serialized
+        # But it must still carry what the candidate needs to answer.
+        assert len(body["question"]["questions"]) == 4
+        assert len(body["question"]["questions"][0]["options"]) == 4
+
+    def test_cannot_skip_ahead_to_a_later_round(self, monkeypatch):
+        h = self._setup(monkeypatch, "skip", CODE_ROUND_PLAN)
+        with TestClient(h["app"]) as client:
+            resp = client.get(f"/api/v1/interview/{h['interview_id']}/round/1")
+        assert resp.status_code == 409
+
+    def test_mcq_is_scored_deterministically_without_a_model(self, monkeypatch):
+        h = self._setup(monkeypatch, "mcq", MCQ_ROUND_PLAN)
+        app = h["app"]
+
+        with TestClient(app) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/advance", json={})
+            # mcq-ib-technicals answer key is [1, 1, 2, 1]; get three right.
+            resp = client.post(
+                f"/api/v1/interview/{h['interview_id']}/round/1/submit",
+                json={"mcq_answers": [1, 1, 2, 0], "seconds_taken": 90},
+            )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert h["calls"]["review"] == 0, "MCQ must not spend a model call"
+        assert [d["correct"] for d in body["mcq_detail"]] == [True, True, True, False]
+        assert 1 <= body["score"] <= 10
+
+    def test_submitted_round_cannot_be_replayed(self, monkeypatch):
+        h = self._setup(monkeypatch, "replay", MCQ_ROUND_PLAN)
+        with TestClient(h["app"]) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/advance", json={})
+            first = client.post(
+                f"/api/v1/interview/{h['interview_id']}/round/1/submit", json={"mcq_answers": [0, 0, 0, 0]}
+            )
+            # A second attempt at a better score must be refused.
+            second = client.post(
+                f"/api/v1/interview/{h['interview_id']}/round/1/submit", json={"mcq_answers": [1, 1, 2, 1]}
+            )
+        assert first.status_code == 200
+        assert second.status_code == 409
+
+    def test_code_round_result_hides_the_interviewer_notes(self, monkeypatch):
+        # Those notes are the debrief's ammunition -- showing them would let
+        # the candidate prepare for the exact question coming next.
+        h = self._setup(monkeypatch, "notes", CODE_ROUND_PLAN)
+        app = h["app"]
+
+        with TestClient(app) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/advance", json={})
+            resp = client.post(
+                f"/api/v1/interview/{h['interview_id']}/round/1/submit",
+                json={"answer": "def merge_intervals(x): return x", "language": "python", "pasted": True},
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert h["calls"]["review"] == 1
+        assert "interviewer_notes" not in json.dumps(body)
+        assert "Press on the empty-input case." not in json.dumps(body)
+        assert body["problems"] == ["Did not handle empty input."]
+
+    def test_voice_token_reseeds_with_the_submission_and_review(self, monkeypatch):
+        h = self._setup(monkeypatch, "reseed", CODE_ROUND_PLAN)
+        app = h["app"]
+
+        with TestClient(app) as client:
+            client.post(
+                f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION}
+            )
+            client.post(f"/api/v1/interview/{h['interview_id']}/advance", json={})
+            client.post(
+                f"/api/v1/interview/{h['interview_id']}/round/1/submit",
+                json={"answer": "def merge_intervals(x): return sorted(x)", "language": "python"},
+            )
+            resp = client.post(f"/api/v1/interview/{h['interview_id']}/voice-token", json={})
+
+        assert resp.status_code == 200, resp.text
+        instruction = resp.json()["system_instruction"]
+        # Carries the conversation (ephemeral tokens ignore resumption
+        # handles, so this is the ONLY way it remembers).
+        assert "Redis, read-through" in instruction
+        assert "do NOT restart the interview" in instruction.lower() or "not restart" in instruction.lower()
+        # Carries the submission and the review's notes.
+        assert "sorted(x)" in instruction
+        assert "Press on the empty-input case." in instruction
+
+    def test_interview_without_a_plan_still_works(self, monkeypatch):
+        # Every interview created before this feature has plan = NULL.
+        h = self._setup(monkeypatch, "legacy", CODE_ROUND_PLAN)
+        interview_id = h["interview_id"]
+
+        async def wipe_plan():
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import text
+
+                await db.execute(
+                    text('UPDATE "InterviewSessions" SET plan = NULL WHERE id = :i'), {"i": interview_id}
+                )
+                await db.commit()
+
+        _run(wipe_plan)
+
+        with TestClient(h["app"]) as client:
+            # No exercise rounds exist, so asking for one 404s rather than
+            # exploding, and voice still mints.
+            missing = client.get(f"/api/v1/interview/{interview_id}/round/0")
+            voice = client.post(f"/api/v1/interview/{interview_id}/voice-token", json={})
+
+        assert missing.status_code == 409  # round 0 is a conversation
+        assert voice.status_code == 200
 
 
 class TestEligibility:

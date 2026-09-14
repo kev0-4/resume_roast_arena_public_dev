@@ -25,7 +25,35 @@ class InterviewStartResponse(BaseModel):
     system_instruction: str
     tools: list[dict]
     resume_text: str
+    # The round agenda, shown to the candidate before they join so the
+    # interview's shape is never a surprise mid-session.
+    agenda: list[dict] = Field(default_factory=list)
     expires_at: datetime
+
+
+class InterviewRoundResponse(BaseModel):
+    """One exercise round's question, stripped of anything that would give
+    the answer away. See catalogue.public_question."""
+    index: int
+    minutes: int
+    question: dict
+
+
+class InterviewRoundResult(BaseModel):
+    """
+    What the candidate is told after submitting.
+
+    Deliberately excludes the review's `interviewer_notes` -- that is
+    ammunition for the debrief, and showing it would let them prepare for
+    the exact question coming next.
+    """
+    index: int
+    score: int
+    strengths: list[str]
+    problems: list[str]
+    mcq_detail: Optional[list[dict]] = None
+    next_round_kind: Optional[str] = None
+    next_round_index: Optional[int] = None
 
 
 class InterviewTranscriptAck(BaseModel):

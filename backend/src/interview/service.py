@@ -143,6 +143,86 @@ async def set_transcript_blob_path(db: AsyncSession, interview: InterviewSession
     return interview
 
 
+async def set_plan(db: AsyncSession, interview: InterviewSessions, plan: Dict[str, Any]) -> InterviewSessions:
+    interview.plan = plan
+    interview.current_round = 0
+    interview.updated_at = datetime.datetime.utcnow()
+    try:
+        await db.commit()
+        await db.refresh(interview)
+    except Exception:
+        await db.rollback()
+        raise
+    return interview
+
+
+async def record_round_result(
+    db: AsyncSession, interview: InterviewSessions, result: Dict[str, Any]
+) -> InterviewSessions:
+    """
+    Appends one exercise result and advances the round pointer.
+
+    The pointer lives here rather than on the client so a submission
+    cannot be replayed for a second grading, and a client cannot jump
+    ahead to a round it prefers. Re-assigned rather than mutated in place:
+    SQLAlchemy does not reliably detect in-place mutation of a JSONB list.
+    """
+    interview.round_results = [*(interview.round_results or []), result]
+    interview.current_round = (interview.current_round or 0) + 1
+    interview.updated_at = datetime.datetime.utcnow()
+    try:
+        await db.commit()
+        await db.refresh(interview)
+    except Exception:
+        await db.rollback()
+        raise
+    return interview
+
+
+def score_mcq(question: Dict[str, Any], answers: List[int]) -> Dict[str, Any]:
+    """
+    Auto-scores an MCQ round. No model in the loop: the answer key is right
+    here, so grading is deterministic, instant and free.
+
+    Unanswered questions score zero rather than raising -- a candidate who
+    ran out of time still gets a graded round.
+    """
+    questions = question.get("questions", [])
+    correct = 0
+    detail = []
+    for index, q in enumerate(questions):
+        given = answers[index] if index < len(answers) else None
+        hit = given == q["answer"]
+        correct += 1 if hit else 0
+        detail.append(
+            {
+                "prompt": q["prompt"],
+                "given": given,
+                "answer": q["answer"],
+                "correct": hit,
+                "why": q.get("why", ""),
+            }
+        )
+
+    total = len(questions) or 1
+    return {
+        "correct": correct == total,
+        "complexity": "n/a",
+        "strengths": [f"{correct} of {total} correct."],
+        "problems": [f"Got wrong: {d['prompt'][:70]}" for d in detail if not d["correct"]] or [],
+        "interviewer_notes": (
+            f"Scored {correct}/{total}. Press on: "
+            + "; ".join(d["prompt"][:60] for d in detail if not d["correct"])
+            if correct < total
+            else f"Scored {correct}/{total} -- clean sweep, so push somewhere harder."
+        ),
+        # Map to the same 1-10 band every other round uses, so blending
+        # later does not have to special-case MCQ.
+        "score": max(1, round(1 + 9 * (correct / total))),
+        "detail": detail,
+    }
+
+
 async def mark_interview_abandoned(db: AsyncSession, interview: InterviewSessions) -> InterviewSessions:
     """
     For a session that produced no candidate speech at all -- joined and
