@@ -5,13 +5,24 @@
 // there is exactly one chance to carry it across the navigation. It also
 // must not go in the URL, where it would land in history and server logs.
 //
-// sessionStorage (not localStorage) so it dies with the tab, and the entry
-// is consumed on read -- a stale token left lying around is just a
-// confusing error on the next visit.
+// sessionStorage (not localStorage) so it dies with the tab.
 
 import type { InterviewStartResponse } from "./interview-api";
 
 const KEY_PREFIX = "interview-start:";
+
+// Payloads already taken out of sessionStorage during this page's life.
+//
+// This exists because the read is destructive AND is made from an effect,
+// and React double-invokes effects in development. The first call consumed
+// the entry and the second got nothing back, so every interview opened
+// straight into "this interview room has closed" -- a bug that only
+// appeared in dev, which is exactly where the feature gets used most.
+//
+// Caching makes the read idempotent for as long as the module is alive.
+// A real reload re-evaluates the module AND finds sessionStorage already
+// emptied, so a genuinely stale room still reports itself closed.
+const taken = new Map<string, InterviewStartResponse>();
 
 export function stashInterviewStart(start: InterviewStartResponse): void {
   try {
@@ -23,11 +34,16 @@ export function stashInterviewStart(start: InterviewStartResponse): void {
 }
 
 export function takeInterviewStart(interviewId: string): InterviewStartResponse | null {
+  const cached = taken.get(interviewId);
+  if (cached) return cached;
+
   try {
     const raw = sessionStorage.getItem(KEY_PREFIX + interviewId);
     if (!raw) return null;
     sessionStorage.removeItem(KEY_PREFIX + interviewId);
-    return JSON.parse(raw) as InterviewStartResponse;
+    const parsed = JSON.parse(raw) as InterviewStartResponse;
+    taken.set(interviewId, parsed);
+    return parsed;
   } catch {
     return null;
   }
