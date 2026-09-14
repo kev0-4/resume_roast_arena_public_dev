@@ -7,12 +7,21 @@
 import { GoogleGenAI, Modality, ThinkingLevel, type Session } from "@google/genai";
 import { MIC_MIME_TYPE } from "./live-audio";
 
+/** A tool the interviewer invoked. See backend/src/interview/tools.py. */
+export interface LiveToolCall {
+  id?: string;
+  name?: string;
+  args?: Record<string, unknown>;
+}
+
 export interface LiveSessionCallbacks {
   onAudio: (base64Pcm: string) => void;
   /** A transcript fragment. `speaker` says whose voice it was. */
   onTranscript: (speaker: "interviewer" | "candidate", text: string, isFinal: boolean) => void;
   /** User talked over the interviewer -- drop queued audio immediately. */
   onInterrupted: () => void;
+  /** The interviewer chose to end the session or skip a question. */
+  onToolCall: (calls: LiveToolCall[]) => void;
   onOpen: () => void;
   onClose: (reason: string) => void;
   onError: (message: string) => void;
@@ -25,9 +34,11 @@ export class LiveInterviewSession {
     token: string;
     model: string;
     systemInstruction: string;
+    /** Passed straight through from the server; see tools.py. */
+    tools: unknown[];
     callbacks: LiveSessionCallbacks;
   }): Promise<void> {
-    const { token, model, systemInstruction, callbacks } = opts;
+    const { token, model, systemInstruction, tools, callbacks } = opts;
 
     // apiVersion v1alpha is REQUIRED for ephemeral tokens -- the SDK warns
     // about this explicitly and otherwise builds the wrong WebSocket path.
@@ -51,10 +62,21 @@ export class LiveInterviewSession {
         // gemini-3.1-flash-live-preview -- Google's reference says to omit
         // them, and sending them errors the session.
         thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+        // Sent for parity with what's pinned into the token. The token's
+        // copy is the authoritative one.
+        tools: tools as never,
       },
       callbacks: {
         onopen: () => callbacks.onOpen(),
         onmessage: (message) => {
+          // Tool calls arrive as their own top-level message, NOT inside
+          // serverContent -- confirmed by dumping the raw stream. Handling
+          // it after an early `return` on serverContent would silently
+          // swallow every one of them.
+          if (message.toolCall?.functionCalls?.length) {
+            callbacks.onToolCall(message.toolCall.functionCalls as LiveToolCall[]);
+          }
+
           const content = message.serverContent;
           if (!content) return;
 
@@ -105,6 +127,18 @@ export class LiveInterviewSession {
     this.session?.sendClientContent({
       turns: [{ role: "user", parts: [{ text: "I'm here and ready. Please begin the interview." }] }],
       turnComplete: true,
+    });
+  }
+
+  /**
+   * Acknowledges a tool call. Required for skip_question: the model waits
+   * for the response before continuing, so without this the interview
+   * stalls in silence right after agreeing to move on -- the exact moment
+   * the candidate is least forgiving of dead air.
+   */
+  respondToTool(calls: LiveToolCall[], response: Record<string, unknown>): void {
+    this.session?.sendToolResponse({
+      functionResponses: calls.map((call) => ({ id: call.id, name: call.name, response })),
     });
   }
 

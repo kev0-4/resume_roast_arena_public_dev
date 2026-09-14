@@ -122,6 +122,9 @@ def _patch_gemini(monkeypatch, *, score=7):
 
     async def fake_generate_score(prompt):
         calls["score"] += 1
+        # Captured so tests can assert what scoring was actually TOLD about
+        # skips and early endings -- that's the negative marking.
+        calls["scoring_prompt"] = prompt
         return (
             InterviewScoreResponse(
                 score=score, strengths=["Specific."], weaknesses=["Vague on scale."], next_steps=["Quantify."]
@@ -211,6 +214,17 @@ class TestStartInterview:
         assert body["token"] == FAKE_TOKEN
         assert body["model"]
         assert body["expires_at"]
+
+        # The interviewer needs the authority to end the session and to
+        # move past a question; both are tools, so they must reach the client.
+        tool_names = {fn["name"] for tool in body["tools"] for fn in tool["function_declarations"]}
+        assert tool_names == {"end_interview", "skip_question"}
+
+        # The reference pane shows the resume, and must NOT leak the roast --
+        # that would name every weak spot before it's asked about.
+        assert "caching layer" in body["resume_text"]
+        assert "Competent but forgettable." not in body["resume_text"]
+
         # The instruction must carry the interview context, because the
         # browser never gets to assemble it itself.
         assert "caching layer" in body["system_instruction"]
@@ -500,6 +514,66 @@ class TestCompleteInterview:
         with TestClient(h["app"]) as client:
             resp = client.post(f"/api/v1/interview/{h['interview_id']}/complete", json={})
         assert resp.status_code == 404
+
+    def test_skipped_questions_reach_the_scorer(self, monkeypatch):
+        h = self._setup(monkeypatch, "skips")
+
+        with TestClient(h["app"]) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION})
+            resp = client.post(
+                f"/api/v1/interview/{h['interview_id']}/complete",
+                json={"skipped_questions": 3},
+            )
+
+        assert resp.status_code == 200
+        prompt = h["calls"]["scoring_prompt"]
+        assert "declined to answer 3 questions" in prompt
+        assert "weigh heavily against the score" in prompt
+
+    def test_no_conduct_block_when_nothing_went_wrong(self, monkeypatch):
+        h = self._setup(monkeypatch, "clean")
+
+        with TestClient(h["app"]) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION})
+            client.post(f"/api/v1/interview/{h['interview_id']}/complete", json={"skipped_questions": 0})
+
+        assert "HOW THE CANDIDATE CONDUCTED THEMSELVES" not in h["calls"]["scoring_prompt"]
+
+    def test_time_wasting_end_is_still_scored_and_reaches_the_leaderboard(self, monkeypatch):
+        # The product decision: being thrown out produces a genuinely bad
+        # score rather than a free escape from a bad interview.
+        h = self._setup(monkeypatch, "wasted")
+
+        with TestClient(h["app"]) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION})
+            resp = client.post(
+                f"/api/v1/interview/{h['interview_id']}/complete",
+                json={
+                    "skipped_questions": 0,
+                    "ended_early": {"reason": "Kept asking about lasagna.", "category": "TIME_WASTING"},
+                },
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == InterviewStatusEnum.COMPLETED.value
+        prompt = h["calls"]["scoring_prompt"]
+        assert "ENDED this interview early for time-wasting" in prompt
+        assert "Kept asking about lasagna." in prompt
+
+    def test_complete_category_is_not_treated_as_a_negative(self, monkeypatch):
+        h = self._setup(monkeypatch, "ranitscourse")
+
+        with TestClient(h["app"]) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION})
+            client.post(
+                f"/api/v1/interview/{h['interview_id']}/complete",
+                json={"ended_early": {"reason": "Covered enough ground.", "category": "COMPLETE"}},
+            )
+
+        prompt = h["calls"]["scoring_prompt"]
+        assert "is NOT itself a negative" in prompt
+        assert "time-wasting" not in prompt
 
 
 class TestGetInterview:

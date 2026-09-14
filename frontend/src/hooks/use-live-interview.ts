@@ -38,6 +38,10 @@ export interface TranscriptLine {
 /** How often finalised transcript lines are pushed to our backend. */
 const FLUSH_INTERVAL_MS = 5000;
 
+/** Cap on waiting for a closing line, so a stuck queue can't hang the room. */
+const MAX_DRAIN_WAIT_MS = 12000;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export function useLiveInterview(start: InterviewStartResponse | null, getIdToken: () => Promise<string | null>) {
   const [phase, setPhase] = useState<InterviewPhase>("greenroom");
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +53,10 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
   const [muted, setMuted] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const [result, setResult] = useState<InterviewScoreResult | null>(null);
+  /** Set when the INTERVIEWER ended the session rather than the candidate. */
+  const [endedByInterviewer, setEndedByInterviewer] = useState<{ reason: string; category: string } | null>(null);
+  /** Questions the candidate declined. Counts against the score. */
+  const [skippedCount, setSkippedCount] = useState(0);
   /** Time from "connect" to the interviewer's first audio. The entire
    *  justification for this rebuild, so it is measured, not assumed. */
   const [firstAudioMs, setFirstAudioMs] = useState<number | null>(null);
@@ -62,6 +70,12 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
   // Transcript chunks that have been finalised but not yet sent upstream.
   const pendingRef = useRef<TranscriptChunk[]>([]);
   const seqRef = useRef(0);
+  // Mirrored in refs because end() is called from socket callbacks that
+  // captured an older render, and these must reach /complete accurately --
+  // they are the negative marking.
+  const skippedRef = useRef(0);
+  const endedByInterviewerRef = useRef<{ reason: string; category: string } | null>(null);
+  const speakingRef = useRef(false);
   // Guards the end sequence: clock expiry, socket close and the button can
   // all fire at once, and scoring must only ever run once.
   const endingRef = useRef(false);
@@ -103,6 +117,21 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
     });
   }, []);
 
+  /**
+   * Waits for the interviewer to stop talking, bounded.
+   *
+   * The initial pause exists because the closing line usually hasn't
+   * STARTED playing when the tool call lands -- polling immediately would
+   * see silence, conclude it had finished, and cut the line off.
+   */
+  const waitForPlaybackToDrain = useCallback(async () => {
+    const startedAt = performance.now();
+    await sleep(700);
+    while (speakingRef.current && performance.now() - startedAt < MAX_DRAIN_WAIT_MS) {
+      await sleep(150);
+    }
+  }, []);
+
   const teardown = useCallback(async () => {
     sessionRef.current?.close();
     sessionRef.current = null;
@@ -129,7 +158,12 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
         return;
       }
       if (!start) return;
-      setResult(await completeInterview(start.interview_id, idToken));
+      setResult(
+        await completeInterview(start.interview_id, idToken, {
+          skipped_questions: skippedRef.current,
+          ended_early: endedByInterviewerRef.current ?? undefined,
+        }),
+      );
       setPhase("done");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not score the interview.");
@@ -151,7 +185,10 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
     connectStartRef.current = performance.now();
 
     try {
-      const player = new PcmPlayer(setSpeaking);
+      const player = new PcmPlayer((isSpeaking) => {
+        speakingRef.current = isSpeaking;
+        setSpeaking(isSpeaking);
+      });
       await player.start();
       playerRef.current = player;
 
@@ -162,6 +199,7 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
         token: start.token,
         model: start.model,
         systemInstruction: start.system_instruction,
+        tools: start.tools,
         callbacks: {
           onOpen: () => setPhase("live"),
           onAudio: (b64) => {
@@ -182,6 +220,33 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
           // Barge-in: the user talked over the interviewer. Drop queued audio
           // so the voice cuts mid-word like a real interruption.
           onInterrupted: () => playerRef.current?.clear(),
+          onToolCall: (calls) => {
+            for (const call of calls) {
+              if (call.name === "end_interview") {
+                const ended = {
+                  reason: String(call.args?.reason ?? ""),
+                  category: String(call.args?.category ?? "COMPLETE"),
+                };
+                endedByInterviewerRef.current = ended;
+                setEndedByInterviewer(ended);
+                // Let the closing line finish before tearing the room down.
+                // Verified against the real API that the tool call arrives
+                // BEFORE the closing line has played, so ending immediately
+                // would cut the interviewer off mid-sentence and read as a
+                // crash rather than a decision it made.
+                void (async () => {
+                  await waitForPlaybackToDrain();
+                  void endRef.current();
+                })();
+              } else if (call.name === "skip_question") {
+                skippedRef.current += 1;
+                setSkippedCount(skippedRef.current);
+              }
+            }
+            // Must acknowledge, or the model waits on us and the room goes
+            // silent at exactly the wrong moment.
+            sessionRef.current?.respondToTool(calls, { ok: true });
+          },
           onError: (message) => {
             setError(message);
             setPhase("error");
@@ -213,7 +278,7 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
       setPhase("error");
       await teardown();
     }
-  }, [start, appendFragment, teardown]);
+  }, [start, appendFragment, teardown, waitForPlaybackToDrain]);
 
   const toggleMute = useCallback(() => {
     setMuted((prev) => {
@@ -268,6 +333,8 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
     secondsLeft,
     result,
     firstAudioMs,
+    endedByInterviewer,
+    skippedCount,
     connect,
     toggleMute,
     end,

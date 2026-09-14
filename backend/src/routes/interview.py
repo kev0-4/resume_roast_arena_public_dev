@@ -53,9 +53,11 @@ from ..interview import service as interview_service
 from ..interview import prompt_builder as interview_prompts
 from ..interview import llm_client as interview_llm
 from ..interview import validator as interview_validator
+from ..interview.tools import INTERVIEW_TOOLS
 from ..schemas.interview_schemas import (
     InterviewStartResponse,
     InterviewTranscriptAck,
+    InterviewCompleteRequest,
     InterviewScoreResult,
     InterviewDetailResponse,
     TranscriptEntry,
@@ -172,6 +174,7 @@ async def start_interview(
     anonymized, roast = await _load_resume_context(resume_session.id)
     system_context = interview_prompts.build_interview_system_context(anonymized, roast, body.job_description)
     system_instruction = interview_prompts.build_live_system_instruction(system_context)
+    resume_text = interview_prompts.build_resume_display_text(anonymized)
 
     # Minted before the DB row exists: if this fails there is nothing to
     # clean up, and the user gets a 503 rather than an orphaned interview
@@ -191,6 +194,8 @@ async def start_interview(
         token=token,
         model=GEMINI_LIVE_MODEL,
         system_instruction=system_instruction,
+        tools=INTERVIEW_TOOLS,
+        resume_text=resume_text,
         expires_at=expires_at,
     )
 
@@ -277,6 +282,7 @@ async def post_interview_transcript(
 @interview_router.post("/interview/{interview_id}/complete", response_model=InterviewScoreResult)
 async def complete_interview(
     interview_id: str,
+    body: InterviewCompleteRequest = InterviewCompleteRequest(),
     db: AsyncSession = Depends(get_db_sqlalchemy),
     curr_user: Users = Depends(get_current_user),
 ):
@@ -284,9 +290,14 @@ async def complete_interview(
     Ends the interview and scores it.
 
     Idempotent by design: the browser calls this from several paths that
-    can race (the end button, the 10-minute expiry, the socket closing), so
-    a completed interview returns its existing score rather than paying for
-    a second scoring call.
+    can race (the end button, the 10-minute expiry, the socket closing, and
+    now the interviewer's own end_interview tool call), so a completed
+    interview returns its existing score rather than paying for a second
+    scoring call.
+
+    An interview the INTERVIEWER ended still gets scored normally, and
+    still reaches the leaderboard. Wasting the interviewer's time produces
+    a genuinely bad score rather than a free escape from one.
     """
     interview = await _get_owned_interview(interview_id, curr_user, db)
 
@@ -321,7 +332,12 @@ async def complete_interview(
 
     anonymized, roast = await _load_resume_context(interview.resume_session_id)
     system_context = interview_prompts.build_interview_system_context(anonymized, roast, interview.job_description)
-    scoring_prompt = interview_prompts.build_scoring_prompt(system_context, utterances)
+    scoring_prompt = interview_prompts.build_scoring_prompt(
+        system_context,
+        utterances,
+        skipped_questions=body.skipped_questions,
+        ended_early=body.ended_early.model_dump() if body.ended_early else None,
+    )
 
     async with _gemini_call_guard():
         raw_score, _usage, _model = await interview_llm.generate_score(scoring_prompt)

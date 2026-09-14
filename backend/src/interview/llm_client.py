@@ -34,6 +34,7 @@ from ..config import (
     INTERVIEW_TOKEN_NEW_SESSION_SECONDS,
 )
 from .schemas import InterviewScoreResponse
+from .tools import INTERVIEW_TOOLS
 
 _MAX_OUTPUT_TOKENS = 1024
 
@@ -104,6 +105,11 @@ async def create_ephemeral_token(system_instruction: str) -> Tuple[str, datetime
                     system_instruction=system_instruction,
                     input_audio_transcription=genai.types.AudioTranscriptionConfig(),
                     output_audio_transcription=genai.types.AudioTranscriptionConfig(),
+                    # Pinned here as well as sent by the client, because the
+                    # constraints config is the authoritative one -- tools
+                    # declared only client-side would not be honoured.
+                    # Verified live: the model does call end_interview.
+                    tools=INTERVIEW_TOOLS,
                 ),
             ),
         )

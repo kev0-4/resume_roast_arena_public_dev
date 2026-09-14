@@ -17,6 +17,7 @@ import { takeInterviewStart } from "@/lib/interview-handoff";
 import type { InterviewStartResponse } from "@/lib/interview-api";
 import { InterviewerPresence } from "@/components/interview/interviewer-presence";
 import { TranscriptPane } from "@/components/interview/transcript-pane";
+import { ResumePane } from "@/components/interview/resume-pane";
 import { ResultsSummary } from "@/components/interview/results-summary";
 
 function formatClock(seconds: number): string {
@@ -100,8 +101,15 @@ export default function InterviewRoomPage({ params }: { params: Promise<{ interv
         <div className="flex flex-col items-center gap-4 py-24 text-center">
           <Loader2 size={32} className="animate-spin text-brand-lime" />
           <p className="font-display text-2xl uppercase tracking-tight text-white">
-            {live.phase === "ending" ? "Wrapping up" : "Scoring your answers"}
+            {live.endedByInterviewer ? "The interviewer ended it" : live.phase === "ending" ? "Wrapping up" : "Scoring your answers"}
           </p>
+          {/* Attribute the ending honestly. Being cut off without being told
+              why reads as a crash rather than a decision the interviewer made. */}
+          {live.endedByInterviewer?.reason ? (
+            <p className="max-w-sm font-mono text-xs italic text-brand-lime/80">
+              &ldquo;{live.endedByInterviewer.reason}&rdquo;
+            </p>
+          ) : null}
           <p className="max-w-sm font-mono text-xs text-white/50">
             Reading back everything you said and grading it against the job description.
           </p>
@@ -119,7 +127,7 @@ export default function InterviewRoomPage({ params }: { params: Promise<{ interv
       <RoomShell>
         <CenteredCard
           title="Ready when you are"
-          body="Put headphones on -- without them the interviewer hears itself through your mic and talks over its own questions. It speaks first, so just answer out loud. You can cut it off mid-sentence; it'll stop like a real person."
+          body="Put headphones on -- without them the interviewer hears itself through your mic and talks over its own questions. It speaks first, so just answer out loud, and you can cut it off mid-sentence. If you're stuck you can ask to move on, though it'll push back once and skipping counts against your score. It can also end the interview early if you waste its time."
           onAction={() => void live.connect()}
           actionLabel="Join the interview"
         />
@@ -156,6 +164,18 @@ export default function InterviewRoomPage({ params }: { params: Promise<{ interv
               </span>
             </div>
           ) : null}
+
+          {/* Visible running cost of asking to move on, so the penalty is
+              never a surprise that only shows up in the final score. */}
+          {live.skippedCount > 0 ? (
+            <div className="absolute left-4 top-4 rounded-full border-2 border-black bg-red-500 px-3 py-1 shadow-[3px_3px_0_#000]">
+              <span className="font-mono text-[10px] font-black uppercase tracking-wide text-white">
+                {live.skippedCount} skipped
+              </span>
+            </div>
+          ) : null}
+
+          {!connecting ? <ResumePane resumeText={start.resume_text} /> : null}
         </div>
 
         {/* Transcript rail */}

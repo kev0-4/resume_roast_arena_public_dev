@@ -17,8 +17,20 @@ export interface InterviewStartResponse {
   /** Persona + resume + roast + JD context, built server-side and passed
    *  straight through as the Live session's systemInstruction. */
   system_instruction: string;
+  /** Tool declarations (end_interview, skip_question), passed through to
+   *  the connect config. The authoritative copy is pinned in the token. */
+  tools: unknown[];
+  /** The anonymized resume, for the in-room reference pane. Never the
+   *  roast -- that would hand over the list of weak spots in advance. */
+  resume_text: string;
   /** ISO8601 -- when the session must end. Drives the countdown. */
   expires_at: string;
+}
+
+/** Reported at /complete, from the interviewer's own tool calls. */
+export interface InterviewConduct {
+  skipped_questions: number;
+  ended_early?: { reason: string; category: string };
 }
 
 export type TranscriptSpeaker = "interviewer" | "candidate";
@@ -145,11 +157,12 @@ export async function postTranscriptChunks(
 export async function completeInterview(
   interviewId: string,
   idToken: string,
+  conduct: InterviewConduct = { skipped_questions: 0 },
 ): Promise<InterviewScoreResult> {
   const resp = await fetch(`${API_BASE_URL}/api/v1/interview/${interviewId}/complete`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
-    body: JSON.stringify({}),
+    body: JSON.stringify(conduct),
   });
   if (!resp.ok) throw await errorFromResponse(resp, "Could not score the interview");
   return resp.json();
