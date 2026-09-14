@@ -7,7 +7,7 @@ import { ArrowRight, FileText } from "lucide-react";
 import { Navbar } from "@/components/site/navbar";
 import { stackedShadow } from "@/lib/text-shadow";
 import { useAuth } from "@/lib/auth-context";
-import { ApiError, startInterview } from "@/lib/interview-api";
+import { ApiError, formatRetryAfter, startInterview } from "@/lib/interview-api";
 import { stashInterviewStart } from "@/lib/interview-handoff";
 import { getMySessions, type MySession } from "@/lib/api";
 
@@ -104,8 +104,8 @@ function NewInterviewForm() {
       router.push(`/interview/${result.interview_id}`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 429) {
-        const wait = err.retryAfterSeconds ? ` Try again in ${Math.ceil(err.retryAfterSeconds / 60)} min.` : "";
-        setError(`You've hit the interview limit.${wait}`);
+        const wait = err.retryAfterSeconds ? ` Your next one unlocks in ${formatRetryAfter(err.retryAfterSeconds)}.` : "";
+        setError(`You get one interview a week for now.${wait}`);
       } else if (err instanceof ApiError) {
         setError(err.message);
       } else {
@@ -138,6 +138,11 @@ function NewInterviewForm() {
           <p className="mt-4 max-w-md font-mono text-xs text-white/60 md:text-sm">
             Paste the job description you&apos;re chasing. The interviewer already read your roast -- expect follow-ups on
             exactly what it called out.
+          </p>
+          {/* Stated before they write anything: finding out about the cap
+              only after composing a job description is a bad surprise. */}
+          <p className="mt-3 font-mono text-[10px] font-black uppercase tracking-wide text-brand-lime/70">
+            One interview per week &middot; make it count
           </p>
         </div>
 

@@ -100,6 +100,18 @@ export interface MyInterviewLeaderboardPosition {
   completed_at: string;
 }
 
+/** "3 days", "5 hours", "20 minutes" -- the interview cap is weekly, so a
+ *  countdown in minutes would read as five figures and tell nobody
+ *  anything. Rounds up: promising sooner than reality is worse. */
+export function formatRetryAfter(seconds: number): string {
+  const days = Math.ceil(seconds / 86400);
+  if (seconds >= 86400) return `${days} day${days === 1 ? "" : "s"}`;
+  const hours = Math.ceil(seconds / 3600);
+  if (seconds >= 3600) return `${hours} hour${hours === 1 ? "" : "s"}`;
+  const minutes = Math.max(1, Math.ceil(seconds / 60));
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
 async function errorFromResponse(resp: Response, fallback: string): Promise<ApiError> {
   if (resp.status === 429) {
     const retryAfter = resp.headers.get("Retry-After");

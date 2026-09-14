@@ -70,8 +70,24 @@ INGEST_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("INGEST_RATE_LIMIT_WINDOW_SECON
 # limit any more because there are no turns -- a live session's cost is
 # bounded by the token's own expiry, so capping how many sessions a user
 # can START is the only lever that matters.
-INTERVIEW_START_RATE_LIMIT_MAX = int(os.getenv("INTERVIEW_START_RATE_LIMIT_MAX", "3"))
-INTERVIEW_START_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("INTERVIEW_START_RATE_LIMIT_WINDOW_SECONDS", "86400"))
+#
+# One per week while the feature is free and unproven: a Live session is
+# by far the most expensive thing this app does per user. This is a
+# placeholder for entitlements, not a permanent design -- when a paid tier
+# exists, the cap belongs on the account's plan rather than in config.
+INTERVIEW_START_RATE_LIMIT_MAX = int(os.getenv("INTERVIEW_START_RATE_LIMIT_MAX", "1"))
+INTERVIEW_START_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("INTERVIEW_START_RATE_LIMIT_WINDOW_SECONDS", "604800"))
+
+# Accounts exempt from the cap, comma-separated and matched case-insensitively.
+# Currently the owner's own account, so the feature stays testable without
+# waiting a week between runs. Deliberately a config value rather than a
+# hardcoded check, so it can be changed without a deploy of new code -- and
+# so it is obvious where to delete it once real entitlements exist.
+INTERVIEW_RATE_LIMIT_EXEMPT_EMAILS = frozenset(
+    email.strip().lower()
+    for email in os.getenv("INTERVIEW_RATE_LIMIT_EXEMPT_EMAILS", "kevintandon123@gmail.com").split(",")
+    if email.strip()
+)
 
 RAW_UPLOAD_TTL_HOURS = int(os.getenv("RAW_UPLOAD_TTL_HOURS", "24"))
 ANONYMOUS_ROAST_TTL_DAYS = int(os.getenv("ANONYMOUS_ROAST_TTL_DAYS", "30"))
