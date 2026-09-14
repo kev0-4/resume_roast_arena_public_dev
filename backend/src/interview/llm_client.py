@@ -22,6 +22,7 @@ ever being handed anonymized.json.
 """
 
 import datetime
+import hashlib
 from typing import Tuple
 
 from google import genai
@@ -30,7 +31,7 @@ from ..config import (
     GEMINI_API_KEY,
     GEMINI_INTERVIEW_MODEL,
     GEMINI_LIVE_MODEL,
-    GEMINI_LIVE_VOICE,
+    GEMINI_LIVE_VOICES,
     INTERVIEW_TOKEN_EXPIRE_SECONDS,
     INTERVIEW_TOKEN_NEW_SESSION_SECONDS,
 )
@@ -56,7 +57,24 @@ def _usage_from(response) -> dict:
     }
 
 
-async def create_ephemeral_token(system_instruction: str) -> Tuple[str, datetime.datetime]:
+def voice_for_interview(interview_id) -> str:
+    """
+    The voice this interview uses, derived from its id.
+
+    Deterministic on purpose. A multi-round interview mints a fresh token
+    for every voice segment, and all of them must resolve to the same
+    voice or the interviewer changes person partway through -- which is
+    exactly the bug this replaced. Deriving it from the id means no extra
+    column and no way for the segments to disagree.
+
+    md5 for spread only, never for secrecy: the voice is not a secret and
+    is audible the moment anyone joins.
+    """
+    digest = hashlib.md5(str(interview_id).encode("utf-8")).hexdigest()
+    return GEMINI_LIVE_VOICES[int(digest, 16) % len(GEMINI_LIVE_VOICES)]
+
+
+async def create_ephemeral_token(system_instruction: str, voice: str | None = None) -> Tuple[str, datetime.datetime]:
     """
     Mints a single-use Live API credential for one interview.
 
@@ -111,7 +129,7 @@ async def create_ephemeral_token(system_instruction: str) -> Tuple[str, datetime
                     speech_config=genai.types.SpeechConfig(
                         voice_config=genai.types.VoiceConfig(
                             prebuilt_voice_config=genai.types.PrebuiltVoiceConfig(
-                                voice_name=GEMINI_LIVE_VOICE
+                                voice_name=voice or GEMINI_LIVE_VOICES[0]
                             )
                         )
                     ),

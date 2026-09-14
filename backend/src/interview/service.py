@@ -97,8 +97,19 @@ def merge_into_utterances(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 async def create_interview_session(
-    db: AsyncSession, *, user_id: str | uuid.UUID, resume_session_id: str | uuid.UUID, job_description: str
+    db: AsyncSession,
+    *,
+    user_id: str | uuid.UUID,
+    resume_session_id: str | uuid.UUID,
+    job_description: str,
+    interview_id: uuid.UUID | None = None,
 ) -> InterviewSessions:
+    """
+    interview_id may be supplied by the caller so the id exists BEFORE the
+    row does. /start needs it to choose the interview's voice, which is
+    derived from the id, while still minting the token before writing
+    anything -- a mint failure then leaves nothing to clean up.
+    """
     # turn_count / max_turns are vestigial: a live conversation has no
     # turns to count, and its length is bounded by the token's expiry
     # instead. The columns are written as zeroes rather than dropped --
@@ -106,7 +117,7 @@ async def create_interview_session(
     # to take while production's automated migration path is this new.
     # Flagged for a later cleanup migration.
     interview = InterviewSessions(
-        id=uuid.uuid4(),
+        id=interview_id or uuid.uuid4(),
         user_id=user_id,
         resume_session_id=resume_session_id,
         status=InterviewStatusEnum.IN_PROGRESS.value,

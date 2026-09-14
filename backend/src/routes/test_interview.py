@@ -122,11 +122,15 @@ def _patch_gemini(monkeypatch, *, score=7, plan_rounds=None, review_score=6):
     """
     calls = {"score": 0, "token": 0, "plan": 0, "review": 0}
 
-    async def fake_create_ephemeral_token(system_instruction):
+    calls["voices"] = []
+
+    async def fake_create_ephemeral_token(system_instruction, voice=None):
         # Captured so a test can assert the interview context is pinned
-        # into the TOKEN, not merely handed to the client.
+        # into the TOKEN, not merely handed to the client -- and that every
+        # segment of one interview asks for the same voice.
         calls["token"] += 1
         calls["instruction"] = system_instruction
+        calls["voices"].append(voice)
         expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=11)
         return FAKE_TOKEN, expires_at
 
@@ -766,6 +770,47 @@ class TestRounds:
         assert "interviewer_notes" not in json.dumps(body)
         assert "Press on the empty-input case." not in json.dumps(body)
         assert body["problems"] == ["Did not handle empty input."]
+
+    def test_one_voice_for_the_whole_interview(self, monkeypatch):
+        # The interviewer must not become a different person after the
+        # coding round. Every segment mints its own token, so they have to
+        # agree on a voice without anything being stored.
+        h = self._setup(monkeypatch, "onevoice", CODE_ROUND_PLAN)
+        app = h["app"]
+
+        with TestClient(app) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/advance", json={})
+            client.post(
+                f"/api/v1/interview/{h['interview_id']}/round/1/submit",
+                json={"answer": "def merge_intervals(x): return x", "language": "python"},
+            )
+            client.post(f"/api/v1/interview/{h['interview_id']}/voice-token", json={})
+
+        voices = h["calls"]["voices"]
+        assert len(voices) >= 2, "expected a token at /start and another for the debrief"
+        assert all(v == voices[0] for v in voices), f"voice changed mid-interview: {voices}"
+        assert voices[0], "a voice must actually be chosen, not left to the API default"
+
+    def test_different_interviews_get_different_voices(self, monkeypatch):
+        # Variety across interviews is the point of deriving it rather than
+        # pinning one globally. Sampled over many ids so this cannot pass by
+        # luck on a single collision.
+        from src.interview.llm_client import voice_for_interview
+        from src.config import GEMINI_LIVE_VOICES
+
+        picked = {voice_for_interview(uuid.uuid4()) for _ in range(300)}
+        assert len(picked) > 1, "every interview drew the same voice"
+        assert picked <= set(GEMINI_LIVE_VOICES)
+        # A hash spread over 300 draws should reach most of a 20-voice list.
+        assert len(picked) >= len(GEMINI_LIVE_VOICES) // 2
+
+    def test_the_same_interview_always_resolves_to_one_voice(self, monkeypatch):
+        from src.interview.llm_client import voice_for_interview
+
+        interview_id = uuid.uuid4()
+        assert len({voice_for_interview(interview_id) for _ in range(20)}) == 1
+        # str and UUID forms must agree -- routes pass both.
+        assert voice_for_interview(interview_id) == voice_for_interview(str(interview_id))
 
     def test_voice_token_reseeds_with_the_submission_and_review(self, monkeypatch):
         h = self._setup(monkeypatch, "reseed", CODE_ROUND_PLAN)

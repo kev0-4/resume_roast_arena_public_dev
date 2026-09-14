@@ -196,17 +196,24 @@ async def start_interview(
         )
         plan = interview_planner.conversation_only_plan()
 
-    # Minted before the DB row exists: if this fails there is nothing to
-    # clean up, and the user gets a 503 rather than an orphaned interview
-    # they can never connect to.
+    # The id is generated here rather than by the DB so the voice -- which
+    # is derived from it -- is known before the token is minted, while the
+    # mint still happens before any row is written. A mint failure then
+    # leaves nothing to clean up and the user gets a 503 rather than an
+    # orphaned interview they can never connect to.
+    interview_id = uuid.uuid4()
+
     async with _gemini_call_guard():
-        token, expires_at = await interview_llm.create_ephemeral_token(system_instruction)
+        token, expires_at = await interview_llm.create_ephemeral_token(
+            system_instruction, interview_llm.voice_for_interview(interview_id)
+        )
 
     interview = await interview_service.create_interview_session(
         db=db,
         user_id=curr_user.id,
         resume_session_id=resume_session.id,
         job_description=body.job_description,
+        interview_id=interview_id,
     )
     interview = await interview_service.set_plan(db, interview, plan.model_dump())
 
@@ -545,8 +552,12 @@ async def mint_voice_token(
                 utterances, entry, last.get("submission", ""), last.get("review")
             )
 
+    # Same voice as every other segment of this interview -- it is derived
+    # from the id, so the debrief cannot come back as a different person.
     async with _gemini_call_guard():
-        token, expires_at = await interview_llm.create_ephemeral_token(instruction)
+        token, expires_at = await interview_llm.create_ephemeral_token(
+            instruction, interview_llm.voice_for_interview(interview.id)
+        )
 
     return InterviewStartResponse(
         interview_id=str(interview.id),
