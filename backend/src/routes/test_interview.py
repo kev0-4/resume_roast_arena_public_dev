@@ -1,15 +1,21 @@
 """
 Tests against real Postgres + real Azurite (same philosophy as
-test_public_data.py -- no mocks for infra). The two real Gemini calls
-(llm_client, tts_client) ARE monkeypatched here, deliberately: a live
-conversational feature calling the real API on every CI run would be
-slow, cost money, and be flaky against network conditions -- this is a
-new pattern for this codebase's test suite (nothing mocks Gemini
-elsewhere), justified specifically because it lets these tests exercise
-the turn_count/max_turns/idempotency/ownership logic for real without
-depending on model output quality, which is exactly what needs to stay
-fast and free in CI. The real Gemini/TTS call shape itself was verified
-separately via a real, throwaway (uncommitted) script.
+test_public_data.py -- no mocks for infra). The two real Gemini
+interactions ARE monkeypatched here, deliberately:
+
+- create_ephemeral_token mints a real billable credential against Google.
+- generate_score costs money and its output is non-deterministic.
+
+Neither can run on every CI push, and neither is what these tests are
+about: what needs covering is ownership, status transitions, idempotency,
+de-duplication and the empty-transcript path, all of which are entirely
+ours. The real call shapes were verified separately against the live API.
+
+Note what is NOT tested here and cannot be: the interview itself. The
+conversation happens over a WebSocket between the candidate's browser and
+Gemini, so no server-side test can observe it. That gap is covered by
+manual verification with a real microphone, which is the step whose
+absence sank the previous build.
 
 `from src.routes.interview import ...` / `from src.interview import
 llm_client as interview_llm_module` (not backend.src...) -- same absolute-
@@ -24,10 +30,9 @@ codebase's tests.
 """
 
 import asyncio
-import json
+import datetime
 import uuid
 
-import pytest
 from fastapi.testclient import TestClient
 
 from backend.src.db.session import AsyncSessionLocal, engine
@@ -40,8 +45,7 @@ from backend.src import create_app
 
 from src.dependencies.auth import get_current_user
 from src.interview import llm_client as interview_llm_module
-from src.interview import tts_client as interview_tts_module
-from src.interview.schemas import InterviewTurnResponse, InterviewScoreResponse
+from src.interview.schemas import InterviewScoreResponse
 
 
 def _run(coro_fn):
@@ -100,75 +104,155 @@ class _FakeCurrUser:
         self.id = user_id
 
 
-def _patch_llm_and_tts(monkeypatch, *, is_final_turn=False):
-    async def fake_generate_opening_question(prompt):
-        return (
-            InterviewTurnResponse(
-                answer_transcript="", reaction_text="", next_question="What did you actually build?", is_final_turn=False
-            ),
-            {"input_tokens": 10, "output_tokens": 5},
-            "fake-model",
-        )
+FAKE_TOKEN = "auth_tokens/fake-ephemeral-token"
 
-    async def fake_generate_turn_response(prompt, audio_bytes, audio_mime_type):
-        return (
-            InterviewTurnResponse(
-                answer_transcript="I built a caching layer.",
-                reaction_text="Vague. What kind of cache?",
-                next_question="What eviction policy did you use?",
-                is_final_turn=is_final_turn,
-            ),
-            {"input_tokens": 20, "output_tokens": 10},
-            "fake-model",
-        )
+
+def _patch_gemini(monkeypatch, *, score=7):
+    """Replaces both real Gemini interactions. Returns a call counter so
+    tests can assert scoring is NOT paid for twice."""
+    calls = {"score": 0, "token": 0}
+
+    async def fake_create_ephemeral_token(system_instruction):
+        # Captured so a test can assert the interview context is pinned
+        # into the TOKEN, not merely handed to the client.
+        calls["token"] += 1
+        calls["instruction"] = system_instruction
+        expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=11)
+        return FAKE_TOKEN, expires_at
 
     async def fake_generate_score(prompt):
+        calls["score"] += 1
+        # Captured so tests can assert what scoring was actually TOLD about
+        # skips and early endings -- that's the negative marking.
+        calls["scoring_prompt"] = prompt
         return (
-            InterviewScoreResponse(score=7, strengths=["Specific."], weaknesses=["Vague on scale."], next_steps=["Quantify."]),
+            InterviewScoreResponse(
+                score=score, strengths=["Specific."], weaknesses=["Vague on scale."], next_steps=["Quantify."]
+            ),
             {"input_tokens": 30, "output_tokens": 15},
             "fake-model",
         )
 
-    async def fake_synthesize_speech(text, *, voice_name="Kore"):
-        return b"RIFF....WAVEfmt fake audio bytes", "audio/wav"
-
-    monkeypatch.setattr(interview_llm_module, "generate_opening_question", fake_generate_opening_question)
-    monkeypatch.setattr(interview_llm_module, "generate_turn_response", fake_generate_turn_response)
+    monkeypatch.setattr(interview_llm_module, "create_ephemeral_token", fake_create_ephemeral_token)
     monkeypatch.setattr(interview_llm_module, "generate_score", fake_generate_score)
-    monkeypatch.setattr(interview_tts_module, "synthesize_speech", fake_synthesize_speech)
+    return calls
+
+
+def _start_interview(app, user_id, resume_session_id) -> dict:
+    app.dependency_overrides[get_current_user] = lambda: _FakeCurrUser(user_id)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/interview/start",
+            json={"resume_session_id": resume_session_id, "job_description": "Backend engineer role at a startup."},
+        )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def _chunks(*pairs, start_seq=0):
+    """(speaker, text) pairs -> the wire shape the browser posts."""
+    return [
+        {
+            "seq": start_seq + i,
+            "speaker": speaker,
+            "text": text,
+            "is_final": True,
+            "at": "2026-01-01T00:00:00Z",
+        }
+        for i, (speaker, text) in enumerate(pairs)
+    ]
+
+
+A_REAL_CONVERSATION = _chunks(
+    ("interviewer", "You say you built a caching layer. What kind?"),
+    ("candidate", "Redis, read-through, in front of the checkout service."),
+    ("interviewer", "What was the hit rate?"),
+    ("candidate", "Around ninety percent after we fixed the key scheme."),
+)
 
 
 class TestStartInterview:
-    def test_success(self, monkeypatch):
-        _patch_llm_and_tts(monkeypatch)
+    def test_pins_the_instruction_into_the_token(self, monkeypatch):
+        # Regression guard for a bug found by probing the real API: minting
+        # a token whose constraints name only the model makes the server
+        # apply its own TEXT default and reject the AUDIO session at
+        # connect. The config -- and so the instruction -- has to be pinned
+        # into the token itself.
+        calls = _patch_gemini(monkeypatch)
+        holder = {}
+
+        async def setup():
+            async with AsyncSessionLocal() as db:
+                user_id = await _make_user_id(db, f"pin-{uuid.uuid4().hex[:6]}")
+                holder["user_id"] = user_id
+                holder["resume_session_id"] = await _make_done_resume_session_id(db, user_id)
+
+        _run(setup)
+
+        app = create_app()
+        body = _start_interview(app, holder["user_id"], holder["resume_session_id"])
+
+        assert calls["token"] == 1
+        assert calls["instruction"] == body["system_instruction"]
+        assert "caching layer" in calls["instruction"]
+
+    def test_returns_a_token_and_system_instruction(self, monkeypatch):
+        _patch_gemini(monkeypatch)
         holder = {}
 
         async def setup():
             async with AsyncSessionLocal() as db:
                 user_id = await _make_user_id(db, f"start-{uuid.uuid4().hex[:6]}")
-                resume_session_id = await _make_done_resume_session_id(db, user_id)
                 holder["user_id"] = user_id
-                holder["resume_session_id"] = resume_session_id
+                holder["resume_session_id"] = await _make_done_resume_session_id(db, user_id)
 
         _run(setup)
 
         app = create_app()
-        app.dependency_overrides[get_current_user] = lambda: _FakeCurrUser(holder["user_id"])
-        with TestClient(app) as client:
-            resp = client.post(
-                "/api/v1/interview/start",
-                json={"resume_session_id": holder["resume_session_id"], "job_description": "Backend engineer role at a startup."},
-            )
+        body = _start_interview(app, holder["user_id"], holder["resume_session_id"])
 
-        assert resp.status_code == 201
-        body = resp.json()
-        assert body["status"] == InterviewStatusEnum.IN_PROGRESS.value
-        assert body["turn_number"] == 0
-        assert body["question_text"] == "What did you actually build?"
-        assert body["question_audio_url"].endswith("/audio/0/prompt")
+        assert body["token"] == FAKE_TOKEN
+        assert body["model"]
+        assert body["expires_at"]
+
+        # The interviewer needs the authority to end the session and to
+        # move past a question; both are tools, so they must reach the client.
+        tool_names = {fn["name"] for tool in body["tools"] for fn in tool["function_declarations"]}
+        assert tool_names == {"end_interview", "skip_question"}
+
+        # The reference pane shows the resume, and must NOT leak the roast --
+        # that would name every weak spot before it's asked about.
+        assert "caching layer" in body["resume_text"]
+        assert "Competent but forgettable." not in body["resume_text"]
+
+        # The instruction must carry the interview context, because the
+        # browser never gets to assemble it itself.
+        assert "caching layer" in body["system_instruction"]
+        assert "Competent but forgettable." in body["system_instruction"]
+        assert "Open the interview yourself" in body["system_instruction"]
+
+    def test_never_leaks_the_real_api_key(self, monkeypatch):
+        _patch_gemini(monkeypatch)
+        holder = {}
+
+        async def setup():
+            async with AsyncSessionLocal() as db:
+                user_id = await _make_user_id(db, f"leak-{uuid.uuid4().hex[:6]}")
+                holder["user_id"] = user_id
+                holder["resume_session_id"] = await _make_done_resume_session_id(db, user_id)
+
+        _run(setup)
+
+        app = create_app()
+        body = _start_interview(app, holder["user_id"], holder["resume_session_id"])
+
+        from src.config import GEMINI_API_KEY
+
+        serialized = str(body)
+        assert GEMINI_API_KEY is None or GEMINI_API_KEY not in serialized
 
     def test_404_when_resume_session_not_found(self, monkeypatch):
-        _patch_llm_and_tts(monkeypatch)
+        _patch_gemini(monkeypatch)
         holder = {}
 
         async def setup():
@@ -187,7 +271,7 @@ class TestStartInterview:
         assert resp.status_code == 404
 
     def test_403_when_not_owner(self, monkeypatch):
-        _patch_llm_and_tts(monkeypatch)
+        _patch_gemini(monkeypatch)
         holder = {}
 
         async def setup():
@@ -209,7 +293,7 @@ class TestStartInterview:
         assert resp.status_code == 403
 
     def test_409_when_resume_not_done(self, monkeypatch):
-        _patch_llm_and_tts(monkeypatch)
+        _patch_gemini(monkeypatch)
         holder = {}
 
         async def setup():
@@ -231,7 +315,7 @@ class TestStartInterview:
         assert resp.status_code == 409
 
     def test_422_when_job_description_too_short(self, monkeypatch):
-        _patch_llm_and_tts(monkeypatch)
+        _patch_gemini(monkeypatch)
         holder = {}
 
         async def setup():
@@ -252,189 +336,279 @@ class TestStartInterview:
         assert resp.status_code == 422
 
 
-def _start_interview(app, user_id, resume_session_id) -> dict:
-    app.dependency_overrides[get_current_user] = lambda: _FakeCurrUser(user_id)
-    with TestClient(app) as client:
-        resp = client.post(
-            "/api/v1/interview/start",
-            json={"resume_session_id": resume_session_id, "job_description": "Backend engineer role at a startup."},
-        )
-    assert resp.status_code == 201
-    return resp.json()
-
-
-class TestSubmitTurn:
-    def test_success_non_final_advances_turn_count(self, monkeypatch):
-        _patch_llm_and_tts(monkeypatch, is_final_turn=False)
+class TestPostTranscript:
+    def _setup(self, monkeypatch, suffix):
+        _patch_gemini(monkeypatch)
         holder = {}
 
         async def setup():
             async with AsyncSessionLocal() as db:
-                user_id = await _make_user_id(db, f"turn-{uuid.uuid4().hex[:6]}")
+                user_id = await _make_user_id(db, f"{suffix}-{uuid.uuid4().hex[:6]}")
                 holder["user_id"] = user_id
                 holder["resume_session_id"] = await _make_done_resume_session_id(db, user_id)
 
         _run(setup)
-
         app = create_app()
-        start_body = _start_interview(app, holder["user_id"], holder["resume_session_id"])
-        interview_id = start_body["interview_id"]
+        holder["app"] = app
+        holder["interview_id"] = _start_interview(app, holder["user_id"], holder["resume_session_id"])["interview_id"]
+        return holder
+
+    def test_accepts_and_accumulates_chunks(self, monkeypatch):
+        h = self._setup(monkeypatch, "tx")
+        app = h["app"]
 
         with TestClient(app) as client:
-            resp = client.post(
-                f"/api/v1/interview/{interview_id}/turn",
-                data={"turn_number": 0},
-                files={"file": ("answer.webm", b"fake audio bytes", "audio/webm")},
+            first = client.post(
+                f"/api/v1/interview/{h['interview_id']}/transcript",
+                json={"chunks": A_REAL_CONVERSATION[:2]},
+            )
+            second = client.post(
+                f"/api/v1/interview/{h['interview_id']}/transcript",
+                json={"chunks": A_REAL_CONVERSATION[2:]},
             )
 
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["is_final"] is False
-        assert body["status"] == InterviewStatusEnum.IN_PROGRESS.value
-        assert body["score"] is None
-        assert body["next_question"] == "What eviction policy did you use?"
+        assert first.status_code == 200, first.text
+        assert first.json() == {"accepted": 2, "total_chunks": 2}
+        assert second.json() == {"accepted": 2, "total_chunks": 4}
 
-    def test_success_final_turn_completes_and_scores(self, monkeypatch):
-        _patch_llm_and_tts(monkeypatch, is_final_turn=True)
-        holder = {}
-
-        async def setup():
-            async with AsyncSessionLocal() as db:
-                user_id = await _make_user_id(db, f"final-{uuid.uuid4().hex[:6]}")
-                holder["user_id"] = user_id
-                holder["resume_session_id"] = await _make_done_resume_session_id(db, user_id)
-
-        _run(setup)
-
-        app = create_app()
-        start_body = _start_interview(app, holder["user_id"], holder["resume_session_id"])
-        interview_id = start_body["interview_id"]
+    def test_replayed_batch_is_deduplicated(self, monkeypatch):
+        # The browser retries a batch it failed to deliver. The same seqs
+        # arrive twice and must not be double-recorded.
+        h = self._setup(monkeypatch, "dedupe")
+        app = h["app"]
 
         with TestClient(app) as client:
-            resp = client.post(
-                f"/api/v1/interview/{interview_id}/turn",
-                data={"turn_number": 0},
-                files={"file": ("answer.webm", b"fake audio bytes", "audio/webm")},
+            client.post(
+                f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION}
+            )
+            replay = client.post(
+                f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION}
             )
 
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["is_final"] is True
-        assert body["status"] == InterviewStatusEnum.COMPLETED.value
-        assert body["score"] == 7
-        assert body["strengths"] == ["Specific."]
+        assert replay.json() == {"accepted": 0, "total_chunks": 4}
 
     def test_404_for_non_owner(self, monkeypatch):
-        _patch_llm_and_tts(monkeypatch)
+        h = self._setup(monkeypatch, "txowner")
+        app = h["app"]
+
         holder = {}
 
-        async def setup():
+        async def make_other():
             async with AsyncSessionLocal() as db:
-                owner_id = await _make_user_id(db, f"towner-{uuid.uuid4().hex[:6]}")
-                other_id = await _make_user_id(db, f"tother-{uuid.uuid4().hex[:6]}")
-                holder["owner_id"] = owner_id
-                holder["other_id"] = other_id
-                holder["resume_session_id"] = await _make_done_resume_session_id(db, owner_id)
+                holder["other_id"] = await _make_user_id(db, f"txother-{uuid.uuid4().hex[:6]}")
 
-        _run(setup)
-
-        app = create_app()
-        start_body = _start_interview(app, holder["owner_id"], holder["resume_session_id"])
-        interview_id = start_body["interview_id"]
+        _run(make_other)
 
         app.dependency_overrides[get_current_user] = lambda: _FakeCurrUser(holder["other_id"])
         with TestClient(app) as client:
             resp = client.post(
-                f"/api/v1/interview/{interview_id}/turn",
-                data={"turn_number": 0},
-                files={"file": ("answer.webm", b"fake audio bytes", "audio/webm")},
+                f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION}
             )
         assert resp.status_code == 404
 
-    def test_409_when_turn_number_mismatch(self, monkeypatch):
-        _patch_llm_and_tts(monkeypatch)
-        holder = {}
-
-        async def setup():
-            async with AsyncSessionLocal() as db:
-                user_id = await _make_user_id(db, f"mismatch-{uuid.uuid4().hex[:6]}")
-                holder["user_id"] = user_id
-                holder["resume_session_id"] = await _make_done_resume_session_id(db, user_id)
-
-        _run(setup)
-
-        app = create_app()
-        start_body = _start_interview(app, holder["user_id"], holder["resume_session_id"])
-        interview_id = start_body["interview_id"]
+    def test_409_once_the_interview_is_complete(self, monkeypatch):
+        h = self._setup(monkeypatch, "txdone")
+        app = h["app"]
 
         with TestClient(app) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION})
+            client.post(f"/api/v1/interview/{h['interview_id']}/complete", json={})
+            late = client.post(
+                f"/api/v1/interview/{h['interview_id']}/transcript",
+                json={"chunks": _chunks(("candidate", "One more thing."), start_seq=99)},
+            )
+        assert late.status_code == 409
+
+    def test_422_on_unknown_speaker(self, monkeypatch):
+        h = self._setup(monkeypatch, "txspeaker")
+        with TestClient(h["app"]) as client:
             resp = client.post(
-                f"/api/v1/interview/{interview_id}/turn",
-                data={"turn_number": 5},  # interview.turn_count is actually 0
-                files={"file": ("answer.webm", b"fake audio bytes", "audio/webm")},
+                f"/api/v1/interview/{h['interview_id']}/transcript",
+                json={"chunks": [{"seq": 0, "speaker": "narrator", "text": "hi", "is_final": True, "at": "x"}]},
             )
-        assert resp.status_code == 409
+        assert resp.status_code == 422
 
-    def test_409_when_already_completed(self, monkeypatch):
-        _patch_llm_and_tts(monkeypatch, is_final_turn=True)
-        holder = {}
+
+class TestCompleteInterview:
+    def _setup(self, monkeypatch, suffix, *, score=7):
+        calls = _patch_gemini(monkeypatch, score=score)
+        holder = {"calls": calls}
 
         async def setup():
             async with AsyncSessionLocal() as db:
-                user_id = await _make_user_id(db, f"redo-{uuid.uuid4().hex[:6]}")
+                user_id = await _make_user_id(db, f"{suffix}-{uuid.uuid4().hex[:6]}")
                 holder["user_id"] = user_id
                 holder["resume_session_id"] = await _make_done_resume_session_id(db, user_id)
 
         _run(setup)
-
         app = create_app()
-        start_body = _start_interview(app, holder["user_id"], holder["resume_session_id"])
-        interview_id = start_body["interview_id"]
+        holder["app"] = app
+        holder["interview_id"] = _start_interview(app, holder["user_id"], holder["resume_session_id"])["interview_id"]
+        return holder
 
+    def test_scores_a_real_conversation(self, monkeypatch):
+        h = self._setup(monkeypatch, "done")
+
+        with TestClient(h["app"]) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION})
+            resp = client.post(f"/api/v1/interview/{h['interview_id']}/complete", json={})
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status"] == InterviewStatusEnum.COMPLETED.value
+        assert body["score"] == 7
+        assert body["strengths"] == ["Specific."]
+
+    def test_is_idempotent_and_does_not_pay_twice(self, monkeypatch):
+        # The end button, the countdown and the socket close can all fire
+        # at once, so this genuinely gets called more than once.
+        h = self._setup(monkeypatch, "idem")
+
+        with TestClient(h["app"]) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION})
+            first = client.post(f"/api/v1/interview/{h['interview_id']}/complete", json={})
+            second = client.post(f"/api/v1/interview/{h['interview_id']}/complete", json={})
+
+        assert first.json() == second.json()
+        assert h["calls"]["score"] == 1
+
+    def test_silent_session_is_abandoned_not_scored(self, monkeypatch):
+        # Joined and left without speaking. Grading silence would cost a
+        # Gemini call and put a meaningless score on the leaderboard.
+        h = self._setup(monkeypatch, "silent")
+
+        with TestClient(h["app"]) as client:
+            client.post(
+                f"/api/v1/interview/{h['interview_id']}/transcript",
+                json={"chunks": _chunks(("interviewer", "So, tell me what you built."))},
+            )
+            resp = client.post(f"/api/v1/interview/{h['interview_id']}/complete", json={})
+
+        assert resp.status_code == 409
+        assert h["calls"]["score"] == 0
+
+        app = h["app"]
+        app.dependency_overrides[get_current_user] = lambda: _FakeCurrUser(h["user_id"])
         with TestClient(app) as client:
-            first = client.post(
-                f"/api/v1/interview/{interview_id}/turn",
-                data={"turn_number": 0},
-                files={"file": ("answer.webm", b"fake audio bytes", "audio/webm")},
-            )
-            assert first.status_code == 200
-            assert first.json()["status"] == InterviewStatusEnum.COMPLETED.value
+            detail = client.get(f"/api/v1/interview/{h['interview_id']}")
+        assert detail.json()["status"] == InterviewStatusEnum.ABANDONED.value
 
-            second = client.post(
-                f"/api/v1/interview/{interview_id}/turn",
-                data={"turn_number": 1},
-                files={"file": ("answer.webm", b"fake audio bytes", "audio/webm")},
+    def test_completely_empty_session_is_abandoned(self, monkeypatch):
+        h = self._setup(monkeypatch, "empty")
+        with TestClient(h["app"]) as client:
+            resp = client.post(f"/api/v1/interview/{h['interview_id']}/complete", json={})
+        assert resp.status_code == 409
+        assert h["calls"]["score"] == 0
+
+    def test_404_for_non_owner(self, monkeypatch):
+        h = self._setup(monkeypatch, "cowner")
+        holder = {}
+
+        async def make_other():
+            async with AsyncSessionLocal() as db:
+                holder["other_id"] = await _make_user_id(db, f"cother-{uuid.uuid4().hex[:6]}")
+
+        _run(make_other)
+
+        h["app"].dependency_overrides[get_current_user] = lambda: _FakeCurrUser(holder["other_id"])
+        with TestClient(h["app"]) as client:
+            resp = client.post(f"/api/v1/interview/{h['interview_id']}/complete", json={})
+        assert resp.status_code == 404
+
+    def test_skipped_questions_reach_the_scorer(self, monkeypatch):
+        h = self._setup(monkeypatch, "skips")
+
+        with TestClient(h["app"]) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION})
+            resp = client.post(
+                f"/api/v1/interview/{h['interview_id']}/complete",
+                json={"skipped_questions": 3},
             )
-        assert second.status_code == 409
+
+        assert resp.status_code == 200
+        prompt = h["calls"]["scoring_prompt"]
+        assert "declined to answer 3 questions" in prompt
+        assert "weigh heavily against the score" in prompt
+
+    def test_no_conduct_block_when_nothing_went_wrong(self, monkeypatch):
+        h = self._setup(monkeypatch, "clean")
+
+        with TestClient(h["app"]) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION})
+            client.post(f"/api/v1/interview/{h['interview_id']}/complete", json={"skipped_questions": 0})
+
+        assert "HOW THE CANDIDATE CONDUCTED THEMSELVES" not in h["calls"]["scoring_prompt"]
+
+    def test_time_wasting_end_is_still_scored_and_reaches_the_leaderboard(self, monkeypatch):
+        # The product decision: being thrown out produces a genuinely bad
+        # score rather than a free escape from a bad interview.
+        h = self._setup(monkeypatch, "wasted")
+
+        with TestClient(h["app"]) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION})
+            resp = client.post(
+                f"/api/v1/interview/{h['interview_id']}/complete",
+                json={
+                    "skipped_questions": 0,
+                    "ended_early": {"reason": "Kept asking about lasagna.", "category": "TIME_WASTING"},
+                },
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == InterviewStatusEnum.COMPLETED.value
+        prompt = h["calls"]["scoring_prompt"]
+        assert "ENDED this interview early for time-wasting" in prompt
+        assert "Kept asking about lasagna." in prompt
+
+    def test_complete_category_is_not_treated_as_a_negative(self, monkeypatch):
+        h = self._setup(monkeypatch, "ranitscourse")
+
+        with TestClient(h["app"]) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION})
+            client.post(
+                f"/api/v1/interview/{h['interview_id']}/complete",
+                json={"ended_early": {"reason": "Covered enough ground.", "category": "COMPLETE"}},
+            )
+
+        prompt = h["calls"]["scoring_prompt"]
+        assert "is NOT itself a negative" in prompt
+        assert "time-wasting" not in prompt
 
 
 class TestGetInterview:
-    def test_returns_transcript_and_404_for_non_owner(self, monkeypatch):
-        _patch_llm_and_tts(monkeypatch)
+    def test_returns_merged_utterances_and_404s_for_others(self, monkeypatch):
+        _patch_gemini(monkeypatch)
         holder = {}
 
         async def setup():
             async with AsyncSessionLocal() as db:
-                owner_id = await _make_user_id(db, f"gowner-{uuid.uuid4().hex[:6]}")
-                other_id = await _make_user_id(db, f"gother-{uuid.uuid4().hex[:6]}")
-                holder["owner_id"] = owner_id
-                holder["other_id"] = other_id
-                holder["resume_session_id"] = await _make_done_resume_session_id(db, owner_id)
+                user_id = await _make_user_id(db, f"get-{uuid.uuid4().hex[:6]}")
+                holder["user_id"] = user_id
+                holder["other_id"] = await _make_user_id(db, f"getother-{uuid.uuid4().hex[:6]}")
+                holder["resume_session_id"] = await _make_done_resume_session_id(db, user_id)
 
         _run(setup)
 
         app = create_app()
-        start_body = _start_interview(app, holder["owner_id"], holder["resume_session_id"])
-        interview_id = start_body["interview_id"]
+        interview_id = _start_interview(app, holder["user_id"], holder["resume_session_id"])["interview_id"]
 
-        app.dependency_overrides[get_current_user] = lambda: _FakeCurrUser(holder["owner_id"])
+        # Fragments of one sentence, as the Live API actually emits them.
+        fragments = _chunks(
+            ("interviewer", "You say you built"),
+            ("interviewer", " a caching layer."),
+            ("candidate", "I did."),
+        )
         with TestClient(app) as client:
+            client.post(f"/api/v1/interview/{interview_id}/transcript", json={"chunks": fragments})
             resp = client.get(f"/api/v1/interview/{interview_id}")
+
         assert resp.status_code == 200
         body = resp.json()
         assert body["job_description"] == "Backend engineer role at a startup."
-        assert len(body["transcript"]) == 1
-        assert body["transcript"][0]["question_text"] == "What did you actually build?"
+        assert len(body["transcript"]) == 2
+        assert body["transcript"][0]["text"] == "You say you built a caching layer."
+        assert body["transcript"][1]["speaker"] == "candidate"
 
         app.dependency_overrides[get_current_user] = lambda: _FakeCurrUser(holder["other_id"])
         with TestClient(app) as client:
@@ -513,7 +687,7 @@ class TestEligibility:
 
 class TestInterviewLeaderboardRoutes:
     def test_leaderboard_and_my_position(self, monkeypatch):
-        _patch_llm_and_tts(monkeypatch, is_final_turn=True)
+        _patch_gemini(monkeypatch)
         holder = {}
 
         async def setup():
@@ -525,22 +699,17 @@ class TestInterviewLeaderboardRoutes:
         _run(setup)
 
         app = create_app()
-        start_body = _start_interview(app, holder["user_id"], holder["resume_session_id"])
-        interview_id = start_body["interview_id"]
+        interview_id = _start_interview(app, holder["user_id"], holder["resume_session_id"])["interview_id"]
 
         with TestClient(app) as client:
-            turn_resp = client.post(
-                f"/api/v1/interview/{interview_id}/turn",
-                data={"turn_number": 0},
-                files={"file": ("answer.webm", b"fake audio bytes", "audio/webm")},
-            )
-        assert turn_resp.json()["status"] == InterviewStatusEnum.COMPLETED.value
+            client.post(f"/api/v1/interview/{interview_id}/transcript", json={"chunks": A_REAL_CONVERSATION})
+            complete = client.post(f"/api/v1/interview/{interview_id}/complete", json={})
+        assert complete.json()["status"] == InterviewStatusEnum.COMPLETED.value
 
         with TestClient(app) as client:
             lb_resp = client.get("/interview-leaderboard?limit=100")
         assert lb_resp.status_code == 200
-        lb_body = lb_resp.json()
-        assert any(e["score"] == 7 for e in lb_body["entries"])
+        assert any(e["score"] == 7 for e in lb_resp.json()["entries"])
 
         app.dependency_overrides[get_current_user] = lambda: _FakeCurrUser(holder["user_id"])
         with TestClient(app) as client:

@@ -65,3 +65,91 @@ class TestCheckAndIncrement:
 
         allowed, _ = check_and_increment(client, key, max_requests=2, window_seconds=1)
         assert allowed is True
+
+
+class TestInterviewStartExemption:
+    """
+    The interview cap is one per week, which makes ADMIN_EMAILS the only
+    way to exercise the feature more than once in seven days. Real Redis,
+    like the rest of this file -- the point is that an admin account never
+    touches a counter at all.
+    """
+
+    class _User:
+        def __init__(self, uid, email):
+            self.id = uid
+            self.email = email
+
+    def _run(self, coro):
+        import asyncio
+
+        asyncio.run(coro)
+
+    def test_every_admin_email_is_never_limited(self, client):
+        # Loops the whole list rather than sampling one, so adding an admin
+        # without it actually working cannot pass silently.
+        from backend.src.config import ADMIN_EMAILS
+        from backend.src.dependencies.rate_limit import check_interview_start_rate_limit
+
+        assert ADMIN_EMAILS, "expected at least one configured admin"
+
+        for i, admin in enumerate(sorted(ADMIN_EMAILS)):
+            user = self._User(f"admin-{i}-{time.time()}", admin)
+
+            async def run():
+                # Far more than the weekly cap; none of these may raise.
+                for _ in range(5):
+                    await check_interview_start_rate_limit(user)
+
+            self._run(run())
+
+            # No counter was created, so a stale one can never lock an
+            # admin out later.
+            assert client.get(f"ratelimit:interview_start:user:{user.id}") is None, admin
+
+    def test_exemption_ignores_case_and_padding(self, client):
+        from backend.src.config import ADMIN_EMAILS
+        from backend.src.dependencies.rate_limit import check_interview_start_rate_limit
+
+        exempt = next(iter(ADMIN_EMAILS))
+        user = self._User(f"exempt-case-{time.time()}", f"  {exempt.upper()}  ")
+
+        async def run():
+            await check_interview_start_rate_limit(user)
+
+        self._run(run())
+        assert client.get(f"ratelimit:interview_start:user:{user.id}") is None
+
+    def test_ordinary_account_is_capped(self, client):
+        from fastapi import HTTPException
+        from backend.src.config import INTERVIEW_START_RATE_LIMIT_MAX
+        from backend.src.dependencies.rate_limit import check_interview_start_rate_limit
+
+        user = self._User(f"capped-{time.time()}", "someone.else@example.com")
+
+        async def run():
+            for _ in range(INTERVIEW_START_RATE_LIMIT_MAX):
+                await check_interview_start_rate_limit(user)
+            with pytest.raises(HTTPException) as caught:
+                await check_interview_start_rate_limit(user)
+            assert caught.value.status_code == 429
+
+        self._run(run())
+        client.delete(f"ratelimit:interview_start:user:{user.id}")
+
+    def test_user_with_no_email_is_capped_not_exempt(self, client):
+        # A null email must never be read as "matches the empty exemption".
+        from fastapi import HTTPException
+        from backend.src.config import INTERVIEW_START_RATE_LIMIT_MAX
+        from backend.src.dependencies.rate_limit import check_interview_start_rate_limit
+
+        user = self._User(f"noemail-{time.time()}", None)
+
+        async def run():
+            for _ in range(INTERVIEW_START_RATE_LIMIT_MAX):
+                await check_interview_start_rate_limit(user)
+            with pytest.raises(HTTPException):
+                await check_interview_start_rate_limit(user)
+
+        self._run(run())
+        client.delete(f"ratelimit:interview_start:user:{user.id}")

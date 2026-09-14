@@ -77,50 +77,104 @@ class TestBuildInterviewSystemContext:
         assert "None recorded." in ctx
 
 
-class TestBuildOpeningPrompt:
-    def test_contains_system_context_and_task(self):
+class TestBuildLiveSystemInstruction:
+    def test_wraps_the_shared_context(self):
         ctx = pb.build_interview_system_context(_anonymized(), _roast(), "JD text")
-        prompt = pb.build_opening_prompt(ctx)
-        assert ctx in prompt
-        assert "opening question" in prompt.lower()
+        instruction = pb.build_live_system_instruction(ctx)
+        assert ctx in instruction
 
+    def test_tells_the_model_to_speak_first(self):
+        # Without this the model waits for the candidate, the candidate
+        # waits for the model, and the interview opens in silence.
+        instruction = pb.build_live_system_instruction("CTX")
+        assert "Open the interview yourself" in instruction
 
-class TestBuildTurnPrompt:
-    def test_renders_prior_qa_pairs(self):
-        ctx = "CTX"
-        transcript = [
-            {"turn": 0, "question_text": "Tell me about X.", "answer_transcript": "I did X."},
-        ]
-        prompt = pb.build_turn_prompt(ctx, transcript)
-        assert "Q0: Tell me about X." in prompt
-        assert "A0: I did X." in prompt
-
-    def test_unanswered_turn_has_no_answer_line(self):
-        transcript = [{"turn": 0, "question_text": "Tell me about X.", "answer_transcript": None}]
-        prompt = pb.build_turn_prompt("CTX", transcript)
-        assert "Q0: Tell me about X." in prompt
-        assert "A0:" not in prompt
-
-    def test_empty_transcript_handled(self):
-        prompt = pb.build_turn_prompt("CTX", [])
-        assert "no prior turns" in prompt
+    def test_tells_the_model_it_can_be_interrupted(self):
+        instruction = pb.build_live_system_instruction("CTX")
+        assert "interrupt" in instruction.lower()
 
 
 class TestBuildScoringPrompt:
-    def test_renders_full_transcript_with_reactions(self):
-        transcript = [
-            {
-                "turn": 0,
-                "question_text": "Tell me about X.",
-                "answer_transcript": "I did X.",
-                "reaction_text": "Vague.",
-            }
+    def test_renders_speaker_tagged_utterances(self):
+        utterances = [
+            {"speaker": "interviewer", "text": "Tell me about X."},
+            {"speaker": "candidate", "text": "I did X."},
         ]
-        prompt = pb.build_scoring_prompt("CTX", transcript)
-        assert "Q0: Tell me about X." in prompt
-        assert "A0: I did X." in prompt
-        assert "Interviewer reaction: Vague." in prompt
+        prompt = pb.build_scoring_prompt("CTX", utterances)
+        assert "INTERVIEWER: Tell me about X." in prompt
+        assert "CANDIDATE: I did X." in prompt
+
+    def test_includes_the_system_context(self):
+        prompt = pb.build_scoring_prompt("CTX-MARKER", [])
+        assert "CTX-MARKER" in prompt
+
+    def test_skips_blank_utterances(self):
+        prompt = pb.build_scoring_prompt("CTX", [{"speaker": "candidate", "text": "   "}])
+        assert "CANDIDATE:" not in prompt
+
+    def test_empty_transcript_handled(self):
+        prompt = pb.build_scoring_prompt("CTX", [])
+        assert "nothing was said" in prompt
 
     def test_includes_score_range(self):
         prompt = pb.build_scoring_prompt("CTX", [])
         assert "1" in prompt and "10" in prompt
+
+    def test_one_skip_is_a_dent_not_a_disqualification(self):
+        prompt = pb.build_scoring_prompt("CTX", [], skipped_questions=1)
+        assert "declined to answer 1 question" in prompt
+        assert "not a disqualification" in prompt
+
+    def test_repeated_skips_weigh_heavily(self):
+        prompt = pb.build_scoring_prompt("CTX", [], skipped_questions=4)
+        assert "declined to answer 4 questions" in prompt
+        assert "weigh heavily against the score" in prompt
+
+    def test_clean_run_gets_no_conduct_block(self):
+        prompt = pb.build_scoring_prompt("CTX", [], skipped_questions=0)
+        assert "HOW THE CANDIDATE CONDUCTED THEMSELVES" not in prompt
+
+    def test_time_wasting_end_scores_near_the_bottom(self):
+        prompt = pb.build_scoring_prompt(
+            "CTX", [], ended_early={"reason": "Kept asking about lasagna.", "category": "TIME_WASTING"}
+        )
+        assert "near the bottom of the range" in prompt
+        assert "Kept asking about lasagna." in prompt
+
+    def test_a_complete_interview_ending_early_is_not_penalised(self):
+        prompt = pb.build_scoring_prompt(
+            "CTX", [], ended_early={"reason": "Covered enough ground.", "category": "COMPLETE"}
+        )
+        assert "is NOT itself a negative" in prompt
+
+
+class TestBuildResumeDisplayText:
+    def test_includes_resume_sections(self):
+        text = pb.build_resume_display_text(_anonymized())
+        assert "WORK EXPERIENCE" in text
+
+    def test_never_leaks_the_roast(self):
+        # The pane must not become an answer key for the questions coming.
+        text = pb.build_resume_display_text(_anonymized())
+        roast = _roast()
+        assert roast["verdict"] not in text
+        assert roast["roast"] not in text
+
+    def test_malformed_artifact_returns_empty_rather_than_raising(self):
+        # A missing artifact must not take the whole interview down.
+        assert pb.build_resume_display_text({}) == ""
+        assert pb.build_resume_display_text({"content": "not a dict"}) == ""
+
+
+class TestSkipAndEndInstructions:
+    def test_gives_the_model_an_escape_from_stonewalling(self):
+        # v1 bug: it pressed forever and never moved on, because the
+        # instruction to press had no escape hatch.
+        instruction = pb.build_live_system_instruction("CTX")
+        assert "ONCE" in instruction
+        assert "skip_question" in instruction
+
+    def test_tells_it_to_actually_call_the_tool_not_just_threaten(self):
+        instruction = pb.build_live_system_instruction("CTX")
+        assert "end_interview" in instruction
+        assert "without actually calling the tool" in instruction

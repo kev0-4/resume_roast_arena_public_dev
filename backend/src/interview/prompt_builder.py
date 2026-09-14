@@ -155,70 +155,173 @@ Flagged issues: {quality_flags_text}
 """
 
 
-def build_opening_prompt(system_context: str) -> str:
+def build_resume_display_text(anonymized: Dict[str, Any]) -> str:
+    """
+    The resume as the candidate sees it in the live room's side pane.
+
+    Deliberately the SAME anonymized text the interviewer is working from,
+    not the original upload -- partly so both sides are demonstrably
+    reading one document, and partly because the original often no longer
+    exists (raw uploads are deleted after RAW_UPLOAD_TTL_HOURS).
+
+    The roast is deliberately NOT included: it names the exact weak spots
+    the candidate is about to be challenged on, which would turn the
+    interview into an open-book test.
+    """
+    content = anonymized.get("content")
+    if not isinstance(content, dict):
+        return ""
+    blocks = content.get("blocks", {})
+    if not isinstance(blocks, dict):
+        return ""
+    return _format_resume_sections(blocks)
+
+
+def build_live_system_instruction(system_context: str) -> str:
+    """
+    The systemInstruction handed to the Live API session.
+
+    build_interview_system_context above is shared verbatim with scoring so
+    the two calls can never disagree about who this candidate is. What gets
+    added here is everything specific to the fact that this output will be
+    SPOKEN, in real time, to someone who can interrupt it -- direction that
+    would be meaningless in the scoring call.
+
+    The "speak first" instruction matters more than it looks: without it
+    the model waits for the candidate, the candidate waits for the model,
+    and the interview opens with both sides silent.
+    """
     return f"""\
 {system_context}
 
 ---
-TASK: This interview is just starting. Ask your opening question -- one \
-sharp, specific question that gets straight at the weakest or vaguest \
-part of this resume relative to the job description above, not a generic \
-"tell me about yourself." Leave reaction_text empty (there's no answer \
-yet to react to). Set is_final_turn to false.\
+HOW THIS CONVERSATION WORKS:
+
+You are speaking out loud, live, to the candidate right now. This is a \
+voice conversation, not writing.
+
+- Open the interview yourself, immediately, without waiting to be \
+prompted. Introduce yourself in one short line, then go straight to your \
+first question -- a sharp, specific one aimed at the weakest or vaguest \
+part of their resume relative to the job description, never a generic \
+"tell me about yourself."
+- Speak in short conversational turns. A couple of sentences, then stop \
+and let them answer. Never deliver a monologue or a list.
+- Ask exactly one question at a time, then actually wait.
+- React to what they genuinely just said, quoting their own words back at \
+them where it lands. If an answer is vague, evasive, or unsupported, say \
+so plainly and press again on the same point.
+- Never read out headings, bullet points, or anything that only makes \
+sense written down. Everything you say gets spoken aloud.
+- The candidate can and will interrupt you. If they start talking, stop \
+and listen.
+- Stay in character as the interviewer for the whole session. Do not \
+break to explain that you are an AI, and do not narrate what you are \
+doing.
+
+---
+WHEN THE CANDIDATE CANNOT ANSWER:
+
+Pressing hard is right. Refusing to ever move on is not -- a candidate \
+stuck on one question learns nothing and the interview stalls.
+
+So: if they say they don't know, or ask to move on, push back exactly \
+ONCE. Ask why they can't answer, or offer a narrower version of the same \
+question -- often they know more than they think. If they still decline, \
+call the skip_question tool and go to your next question. Say something \
+short and honest as you move -- "Noted, that one's a gap" -- and do not \
+keep circling back to it.
+
+Calling skip_question is recorded and counts against their final score, \
+so do not call it just because an answer was weak. Only call it when they \
+actually decline to answer.
+
+---
+ENDING THE INTERVIEW:
+
+You have an end_interview tool and you are expected to use it.
+
+Call it with category COMPLETE once you have genuinely covered enough \
+ground -- you do not have to fill the clock.
+
+If the candidate is wasting your time -- asking you off-topic questions, \
+trying to get you to answer their questions, baiting you, or refusing to \
+engage -- warn them once, plainly. If they do it again, say one closing \
+line and then call end_interview with category TIME_WASTING. Do not \
+threaten to end the interview without actually calling the tool: saying \
+"we're done" while the session keeps running wastes their time and ours.\
 """
 
 
-def build_turn_prompt(system_context: str, transcript_so_far: List[Dict[str, Any]]) -> str:
+def build_scoring_prompt(
+    system_context: str,
+    utterances: List[Dict[str, Any]],
+    *,
+    skipped_questions: int = 0,
+    ended_early: Dict[str, Any] | None = None,
+) -> str:
     """
-    transcript_so_far: list of turn dicts (see interview/service.py for the
-    exact shape) -- only fully-answered turns' question/answer_transcript
-    pairs are rendered; the current (unanswered) turn's question is the
-    caller's responsibility to make clear separately (it's implicit: it's
-    the most recent question_text in transcript_so_far).
-    """
-    history_lines = []
-    for turn in transcript_so_far:
-        history_lines.append(f"Q{turn['turn']}: {turn['question_text']}")
-        if turn.get("answer_transcript"):
-            history_lines.append(f"A{turn['turn']}: {turn['answer_transcript']}")
-    history_text = "\n".join(history_lines) if history_lines else "(no prior turns)"
+    Scores the finished live conversation.
 
-    return f"""\
-{system_context}
+    utterances: merged speaker-tagged turns, as produced by
+    interview/service.py's merge_transcript_chunks -- [{"speaker": ...,
+    "text": ...}], where speaker is "interviewer" or "candidate". This is
+    the Live API's own transcription of what was actually said on both
+    sides, not a separate speech-to-text pass.
 
----
-CONVERSATION SO FAR:
-
-{history_text}
-
----
-TASK: Listen to the attached audio -- it's the candidate's spoken answer \
-to the most recent question above. First, transcribe what they actually \
-said into answer_transcript (a faithful transcription, not a summary). \
-Then react briefly and sharply to that specific answer (reaction_text), \
-grounded in what they actually said -- not a generic response. Then ask \
-exactly one focused follow-up question (next_question) that digs into a \
-gap, a vague claim, or something worth pressing on -- either from this \
-answer or another weak spot in the resume/roast context not yet covered. \
-Set is_final_turn to true only if you genuinely judge this interview has \
-covered enough ground; otherwise false.\
-"""
-
-
-def build_scoring_prompt(system_context: str, transcript: List[Dict[str, Any]]) -> str:
-    """
-    A separate call/prompt from the per-turn one, over the FULL transcript,
-    so scoring always reasons over the complete conversation rather than
-    just the final exchange.
+    skipped_questions / ended_early come from the interviewer's own tool
+    calls during the session, counted client-side. They are passed in
+    rather than inferred from the transcript because "did they actually
+    decline, or was the answer merely weak?" is exactly the judgement the
+    scorer would get wrong, and the interviewer already made it live.
     """
     history_lines = []
-    for turn in transcript:
-        history_lines.append(f"Q{turn['turn']}: {turn['question_text']}")
-        if turn.get("answer_transcript"):
-            history_lines.append(f"A{turn['turn']}: {turn['answer_transcript']}")
-        if turn.get("reaction_text"):
-            history_lines.append(f"Interviewer reaction: {turn['reaction_text']}")
-    history_text = "\n".join(history_lines) if history_lines else "(no turns recorded)"
+    for utterance in utterances:
+        label = "INTERVIEWER" if utterance.get("speaker") == "interviewer" else "CANDIDATE"
+        text = (utterance.get("text") or "").strip()
+        if text:
+            history_lines.append(f"{label}: {text}")
+    history_text = "\n".join(history_lines) if history_lines else "(nothing was said)"
+
+    conduct_lines = []
+    if skipped_questions == 1:
+        conduct_lines.append(
+            "- The candidate declined to answer 1 question and asked to move on, after being "
+            "pushed on it. Treat that as a real gap: name it in weaknesses and let it pull the "
+            "score down. One skip is a dent, not a disqualification."
+        )
+    elif skipped_questions > 1:
+        conduct_lines.append(
+            f"- The candidate declined to answer {skipped_questions} questions and asked to move "
+            "on each time, after being pushed. This is a serious pattern, not a one-off: it "
+            "should weigh heavily against the score and be named plainly in weaknesses."
+        )
+    if ended_early:
+        category = (ended_early.get("category") or "").upper()
+        reason = (ended_early.get("reason") or "").strip()
+        if category == "TIME_WASTING":
+            conduct_lines.append(
+                f'- The interviewer ENDED this interview early for time-wasting: "{reason}" '
+                "The candidate spent the session avoiding the questions rather than answering "
+                "them. Score accordingly -- this is near the bottom of the range."
+            )
+        elif category == "CANDIDATE_DISENGAGED":
+            conduct_lines.append(
+                f'- The interviewer ended this interview early because the candidate stopped '
+                f'engaging: "{reason}" Score what was actually said, and note the disengagement.'
+            )
+        else:
+            conduct_lines.append(
+                f'- The interviewer judged the interview complete and ended it: "{reason}" '
+                "This is normal and is NOT itself a negative -- a short interview that covered "
+                "the ground is fine."
+            )
+
+    conduct_block = (
+        "\n---\nHOW THE CANDIDATE CONDUCTED THEMSELVES:\n\n" + "\n".join(conduct_lines) + "\n"
+        if conduct_lines
+        else ""
+    )
 
     return f"""\
 {system_context}
@@ -227,7 +330,7 @@ def build_scoring_prompt(system_context: str, transcript: List[Dict[str, Any]]) 
 FULL INTERVIEW TRANSCRIPT:
 
 {history_text}
-
+{conduct_block}
 ---
 TASK: The interview is over. Score this candidate's performance from \
 {SCORE_MIN} to {SCORE_MAX} based on how well they defended and \

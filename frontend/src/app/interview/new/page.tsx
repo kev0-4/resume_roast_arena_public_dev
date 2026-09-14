@@ -7,7 +7,8 @@ import { ArrowRight, FileText } from "lucide-react";
 import { Navbar } from "@/components/site/navbar";
 import { stackedShadow } from "@/lib/text-shadow";
 import { useAuth } from "@/lib/auth-context";
-import { ApiError, startInterview } from "@/lib/interview-api";
+import { ApiError, formatRetryAfter, startInterview } from "@/lib/interview-api";
+import { stashInterviewStart } from "@/lib/interview-handoff";
 import { getMySessions, type MySession } from "@/lib/api";
 
 const HEADLINE_SHADOW = stackedShadow(10, "#001A99");
@@ -84,12 +85,27 @@ function NewInterviewForm() {
         setSubmitting(false);
         return;
       }
+      // Ask for the mic BEFORE minting the token. The token's session must
+      // open within ~2 minutes of being issued, and a permission prompt the
+      // user leaves sitting there will burn that window and kill an
+      // interview they were never told they'd started.
+      try {
+        const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+        probe.getTracks().forEach((t) => t.stop());
+      } catch {
+        setError("We need your microphone for a live interview. Allow it, then start again.");
+        setSubmitting(false);
+        return;
+      }
+
       const result = await startInterview(selectedSessionId, jobDescription.trim(), idToken);
+      // The token is single-use and must not travel in the URL.
+      stashInterviewStart(result);
       router.push(`/interview/${result.interview_id}`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 429) {
-        const wait = err.retryAfterSeconds ? ` Try again in ${Math.ceil(err.retryAfterSeconds / 60)} min.` : "";
-        setError(`You've hit the interview limit.${wait}`);
+        const wait = err.retryAfterSeconds ? ` Your next one unlocks in ${formatRetryAfter(err.retryAfterSeconds)}.` : "";
+        setError(`You get one interview a week for now.${wait}`);
       } else if (err instanceof ApiError) {
         setError(err.message);
       } else {
@@ -122,6 +138,11 @@ function NewInterviewForm() {
           <p className="mt-4 max-w-md font-mono text-xs text-white/60 md:text-sm">
             Paste the job description you&apos;re chasing. The interviewer already read your roast -- expect follow-ups on
             exactly what it called out.
+          </p>
+          {/* Stated before they write anything: finding out about the cap
+              only after composing a job description is a bad surprise. */}
+          <p className="mt-3 font-mono text-[10px] font-black uppercase tracking-wide text-brand-lime/70">
+            One interview per week &middot; make it count
           </p>
         </div>
 

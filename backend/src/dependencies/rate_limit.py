@@ -26,8 +26,7 @@ from ..config import (
     INGEST_RATE_LIMIT_WINDOW_SECONDS,
     INTERVIEW_START_RATE_LIMIT_MAX,
     INTERVIEW_START_RATE_LIMIT_WINDOW_SECONDS,
-    INTERVIEW_TURN_RATE_LIMIT_MAX,
-    INTERVIEW_TURN_RATE_LIMIT_WINDOW_SECONDS,
+    ADMIN_EMAILS,
 )
 from ..dependencies.auth import get_current_user_optional, get_current_user
 from ..utils.telemetry import emit_event
@@ -120,9 +119,8 @@ async def _check_interview_rate_limit(
     curr_user, max_requests: int, window_seconds: int, key_prefix: str, route_label: str
 ) -> None:
     """
-    Shared body for the two interview rate limits below -- both keyed by
-    user:{id} only (unlike check_ingest_rate_limit, no IP branch: auth is
-    mandatory for every interview route, there's no anonymous case).
+    Keyed by user:{id} only (unlike check_ingest_rate_limit, no IP branch:
+    auth is mandatory for every interview route, there's no anonymous case).
     """
     identifier = f"user:{curr_user.id}"
     redis_key = f"ratelimit:{key_prefix}:{identifier}"
@@ -152,30 +150,31 @@ async def _check_interview_rate_limit(
 
 async def check_interview_start_rate_limit(curr_user=Depends(get_current_user)) -> None:
     """
-    Guards the cost of STARTING new interviews -- each start is 1 Gemini
-    text call + 1 TTS call. Distinct from check_interview_turn_rate_limit,
-    which guards per-turn request frequency, not how many interviews a
-    user can begin.
+    The one interview rate limit. Starting an interview is what actually
+    costs money -- it mints a Live session whose spend is then bounded by
+    the token's own expiry -- so capping starts is the only lever needed.
+    There is no per-turn limit any more because there are no turns: the
+    conversation never touches this server.
+
+    Exempt accounts skip the check entirely rather than getting a larger
+    allowance, so an exempt user never consumes a Redis counter and can
+    never be locked out by one left over from before they were exempted.
     """
+    # getattr, not curr_user.email: the route tests inject a minimal user
+    # stand-in, and an AttributeError here would fail every interview route
+    # rather than just the rate limit.
+    email = (getattr(curr_user, "email", None) or "").strip().lower()
+    if email and email in ADMIN_EMAILS:
+        emit_event(
+            "ratelimit.exempt",
+            {"identifier": f"user:{curr_user.id}", "status": "INFO", "route": "POST /v1/interview/start"},
+        )
+        return
+
     await _check_interview_rate_limit(
         curr_user,
         INTERVIEW_START_RATE_LIMIT_MAX,
         INTERVIEW_START_RATE_LIMIT_WINDOW_SECONDS,
         "interview_start",
         "POST /v1/interview/start",
-    )
-
-
-async def check_interview_turn_rate_limit(curr_user=Depends(get_current_user)) -> None:
-    """
-    Guards raw request frequency at the turn endpoint across all of a
-    user's interviews -- distinct from InterviewSessions.max_turns, which
-    caps one single interview's length, not calling rate across many.
-    """
-    await _check_interview_rate_limit(
-        curr_user,
-        INTERVIEW_TURN_RATE_LIMIT_MAX,
-        INTERVIEW_TURN_RATE_LIMIT_WINDOW_SECONDS,
-        "interview_turn",
-        "POST /v1/interview/{id}/turn",
     )

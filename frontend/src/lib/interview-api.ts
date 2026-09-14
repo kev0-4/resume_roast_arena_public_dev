@@ -9,25 +9,47 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8
 
 export interface InterviewStartResponse {
   interview_id: string;
-  status: string;
-  turn_number: number;
-  max_turns: number;
-  question_text: string;
-  question_audio_url: string;
+  /** Single-use ephemeral Gemini token. Never an API key -- see the backend's
+   *  minting route. Cannot be re-minted for the same interview, which is why
+   *  a refresh of the live page can't resume a session. */
+  token: string;
+  model: string;
+  /** Persona + resume + roast + JD context, built server-side and passed
+   *  straight through as the Live session's systemInstruction. */
+  system_instruction: string;
+  /** Tool declarations (end_interview, skip_question), passed through to
+   *  the connect config. The authoritative copy is pinned in the token. */
+  tools: unknown[];
+  /** The anonymized resume, for the in-room reference pane. Never the
+   *  roast -- that would hand over the list of weak spots in advance. */
+  resume_text: string;
+  /** ISO8601 -- when the session must end. Drives the countdown. */
+  expires_at: string;
 }
 
-export interface InterviewTurnResponse {
-  interview_id: string;
-  turn_number: number;
-  reaction_text: string;
-  next_question: string;
-  response_audio_url: string;
+/** Reported at /complete, from the interviewer's own tool calls. */
+export interface InterviewConduct {
+  skipped_questions: number;
+  ended_early?: { reason: string; category: string };
+}
+
+export type TranscriptSpeaker = "interviewer" | "candidate";
+
+export interface TranscriptChunk {
+  seq: number;
+  speaker: TranscriptSpeaker;
+  text: string;
   is_final: boolean;
+  at: string;
+}
+
+export interface InterviewScoreResult {
+  interview_id: string;
   status: string;
-  score?: number;
-  strengths?: string[];
-  weaknesses?: string[];
-  next_steps?: string[];
+  score: number;
+  strengths: string[];
+  weaknesses: string[];
+  next_steps: string[];
 }
 
 export interface InterviewEligibility {
@@ -35,13 +57,11 @@ export interface InterviewEligibility {
   resume_session_id?: string;
 }
 
-export interface TranscriptTurnEntry {
-  turn: number;
-  question_text: string;
-  question_audio_url: string;
-  answer_transcript: string | null;
-  answer_audio_url: string | null;
-  reaction_text: string | null;
+export interface TranscriptEntry {
+  seq: number;
+  speaker: TranscriptSpeaker;
+  text: string;
+  at: string;
 }
 
 export interface InterviewDetail {
@@ -50,9 +70,7 @@ export interface InterviewDetail {
   resume_session_id: string;
   roast_slug: string | null;
   job_description: string;
-  turn_count: number;
-  max_turns: number;
-  transcript: TranscriptTurnEntry[];
+  transcript: TranscriptEntry[];
   score?: number;
   strengths?: string[];
   weaknesses?: string[];
@@ -82,6 +100,18 @@ export interface MyInterviewLeaderboardPosition {
   completed_at: string;
 }
 
+/** "3 days", "5 hours", "20 minutes" -- the interview cap is weekly, so a
+ *  countdown in minutes would read as five figures and tell nobody
+ *  anything. Rounds up: promising sooner than reality is worse. */
+export function formatRetryAfter(seconds: number): string {
+  const days = Math.ceil(seconds / 86400);
+  if (seconds >= 86400) return `${days} day${days === 1 ? "" : "s"}`;
+  const hours = Math.ceil(seconds / 3600);
+  if (seconds >= 3600) return `${hours} hour${hours === 1 ? "" : "s"}`;
+  const minutes = Math.max(1, Math.ceil(seconds / 60));
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
 async function errorFromResponse(resp: Response, fallback: string): Promise<ApiError> {
   if (resp.status === 429) {
     const retryAfter = resp.headers.get("Retry-After");
@@ -108,27 +138,46 @@ export async function startInterview(
   return resp.json();
 }
 
-// turnNumber must be exactly the interview's current turn_count -- the
-// backend 409s on any mismatch (optimistic-concurrency guard against a
-// duplicate submit double-spending a Gemini call). Callers should re-fetch
-// getInterview() and reconcile on a 409, not blindly retry.
-export async function submitInterviewTurn(
+// The browser talks straight to Gemini, so the transcript originates
+// client-side. It is streamed up here as it arrives rather than posted in
+// one lump at the end: a closed tab then can't lose the whole interview,
+// and scoring always runs server-side off the server's own copy.
+//
+// Trust boundary, stated plainly: this is NOT tamper-proof. A determined
+// client could stream invented text. The server can prove a session was
+// *authorised* (it minted the token) but not what was actually said. That
+// matches the roast leaderboard's existing trust model, where the score
+// comes from a resume the user fully controls. A backend WebSocket relay
+// is the genuinely server-authoritative fix, at the cost of the latency
+// this whole design exists to win.
+export async function postTranscriptChunks(
   interviewId: string,
-  turnNumber: number,
-  audioBlob: Blob,
-  audioFilename: string,
+  chunks: TranscriptChunk[],
   idToken: string,
-): Promise<InterviewTurnResponse> {
-  const formData = new FormData();
-  formData.append("turn_number", String(turnNumber));
-  formData.append("file", audioBlob, audioFilename);
-
-  const resp = await fetch(`${API_BASE_URL}/api/v1/interview/${interviewId}/turn`, {
+  clientDiag?: Record<string, unknown>,
+): Promise<{ accepted: number; total_chunks: number }> {
+  const resp = await fetch(`${API_BASE_URL}/api/v1/interview/${interviewId}/transcript`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${idToken}` },
-    body: formData,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify({ chunks, client_diag: clientDiag ?? null }),
   });
-  if (!resp.ok) throw await errorFromResponse(resp, "Could not submit your answer");
+  if (!resp.ok) throw await errorFromResponse(resp, "Could not save the transcript");
+  return resp.json();
+}
+
+// Idempotent server-side: calling it on an already-completed interview
+// returns the existing score rather than paying for a second scoring call.
+export async function completeInterview(
+  interviewId: string,
+  idToken: string,
+  conduct: InterviewConduct = { skipped_questions: 0 },
+): Promise<InterviewScoreResult> {
+  const resp = await fetch(`${API_BASE_URL}/api/v1/interview/${interviewId}/complete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify(conduct),
+  });
+  if (!resp.ok) throw await errorFromResponse(resp, "Could not score the interview");
   return resp.json();
 }
 
@@ -168,21 +217,4 @@ export async function getMyInterviewLeaderboardPosition(idToken: string): Promis
   });
   if (!resp.ok) throw await errorFromResponse(resp, "Could not fetch your interview rank");
   return resp.json();
-}
-
-// Every interview audio route requires the same Authorization header as
-// everything else in this API -- a plain <audio src> can't send that, so
-// every audio URL has to be fetched, read as a Blob, and turned into an
-// object URL before anything can play it. Centralized here so the page
-// doesn't repeat the fetch+blob+createObjectURL dance at every call site.
-// Callers must URL.revokeObjectURL() the result when done with it (a
-// multi-turn interview creates several of these) -- see interview
-// page's cleanup effect.
-export async function fetchAuthedAudioUrl(relativePath: string, idToken: string): Promise<string> {
-  const resp = await fetch(`${API_BASE_URL}/${relativePath}`, {
-    headers: { Authorization: `Bearer ${idToken}` },
-  });
-  if (!resp.ok) throw await errorFromResponse(resp, "Could not load audio");
-  const blob = await resp.blob();
-  return URL.createObjectURL(blob);
 }

@@ -1,234 +1,269 @@
 "use client";
 
-import { use, useEffect, useRef, useState } from "react";
-import { Navbar } from "@/components/site/navbar";
-import { RecorderButton } from "@/components/interview/recorder-button";
-import { ResultsSummary } from "@/components/interview/results-summary";
+// The live interview room.
+//
+// This page holds a WebSocket straight to Gemini's Live API -- our backend
+// is not in the audio path at all. It only minted the single-use token that
+// got us here. That is the whole reason the interviewer answers in under a
+// second instead of the ~92 seconds the old record-upload-wait-playback
+// build took to produce its first question.
+
+import { use, useEffect, useState } from "react";
+import Link from "next/link";
+import { Loader2, Mic, MicOff, PhoneOff } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import {
-  ApiError,
-  fetchAuthedAudioUrl,
-  getInterview,
-  submitInterviewTurn,
-  type InterviewDetail,
-} from "@/lib/interview-api";
+import { useLiveInterview } from "@/hooks/use-live-interview";
+import { takeInterviewStart } from "@/lib/interview-handoff";
+import type { InterviewStartResponse } from "@/lib/interview-api";
+import { InterviewerPresence } from "@/components/interview/interviewer-presence";
+import { TranscriptPane } from "@/components/interview/transcript-pane";
+import { ResumePane } from "@/components/interview/resume-pane";
+import { ResultsSummary } from "@/components/interview/results-summary";
 
-type PageParams = { params: Promise<{ interviewId: string }> };
+function formatClock(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
 
-// Client-rendered and stateful (unlike the server-rendered public /r/[slug]
-// result page) -- this is a live, multi-step interaction the viewer is
-// actively waiting on, not a static shareable result.
-export default function InterviewPage({ params }: PageParams) {
+export default function InterviewRoomPage({ params }: { params: Promise<{ interviewId: string }> }) {
   const { interviewId } = use(params);
-  const { firebaseUser, loading: authLoading, getIdToken } = useAuth();
+  const { getIdToken } = useAuth();
 
-  const [loading, setLoading] = useState(true);
-  const [interview, setInterview] = useState<InterviewDetail | null>(null);
-  const [currentTurnNumber, setCurrentTurnNumber] = useState(0);
-  const [questionText, setQuestionText] = useState("");
-  const [reactionText, setReactionText] = useState<string | null>(null);
-  const [questionAudioUrl, setQuestionAudioUrl] = useState<string | null>(null);
-  const [audioLoading, setAudioLoading] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
-  const [finalScore, setFinalScore] = useState<{
-    score: number;
-    strengths: string[];
-    weaknesses: string[];
-    nextSteps: string[];
-  } | null>(null);
+  // `undefined` = not looked yet, `null` = looked and it wasn't there.
+  const [start, setStart] = useState<InterviewStartResponse | null | undefined>(undefined);
 
-  const currentAudioObjectUrlRef = useRef<string | null>(null);
-
-  const loadAudio = async (relativePath: string, idToken: string) => {
-    setAudioLoading(true);
-    try {
-      const objectUrl = await fetchAuthedAudioUrl(relativePath, idToken);
-      // Revoke the previous object URL before swapping in the new one --
-      // a multi-turn interview would otherwise leak one per turn.
-      if (currentAudioObjectUrlRef.current) URL.revokeObjectURL(currentAudioObjectUrlRef.current);
-      currentAudioObjectUrlRef.current = objectUrl;
-      setQuestionAudioUrl(objectUrl);
-    } catch {
-      // Non-fatal -- the question text is still readable without audio.
-      setQuestionAudioUrl(null);
-    } finally {
-      setAudioLoading(false);
-    }
-  };
-
+  // sessionStorage only exists client-side, so this cannot be a lazy
+  // useState initializer: the server prerender would read null, the client
+  // would read the token, and the two renders would disagree.
+  //
+  // eslint's set-state-in-effect is suppressed rather than worked around,
+  // because this is the case its own message carves out -- reading once
+  // from an external system that React cannot see. There is nothing to
+  // await here, so wrapping it in an async IIFE (this codebase's usual
+  // shape for that rule) would only hide the call from the linter without
+  // changing what it does.
   useEffect(() => {
-    // Revoke on unmount regardless of which effect/handler created it.
-    return () => {
-      if (currentAudioObjectUrlRef.current) URL.revokeObjectURL(currentAudioObjectUrlRef.current);
-    };
-  }, []);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setStart(takeInterviewStart(interviewId));
+  }, [interviewId]);
 
-  useEffect(() => {
-    if (authLoading || !firebaseUser) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const idToken = await getIdToken();
-        if (!idToken) {
-          setError("You need to be signed in to view this interview.");
-          return;
-        }
-        const data = await getInterview(interviewId, idToken);
-        if (cancelled) return;
-        setInterview(data);
+  const live = useLiveInterview(start ?? null, getIdToken);
 
-        if (data.status !== "IN_PROGRESS") {
-          setDone(true);
-          if (data.score !== undefined) {
-            setFinalScore({
-              score: data.score,
-              strengths: data.strengths ?? [],
-              weaknesses: data.weaknesses ?? [],
-              nextSteps: data.next_steps ?? [],
-            });
-          }
-          return;
-        }
+  if (start === undefined) {
+    return <RoomShell>{null}</RoomShell>;
+  }
 
-        setCurrentTurnNumber(data.turn_count);
-        const currentEntry = data.transcript.find((t) => t.turn === data.turn_count);
-        if (currentEntry) {
-          setQuestionText(currentEntry.question_text);
-          await loadAudio(currentEntry.question_audio_url, idToken);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof ApiError ? err.message : "Could not load this interview.");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- interviewId/getIdToken/firebaseUser stable enough for this one-time hydration
-  }, [interviewId, authLoading, firebaseUser]);
+  // No token in the handoff: a refresh, a shared link, or a direct visit.
+  // None of these are recoverable -- the token was single-use and is gone.
+  if (start === null) {
+    return (
+      <RoomShell>
+        <CenteredCard
+          title="This interview room has closed"
+          body="Live interviews can't be resumed or reopened -- the session credential is used once and expires. Start a fresh one and you'll be talking in a few seconds."
+          action={{ href: "/interview/new", label: "Start a new interview" }}
+        />
+      </RoomShell>
+    );
+  }
 
-  const handleAnswer = async (blob: Blob, mimeType: string) => {
-    setSubmitting(true);
-    setError(null);
-    try {
-      const idToken = await getIdToken();
-      if (!idToken) {
-        setError("You need to be signed in to continue.");
-        setSubmitting(false);
-        return;
-      }
-      const extension = mimeType.includes("mp4") ? "mp4" : "webm";
-      const response = await submitInterviewTurn(interviewId, currentTurnNumber, blob, `answer.${extension}`, idToken);
+  if (live.phase === "done" && live.result) {
+    return (
+      <RoomShell>
+        <div className="mx-auto w-full max-w-2xl py-10">
+          <ResultsSummary
+            score={live.result.score}
+            strengths={live.result.strengths}
+            weaknesses={live.result.weaknesses}
+            nextSteps={live.result.next_steps}
+          />
+        </div>
+      </RoomShell>
+    );
+  }
 
-      setReactionText(response.reaction_text);
+  if (live.phase === "error") {
+    return (
+      <RoomShell>
+        <CenteredCard
+          title="The interview dropped"
+          body={live.error ?? "Something went wrong."}
+          action={{ href: "/interview/new", label: "Try again" }}
+        />
+      </RoomShell>
+    );
+  }
 
-      if (response.is_final) {
-        setDone(true);
-        if (response.score !== undefined) {
-          setFinalScore({
-            score: response.score,
-            strengths: response.strengths ?? [],
-            weaknesses: response.weaknesses ?? [],
-            nextSteps: response.next_steps ?? [],
-          });
-        }
-        await loadAudio(response.response_audio_url, idToken);
-      } else {
-        setQuestionText(response.next_question);
-        setCurrentTurnNumber(response.turn_number + 1);
-        await loadAudio(response.response_audio_url, idToken);
-      }
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        // Server's turn_count moved from under us -- re-fetch and
-        // reconcile rather than blindly retrying.
-        setError("Lost sync with the interview -- reloading current state.");
-        try {
-          const idToken = await getIdToken();
-          if (idToken) {
-            const data = await getInterview(interviewId, idToken);
-            setInterview(data);
-            setCurrentTurnNumber(data.turn_count);
-            const currentEntry = data.transcript.find((t) => t.turn === data.turn_count);
-            if (currentEntry) {
-              setQuestionText(currentEntry.question_text);
-              await loadAudio(currentEntry.question_audio_url, idToken);
-            }
-          }
-        } catch {
-          // best-effort reconciliation -- leave the error message up
-        }
-      } else if (err instanceof ApiError && err.status === 429) {
-        const wait = err.retryAfterSeconds ? ` Try again in ${Math.ceil(err.retryAfterSeconds / 60)} min.` : "";
-        setError(`You've hit the turn limit for now.${wait}`);
-      } else if (err instanceof ApiError) {
-        setError(err.message);
-      } else {
-        setError("Something went wrong submitting your answer -- try again.");
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  if (live.phase === "ending" || live.phase === "scoring") {
+    return (
+      <RoomShell>
+        <div className="flex flex-col items-center gap-4 py-24 text-center">
+          <Loader2 size={32} className="animate-spin text-brand-lime" />
+          <p className="font-display text-2xl uppercase tracking-tight text-white">
+            {live.endedByInterviewer ? "The interviewer ended it" : live.phase === "ending" ? "Wrapping up" : "Scoring your answers"}
+          </p>
+          {/* Attribute the ending honestly. Being cut off without being told
+              why reads as a crash rather than a decision the interviewer made. */}
+          {live.endedByInterviewer?.reason ? (
+            <p className="max-w-sm font-mono text-xs italic text-brand-lime/80">
+              &ldquo;{live.endedByInterviewer.reason}&rdquo;
+            </p>
+          ) : null}
+          <p className="max-w-sm font-mono text-xs text-white/50">
+            Reading back everything you said and grading it against the job description.
+          </p>
+        </div>
+      </RoomShell>
+    );
+  }
+
+  // Green room, exactly like Meet's pre-join: nothing connects and no audio
+  // context opens until this click. Browsers require a user gesture before
+  // audio can play at all, so an auto-connect would leave the interviewer
+  // talking into a muted tab.
+  if (live.phase === "greenroom") {
+    return (
+      <RoomShell>
+        <CenteredCard
+          title="Ready when you are"
+          body="Put headphones on -- without them the interviewer hears itself through your mic and talks over its own questions. It speaks first, so just answer out loud, and you can cut it off mid-sentence. If you're stuck you can ask to move on, though it'll push back once and skipping counts against your score. It can also end the interview early if you waste its time."
+          onAction={() => void live.connect()}
+          actionLabel="Join the interview"
+        />
+      </RoomShell>
+    );
+  }
+
+  const connecting = live.phase === "connecting";
 
   return (
-    <div className="relative flex min-h-screen w-full flex-col overflow-hidden bg-brand-blue font-mono selection:bg-brand-lime selection:text-brand-blue">
-      <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(to_right,#ffffff15_1px,transparent_1px),linear-gradient(to_bottom,#ffffff15_1px,transparent_1px)] bg-[size:4rem_4rem]" />
-
-      <Navbar />
-
-      <main className="relative z-10 mx-auto flex w-full max-w-2xl flex-1 flex-col items-center px-4 pb-16 pt-6 md:px-10">
-        {authLoading ? (
-          <div className="h-72 w-full animate-pulse rounded-2xl border-[3px] border-black/10 bg-white/5" />
-        ) : !firebaseUser ? (
-          <p className="mt-16 rounded-2xl border-[3px] border-black bg-white px-6 py-8 text-center font-mono text-sm font-semibold text-black/60 shadow-[5px_5px_0_#000]">
-            Sign in to view this interview.
-          </p>
-        ) : loading ? (
-          <div className="h-72 w-full animate-pulse rounded-2xl border-[3px] border-black/10 bg-white/5" />
-        ) : done && finalScore ? (
-          <div className="mt-4 w-full">
-            <ResultsSummary
-              score={finalScore.score}
-              strengths={finalScore.strengths}
-              weaknesses={finalScore.weaknesses}
-              nextSteps={finalScore.nextSteps}
-            />
-          </div>
-        ) : interview ? (
-          <div className="mt-4 flex w-full flex-col items-center gap-6">
-            <p className="font-mono text-xs font-black uppercase tracking-wide text-white/50">
-              Turn {currentTurnNumber + 1} of {interview.max_turns}
-            </p>
-
-            <div className="w-full rounded-[1.75rem] border-[3px] border-black bg-white p-6 shadow-[6px_6px_0_#000] md:p-8">
-              {reactionText && (
-                <p className="mb-4 border-b border-black/10 pb-4 font-mono text-sm italic text-black/60">
-                  &quot;{reactionText}&quot;
-                </p>
-              )}
-              <p className="font-display text-xl leading-snug text-black md:text-2xl">{questionText}</p>
-              {audioLoading ? (
-                <p className="mt-4 font-mono text-xs text-black/40">Loading audio...</p>
-              ) : questionAudioUrl ? (
-                <audio controls src={questionAudioUrl} className="mt-4 w-full" />
-              ) : null}
+    <RoomShell>
+      <div className="flex min-h-0 flex-1 flex-col gap-4 py-4 lg:flex-row">
+        {/* Stage */}
+        <div className="relative flex min-h-[18rem] flex-1 items-center justify-center rounded-[1.5rem] border-[3px] border-black bg-brand-blue/40 shadow-[6px_6px_0_#000] lg:min-h-0">
+          {connecting ? (
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 size={28} className="animate-spin text-brand-lime" />
+              <p className="font-mono text-xs font-semibold text-white/60">Connecting...</p>
             </div>
+          ) : (
+            <InterviewerPresence
+              amplitude={live.amplitude}
+              speaking={live.speaking}
+              thinking={!live.speaking && !live.muted}
+            />
+          )}
 
-            <RecorderButton disabled={submitting || audioLoading} onRecordingComplete={handleAnswer} />
+          {/* The number this whole rebuild exists to move. Shown, not
+              buried in a console log, because it is the feature. */}
+          {live.firstAudioMs !== null ? (
+            <div className="absolute right-4 top-4 rounded-full border-2 border-black bg-white px-3 py-1 shadow-[3px_3px_0_#000]">
+              <span className="font-mono text-[10px] font-black uppercase tracking-wide text-black">
+                {(live.firstAudioMs / 1000).toFixed(1)}s to first word
+              </span>
+            </div>
+          ) : null}
 
-            {submitting && <p className="font-mono text-xs text-white/60">Thinking of something brutal to say...</p>}
-            {error && <p className="max-w-sm text-center font-mono text-xs font-semibold text-brand-lime">{error}</p>}
-          </div>
-        ) : (
-          error && <p className="mt-16 text-center font-mono text-sm text-brand-lime">{error}</p>
-        )}
-      </main>
+          {/* Visible running cost of asking to move on, so the penalty is
+              never a surprise that only shows up in the final score. */}
+          {live.skippedCount > 0 ? (
+            <div className="absolute left-4 top-4 rounded-full border-2 border-black bg-red-500 px-3 py-1 shadow-[3px_3px_0_#000]">
+              <span className="font-mono text-[10px] font-black uppercase tracking-wide text-white">
+                {live.skippedCount} skipped
+              </span>
+            </div>
+          ) : null}
+
+          {!connecting ? <ResumePane resumeText={start.resume_text} /> : null}
+        </div>
+
+        {/* Transcript rail */}
+        <div className="h-[20rem] shrink-0 lg:h-auto lg:w-[22rem]">
+          <TranscriptPane lines={live.lines} interim={live.interim} />
+        </div>
+      </div>
+
+      {/* Control bar */}
+      <div className="flex shrink-0 items-center justify-center gap-3 pb-6 pt-2">
+        <div className="rounded-full border-2 border-black bg-white px-4 py-2.5 shadow-[3px_3px_0_#000]">
+          <span
+            className={[
+              "font-mono text-xs font-black tabular-nums",
+              live.secondsLeft !== null && live.secondsLeft <= 60 ? "text-red-600" : "text-black",
+            ].join(" ")}
+          >
+            {live.secondsLeft === null ? "--:--" : formatClock(live.secondsLeft)}
+          </span>
+        </div>
+
+        <button
+          onClick={live.toggleMute}
+          disabled={connecting}
+          aria-label={live.muted ? "Unmute microphone" : "Mute microphone"}
+          className={[
+            "flex h-12 w-12 items-center justify-center rounded-full border-2 border-black shadow-[3px_3px_0_#000] transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0_#000] disabled:opacity-40",
+            live.muted ? "bg-red-500 text-white" : "bg-white text-black",
+          ].join(" ")}
+        >
+          {live.muted ? <MicOff size={18} strokeWidth={2.5} /> : <Mic size={18} strokeWidth={2.5} />}
+        </button>
+
+        <button
+          onClick={() => void live.end()}
+          className="flex items-center gap-2 rounded-full border-2 border-black bg-red-500 px-6 py-3 font-display text-sm uppercase tracking-wide text-white shadow-[3px_3px_0_#000] transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0_#000]"
+        >
+          <PhoneOff size={16} strokeWidth={2.5} />
+          End
+        </button>
+      </div>
+    </RoomShell>
+  );
+}
+
+// Deliberately no Navbar: this is a call, and a nav rail full of exits is
+// the wrong shape for one. Matches Meet, which hides its own chrome too.
+function RoomShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-brand-blue font-mono selection:bg-brand-lime selection:text-brand-blue">
+      <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(to_right,#ffffff15_1px,transparent_1px),linear-gradient(to_bottom,#ffffff15_1px,transparent_1px)] bg-[size:4rem_4rem]" />
+      <div className="relative z-10 mx-auto flex h-full w-full max-w-6xl flex-col px-4 md:px-8">{children}</div>
+    </div>
+  );
+}
+
+function CenteredCard({
+  title,
+  body,
+  action,
+  onAction,
+  actionLabel,
+}: {
+  title: string;
+  body: string;
+  action?: { href: string; label: string };
+  onAction?: () => void;
+  actionLabel?: string;
+}) {
+  const buttonClass =
+    "mt-6 inline-flex items-center justify-center gap-2 rounded-full bg-brand-lime px-8 py-4 font-display text-sm uppercase tracking-wide text-black shadow-[4px_4px_0_#000] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0_#000]";
+
+  return (
+    <div className="flex flex-1 items-center justify-center py-10">
+      <div className="w-full max-w-md rounded-[1.75rem] border-[3px] border-black bg-white p-8 text-center shadow-[6px_6px_0_#000]">
+        <h1 className="font-display text-3xl uppercase leading-none tracking-tighter text-black">{title}</h1>
+        <p className="mt-4 font-mono text-xs leading-relaxed text-black/60">{body}</p>
+        {action ? (
+          <Link href={action.href} className={buttonClass}>
+            {action.label}
+          </Link>
+        ) : null}
+        {onAction ? (
+          <button onClick={onAction} className={buttonClass}>
+            {actionLabel}
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
