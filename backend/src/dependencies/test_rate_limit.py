@@ -69,10 +69,10 @@ class TestCheckAndIncrement:
 
 class TestInterviewStartExemption:
     """
-    The interview cap is one per week, which makes the exemption list the
-    only way the owner can test the feature more than once in seven days.
-    Real Redis, like the rest of this file -- the point is that an exempt
-    account never touches a counter at all.
+    The interview cap is one per week, which makes ADMIN_EMAILS the only
+    way to exercise the feature more than once in seven days. Real Redis,
+    like the rest of this file -- the point is that an admin account never
+    touches a counter at all.
     """
 
     class _User:
@@ -85,29 +85,33 @@ class TestInterviewStartExemption:
 
         asyncio.run(coro)
 
-    def test_exempt_email_is_never_limited(self, client):
-        from backend.src.config import INTERVIEW_RATE_LIMIT_EXEMPT_EMAILS
+    def test_every_admin_email_is_never_limited(self, client):
+        # Loops the whole list rather than sampling one, so adding an admin
+        # without it actually working cannot pass silently.
+        from backend.src.config import ADMIN_EMAILS
         from backend.src.dependencies.rate_limit import check_interview_start_rate_limit
 
-        exempt = next(iter(INTERVIEW_RATE_LIMIT_EXEMPT_EMAILS))
-        user = self._User(f"exempt-{time.time()}", exempt)
+        assert ADMIN_EMAILS, "expected at least one configured admin"
 
-        async def run():
-            # Far more than the weekly cap; none of these may raise.
-            for _ in range(5):
-                await check_interview_start_rate_limit(user)
+        for i, admin in enumerate(sorted(ADMIN_EMAILS)):
+            user = self._User(f"admin-{i}-{time.time()}", admin)
 
-        self._run(run())
+            async def run():
+                # Far more than the weekly cap; none of these may raise.
+                for _ in range(5):
+                    await check_interview_start_rate_limit(user)
 
-        # And no counter was created for them, so a stale one can never
-        # lock out an exempt account later.
-        assert client.get(f"ratelimit:interview_start:user:{user.id}") is None
+            self._run(run())
+
+            # No counter was created, so a stale one can never lock an
+            # admin out later.
+            assert client.get(f"ratelimit:interview_start:user:{user.id}") is None, admin
 
     def test_exemption_ignores_case_and_padding(self, client):
-        from backend.src.config import INTERVIEW_RATE_LIMIT_EXEMPT_EMAILS
+        from backend.src.config import ADMIN_EMAILS
         from backend.src.dependencies.rate_limit import check_interview_start_rate_limit
 
-        exempt = next(iter(INTERVIEW_RATE_LIMIT_EXEMPT_EMAILS))
+        exempt = next(iter(ADMIN_EMAILS))
         user = self._User(f"exempt-case-{time.time()}", f"  {exempt.upper()}  ")
 
         async def run():

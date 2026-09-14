@@ -78,14 +78,23 @@ INGEST_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("INGEST_RATE_LIMIT_WINDOW_SECON
 INTERVIEW_START_RATE_LIMIT_MAX = int(os.getenv("INTERVIEW_START_RATE_LIMIT_MAX", "1"))
 INTERVIEW_START_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("INTERVIEW_START_RATE_LIMIT_WINDOW_SECONDS", "604800"))
 
-# Accounts exempt from the cap, comma-separated and matched case-insensitively.
-# Currently the owner's own account, so the feature stays testable without
-# waiting a week between runs. Deliberately a config value rather than a
-# hardcoded check, so it can be changed without a deploy of new code -- and
-# so it is obvious where to delete it once real entitlements exist.
-INTERVIEW_RATE_LIMIT_EXEMPT_EMAILS = frozenset(
+# Admin accounts, comma-separated and matched case-insensitively.
+#
+# "Admin" here means exactly ONE thing today: exempt from the interview
+# rate limit, so the feature stays testable without waiting a week between
+# runs. It grants no other privilege, and nothing should start treating it
+# as a general permission without that being a deliberate decision -- an
+# email list is authentication by claim, which is fine for skipping a
+# counter and not fine for anything that reads or writes someone's data.
+#
+# Deliberately config rather than a hardcoded check: changeable without
+# shipping code, and an obvious single place to delete once real
+# entitlements exist.
+ADMIN_EMAILS = frozenset(
     email.strip().lower()
-    for email in os.getenv("INTERVIEW_RATE_LIMIT_EXEMPT_EMAILS", "kevintandon123@gmail.com").split(",")
+    for email in os.getenv(
+        "ADMIN_EMAILS", "kevintandon123@gmail.com,lemonocean11@gmail.com"
+    ).split(",")
     if email.strip()
 )
 

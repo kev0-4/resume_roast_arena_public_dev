@@ -26,7 +26,7 @@ from ..config import (
     INGEST_RATE_LIMIT_WINDOW_SECONDS,
     INTERVIEW_START_RATE_LIMIT_MAX,
     INTERVIEW_START_RATE_LIMIT_WINDOW_SECONDS,
-    INTERVIEW_RATE_LIMIT_EXEMPT_EMAILS,
+    ADMIN_EMAILS,
 )
 from ..dependencies.auth import get_current_user_optional, get_current_user
 from ..utils.telemetry import emit_event
@@ -164,7 +164,7 @@ async def check_interview_start_rate_limit(curr_user=Depends(get_current_user)) 
     # stand-in, and an AttributeError here would fail every interview route
     # rather than just the rate limit.
     email = (getattr(curr_user, "email", None) or "").strip().lower()
-    if email and email in INTERVIEW_RATE_LIMIT_EXEMPT_EMAILS:
+    if email and email in ADMIN_EMAILS:
         emit_event(
             "ratelimit.exempt",
             {"identifier": f"user:{curr_user.id}", "status": "INFO", "route": "POST /v1/interview/start"},
