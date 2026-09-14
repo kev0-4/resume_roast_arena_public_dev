@@ -11,22 +11,32 @@
 // audio pipeline.
 
 import { useEffect, useRef } from "react";
+import { motion } from "framer-motion";
 
 export function InterviewerPresence({
   amplitude,
   speaking,
   thinking,
+  idle = false,
 }: {
   amplitude: () => number;
   speaking: boolean;
   /** Connected, but nobody is talking -- waiting on the candidate. */
   thinking: boolean;
+  /** Socket closed during an exercise round. Present and watching, but
+   *  deliberately quiet -- the rings stop rather than idling forever. */
+  idle?: boolean;
 }) {
   const innerRef = useRef<HTMLDivElement>(null);
   const midRef = useRef<HTMLDivElement>(null);
   const outerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Nothing is playing during an exercise round, so there is no waveform
+    // to follow. Skipping the rAF loop entirely keeps the main thread free
+    // for the editor rather than animating a flat signal 60 times a second.
+    if (idle) return;
+
     let frame = 0;
     // Smoothed so the rings glide instead of strobing on every buffer.
     let level = 0;
@@ -52,7 +62,7 @@ export function InterviewerPresence({
 
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [amplitude]);
+  }, [amplitude, idle]);
 
   return (
     <div className="relative flex h-full w-full items-center justify-center">
@@ -65,28 +75,43 @@ export function InterviewerPresence({
           ref={midRef}
           className="absolute h-32 w-32 rounded-full bg-brand-lime transition-colors duration-300 md:h-40 md:w-40"
         />
-        <div
+        {/* layoutId lets framer-motion morph this exact circle between the
+            full-stage conversation view and the small tile in the exercise
+            round, so the interviewer visibly travels instead of one element
+            vanishing and another appearing. */}
+        <motion.div
+          layoutId="interviewer-presence"
           ref={innerRef}
           className={[
-            "relative flex h-24 w-24 items-center justify-center rounded-full border-[3px] border-black shadow-[5px_5px_0_#000] md:h-32 md:w-32",
+            "relative flex items-center justify-center rounded-full border-[3px] border-black shadow-[5px_5px_0_#000]",
+            idle ? "h-16 w-16" : "h-24 w-24 md:h-32 md:w-32",
             speaking ? "bg-brand-lime" : "bg-white",
           ].join(" ")}
         >
-          <span className="font-display text-3xl uppercase tracking-tighter text-black md:text-4xl">RR</span>
-        </div>
+          <span
+            className={[
+              "font-display uppercase tracking-tighter text-black",
+              idle ? "text-xl" : "text-3xl md:text-4xl",
+            ].join(" ")}
+          >
+            RR
+          </span>
+        </motion.div>
       </div>
 
-      <div className="absolute bottom-4 left-4 flex items-center gap-2 rounded-full border-2 border-black bg-white px-3 py-1.5 shadow-[3px_3px_0_#000]">
-        <span
-          className={[
-            "h-2 w-2 rounded-full",
-            speaking ? "bg-brand-lime" : thinking ? "animate-pulse bg-amber-400" : "bg-black/25",
-          ].join(" ")}
-        />
-        <span className="font-mono text-[10px] font-black uppercase tracking-wide text-black">
-          {speaking ? "Speaking" : thinking ? "Listening" : "Idle"}
-        </span>
-      </div>
+      {!idle ? (
+        <div className="absolute bottom-4 left-4 flex items-center gap-2 rounded-full border-2 border-black bg-white px-3 py-1.5 shadow-[3px_3px_0_#000]">
+          <span
+            className={[
+              "h-2 w-2 rounded-full",
+              speaking ? "bg-brand-lime" : thinking ? "animate-pulse bg-amber-400" : "bg-black/25",
+            ].join(" ")}
+          />
+          <span className="font-mono text-[10px] font-black uppercase tracking-wide text-black">
+            {speaking ? "Speaking" : thinking ? "Listening" : "Idle"}
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

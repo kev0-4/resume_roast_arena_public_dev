@@ -23,6 +23,7 @@ definition serves both sides instead of two that can disagree.
 
 END_INTERVIEW = "end_interview"
 SKIP_QUESTION = "skip_question"
+BEGIN_ROUND = "begin_round"
 
 # Kept as an enum so scoring gets a reliable category rather than having to
 # parse intent back out of a free-text reason.
@@ -37,7 +38,10 @@ INTERVIEW_TOOLS = [
                     "End the interview now and send the candidate to scoring. Call this when you "
                     "have genuinely covered enough ground, or when the candidate is wasting your "
                     "time and has not corrected course after one warning. Say your closing line "
-                    "BEFORE calling this."
+                    "BEFORE calling this -- and keep that line to how the interview went. Do NOT "
+                    "describe what happens next or what screen they will see: you do not control "
+                    "it and saying so has already misled a candidate about a round that did not "
+                    "exist."
                 ),
                 "parameters": {
                     "type": "OBJECT",
@@ -57,6 +61,26 @@ INTERVIEW_TOOLS = [
                         },
                     },
                     "required": ["reason", "category"],
+                },
+            },
+            {
+                "name": BEGIN_ROUND,
+                "description": (
+                    "Move the candidate on to the next planned round -- this switches their screen "
+                    "to an exercise. Call it once you have covered enough ground in conversation. "
+                    "Tell them what is coming in one short line BEFORE calling this, because the "
+                    "screen changes the moment you do and silence at that point is disorienting. "
+                    "Only call it when the agenda actually has a next round."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "handoff": {
+                            "type": "STRING",
+                            "description": "One short sentence telling the candidate what they are about to do.",
+                        },
+                    },
+                    "required": ["handoff"],
                 },
             },
             {

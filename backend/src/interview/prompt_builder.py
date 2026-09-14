@@ -177,7 +177,7 @@ def build_resume_display_text(anonymized: Dict[str, Any]) -> str:
     return _format_resume_sections(blocks)
 
 
-def build_live_system_instruction(system_context: str) -> str:
+def build_live_system_instruction(system_context: str, minutes: int = 10) -> str:
     """
     The systemInstruction handed to the Live API session.
 
@@ -211,6 +211,25 @@ and let them answer. Never deliver a monologue or a list.
 - React to what they genuinely just said, quoting their own words back at \
 them where it lands. If an answer is vague, evasive, or unsupported, say \
 so plainly and press again on the same point.
+
+---
+COVER GROUND -- YOU HAVE ABOUT {minutes} MINUTES, NOT AN HOUR:
+
+The most common way this interview fails is spending the whole time \
+grinding one bullet point. Do not do that.
+
+- Aim to cover FOUR OR FIVE distinct areas of their resume and the job \
+description. Breadth is the point: you are testing whether the whole CV \
+holds up, not auditing a single project.
+- Press at most TWICE on any one point. If the second answer is still \
+vague, say so bluntly, note it as a gap, and MOVE ON anyway -- "that's \
+still hand-wavy, but let's move on" is a complete and acceptable ending \
+to a thread. A third attempt at the same question teaches nobody anything.
+- Keep a rough clock in your head. If you are several minutes in and \
+still on the first topic, you are too deep -- change subject immediately.
+- Prefer a new area of the resume over a deeper layer of the current one. \
+If they have three roles and a projects section, all of them are fair \
+game and none of them should swallow the whole interview.
 - Never read out headings, bullet points, or anything that only makes \
 sense written down. Everything you say gets spoken aloud.
 - The candidate can and will interrupt you. If they start talking, stop \
@@ -250,6 +269,211 @@ engage -- warn them once, plainly. If they do it again, say one closing \
 line and then call end_interview with category TIME_WASTING. Do not \
 threaten to end the interview without actually calling the tool: saying \
 "we're done" while the session keeps running wastes their time and ours.\
+"""
+
+
+def describe_conduct(
+    *,
+    seconds_taken: int = 0,
+    pasted: bool = False,
+    runs: int = 0,
+    failed_runs: int = 0,
+    hidden_passed: int | None = None,
+    hidden_total: int | None = None,
+) -> str:
+    """
+    How the answer was produced, as opposed to what it says.
+
+    This exists because the signals were being recorded and then used by
+    nothing. A paste flag written to the database and read by no prompt is
+    not a feature -- it told nobody anything. Same for run history: the
+    agreed design is to record it and let the interviewer press on it,
+    rather than silently deduct points for testing, which would just teach
+    candidates to stop testing.
+    """
+    lines = []
+
+    if seconds_taken:
+        minutes, seconds = divmod(seconds_taken, 60)
+        clock = f"{minutes}m {seconds}s" if minutes else f"{seconds}s"
+        lines.append(f"- They took {clock}.")
+
+    if pasted:
+        lines.append(
+            "- They PASTED code in rather than typing it. That is not proof of anything on its own, "
+            "but combined with the time taken it is worth knowing. Do not accuse them. Do make them "
+            "explain a specific line or decision in their own words -- someone who wrote it can, "
+            "and someone who did not will struggle."
+        )
+
+    if runs:
+        if failed_runs == 0:
+            lines.append(f"- They ran the tests {runs} time(s), passing every time.")
+        else:
+            lines.append(
+                f"- They ran the tests {runs} time(s), {failed_runs} of which failed before they got it working. "
+                "Iterating is normal and good; only press if the pattern looks like guessing rather than reasoning."
+            )
+    elif runs == 0 and seconds_taken:
+        lines.append("- They never ran the tests before submitting.")
+
+    if hidden_total:
+        lines.append(
+            f"- Against hidden tests they never saw: {hidden_passed}/{hidden_total} passed. "
+            "They do not know this number. If they failed some, find out whether they understand why "
+            "without telling them which case broke."
+        )
+
+    return "\n".join(lines)
+
+
+def build_review_prompt(
+    question: Dict[str, Any], submission: str, language: str | None = None, conduct: str = ""
+) -> str:
+    """
+    Grades one exercise submission without executing it.
+
+    The most important output is not the score, it is interviewer_notes --
+    the specific weakness the interviewer should open the debrief on.
+    Probing showed that feeding this into the live session turns "walk me
+    through your solution" into "you claimed O(1) but you call
+    list.remove, justify that", which is the entire point of the round.
+    """
+    extra = ""
+    if question["format"] == "CODE" and language:
+        extra = f"\nLanguage: {language}\n"
+    if question["format"] == "SQL":
+        tables = "\n".join(
+            f"  {t['table']}({', '.join(t['columns'])})" for t in question.get("schema", [])
+        )
+        extra = f"\nSchema they were given:\n{tables}\n"
+
+    return f"""\
+You are grading one exercise from a mock interview. The submission was NOT \
+executed -- judge it by reading it.
+
+---
+QUESTION ({question["format"]}, {question["difficulty"]}):
+
+{question["prompt"]}
+{extra}
+---
+GRADING RUBRIC -- this is what a strong and a weak answer look like:
+
+{question["rubric"]}
+
+---
+THE CANDIDATE SUBMITTED:
+
+{submission.strip() or "(nothing -- they submitted an empty answer)"}
+
+{("---" + chr(10) + "HOW THEY PRODUCED IT -- context, not a verdict:" + chr(10) + chr(10) + conduct + chr(10)) if conduct else ""}
+---
+TASK:
+
+Judge it honestly and specifically.
+
+- `correct`: does it actually solve the stated problem? An empty or \
+irrelevant submission is false.
+- `complexity`: the real time complexity for CODE and SQL (say "n/a" for \
+WRITTEN), regardless of what the candidate claimed.
+- `strengths` and `problems`: concrete, grounded in what they actually \
+wrote. Quote their own identifiers or phrases. No generic advice.
+- `interviewer_notes`: the single sharpest thing to press them on out \
+loud, phrased for an interviewer to act on. This is not shown to the \
+candidate. If they overstated something, say exactly where.
+- `score`: {SCORE_MIN} to {SCORE_MAX} for this exercise alone.\
+"""
+
+
+def build_debrief_addendum(
+    utterances: List[Dict[str, Any]],
+    question: Dict[str, Any],
+    submission: str,
+    review: Dict[str, Any] | None,
+    conduct: str = "",
+) -> str:
+    """
+    Appended to the live system instruction when voice returns after an
+    exercise round.
+
+    Two jobs. It carries the conversation across a socket the candidate
+    never knew closed -- ephemeral tokens silently ignore session
+    resumption handles, verified twice, so re-seeding is the only way the
+    interviewer remembers anything. And it hands over the automated review
+    so the interviewer opens on the real weakness rather than a warm-up.
+    """
+    history = "\n".join(
+        f"{'INTERVIEWER' if u.get('speaker') == 'interviewer' else 'CANDIDATE'}: {(u.get('text') or '').strip()}"
+        for u in utterances
+        if (u.get("text") or "").strip()
+    ) or "(nothing said yet)"
+
+    review_block = ""
+    if review:
+        problems = "\n".join(f"  - {p}" for p in review.get("problems", [])) or "  - none noted"
+        review_block = f"""\
+
+An automated review of that submission found:
+  correct: {review.get("correct")}
+  complexity: {review.get("complexity")}
+  problems:
+{problems}
+
+The sharpest thing to press on: {review.get("interviewer_notes", "")}
+"""
+
+    conduct_block = ""
+    if conduct:
+        conduct_block = f"""
+HOW THEY PRODUCED IT -- context for you, never to be read out as an
+accusation:
+
+{conduct}
+"""
+
+    return f"""
+
+---
+THE CONVERSATION SO FAR -- you already had this exchange with the
+candidate. Continue naturally. Do NOT reintroduce yourself, do NOT restart
+the interview, and do NOT repeat a question you already asked.
+
+{history}
+
+---
+THEY HAVE JUST FINISHED AN EXERCISE ROUND.
+
+Question set ({question["format"]}): {question.get("prompt", "")}
+
+Their submission:
+
+{submission.strip() or "(they submitted nothing)"}
+{review_block}{conduct_block}
+---
+TASK: Debrief the code. This is the part of the interview the exercise
+exists for -- do not skip past it in one question and return to the
+resume.
+
+Open by going straight at the weakest part of the submission. Do not
+praise it first and do not ask them to walk through it from the top --
+you have read it. One short spoken question, and make it the one they
+would least like to be asked.
+
+Then actually discuss the solution, covering three or four of these
+before you move on, one question at a time:
+
+- the complexity they claimed versus what the code actually does;
+- an edge case it does not handle, asked as a scenario rather than a
+  hint ("what happens if the same key is inserted twice?" not "you forgot
+  to handle re-insertion");
+- the design choice they made and what the alternative would cost;
+- what breaks first when the input gets very large.
+
+Same rules as the rest of the interview: at most two presses on any one
+of these, then move on. If a hidden test failed, probe the behaviour
+around it WITHOUT naming the case or telling them a test failed -- find
+out whether they can reason their way to it.
 """
 
 

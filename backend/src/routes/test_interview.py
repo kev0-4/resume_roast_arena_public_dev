@@ -31,6 +31,7 @@ codebase's tests.
 
 import asyncio
 import datetime
+import json
 import uuid
 
 from fastapi.testclient import TestClient
@@ -45,7 +46,8 @@ from backend.src import create_app
 
 from src.dependencies.auth import get_current_user
 from src.interview import llm_client as interview_llm_module
-from src.interview.schemas import InterviewScoreResponse
+from src.interview.schemas import InterviewScoreResponse, ExerciseReview
+from src.interview.planner import InterviewPlan, PlannedRound
 
 
 def _run(coro_fn):
@@ -107,16 +109,28 @@ class _FakeCurrUser:
 FAKE_TOKEN = "auth_tokens/fake-ephemeral-token"
 
 
-def _patch_gemini(monkeypatch, *, score=7):
-    """Replaces both real Gemini interactions. Returns a call counter so
-    tests can assert scoring is NOT paid for twice."""
-    calls = {"score": 0, "token": 0}
+def _patch_gemini(monkeypatch, *, score=7, plan_rounds=None, review_score=6):
+    """
+    Replaces every real Gemini interaction. Returns a call counter so tests
+    can assert scoring is NOT paid for twice.
 
-    async def fake_create_ephemeral_token(system_instruction):
+    generate_plan MUST be patched here even though /start tolerates a
+    planner failure: without it the suite makes a real API call per
+    started interview. That is slow, costs money, and is invisible --
+    /start swallows the failure and falls back, so the tests still pass
+    while quietly depending on a key CI deliberately does not set.
+    """
+    calls = {"score": 0, "token": 0, "plan": 0, "review": 0}
+
+    calls["voices"] = []
+
+    async def fake_create_ephemeral_token(system_instruction, voice=None):
         # Captured so a test can assert the interview context is pinned
-        # into the TOKEN, not merely handed to the client.
+        # into the TOKEN, not merely handed to the client -- and that every
+        # segment of one interview asks for the same voice.
         calls["token"] += 1
         calls["instruction"] = system_instruction
+        calls["voices"].append(voice)
         expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=11)
         return FAKE_TOKEN, expires_at
 
@@ -133,8 +147,38 @@ def _patch_gemini(monkeypatch, *, score=7):
             "fake-model",
         )
 
+    async def fake_generate_plan(prompt):
+        calls["plan"] += 1
+        calls["plan_prompt"] = prompt
+        rounds = plan_rounds if plan_rounds is not None else [
+            {"kind": "CONVERSATION", "question_id": "", "minutes": 8, "focus": "Resume."},
+        ]
+        return (
+            InterviewPlan(vertical="swe", rationale="test plan", rounds=[PlannedRound(**r) for r in rounds]),
+            {"input_tokens": 800, "output_tokens": 200},
+            "fake-model",
+        )
+
+    async def fake_review_submission(prompt):
+        calls["review"] += 1
+        calls["review_prompt"] = prompt
+        return (
+            ExerciseReview(
+                correct=True,
+                complexity="O(n log n)",
+                strengths=["Sorted first."],
+                problems=["Did not handle empty input."],
+                interviewer_notes="Press on the empty-input case.",
+                score=review_score,
+            ),
+            {"input_tokens": 400, "output_tokens": 120},
+            "fake-model",
+        )
+
     monkeypatch.setattr(interview_llm_module, "create_ephemeral_token", fake_create_ephemeral_token)
     monkeypatch.setattr(interview_llm_module, "generate_score", fake_generate_score)
+    monkeypatch.setattr(interview_llm_module, "generate_plan", fake_generate_plan)
+    monkeypatch.setattr(interview_llm_module, "review_submission", fake_review_submission)
     return calls
 
 
@@ -218,7 +262,7 @@ class TestStartInterview:
         # The interviewer needs the authority to end the session and to
         # move past a question; both are tools, so they must reach the client.
         tool_names = {fn["name"] for tool in body["tools"] for fn in tool["function_declarations"]}
-        assert tool_names == {"end_interview", "skip_question"}
+        assert tool_names == {"end_interview", "skip_question", "begin_round"}
 
         # The reference pane shows the resume, and must NOT leak the roast --
         # that would name every weak spot before it's asked about.
@@ -616,6 +660,351 @@ class TestGetInterview:
         assert resp.status_code == 404
 
 
+CODE_ROUND_PLAN = [
+    {"kind": "CONVERSATION", "question_id": "", "minutes": 8, "focus": "Resume."},
+    {"kind": "EXERCISE", "question_id": "merge-intervals", "minutes": 10, "focus": "Arrays."},
+]
+MCQ_ROUND_PLAN = [
+    {"kind": "CONVERSATION", "question_id": "", "minutes": 8, "focus": "Resume."},
+    {"kind": "EXERCISE", "question_id": "mcq-ib-technicals", "minutes": 4, "focus": "Technicals."},
+]
+
+
+class TestRounds:
+    def _setup(self, monkeypatch, suffix, plan_rounds):
+        calls = _patch_gemini(monkeypatch, plan_rounds=plan_rounds)
+        holder = {"calls": calls}
+
+        async def setup():
+            async with AsyncSessionLocal() as db:
+                user_id = await _make_user_id(db, f"{suffix}-{uuid.uuid4().hex[:6]}")
+                holder["user_id"] = user_id
+                holder["resume_session_id"] = await _make_done_resume_session_id(db, user_id)
+
+        _run(setup)
+        app = create_app()
+        holder["app"] = app
+        holder["start"] = _start_interview(app, holder["user_id"], holder["resume_session_id"])
+        holder["interview_id"] = holder["start"]["interview_id"]
+        return holder
+
+    def test_agenda_is_returned_at_start(self, monkeypatch):
+        h = self._setup(monkeypatch, "agenda", CODE_ROUND_PLAN)
+        agenda = h["start"]["agenda"]
+        assert [a["label"] for a in agenda] == ["Conversation", "Coding"]
+
+    def test_round_question_never_leaks_the_answer_key(self, monkeypatch):
+        # An MCQ whose answers reach the browser is not a test.
+        h = self._setup(monkeypatch, "leak", MCQ_ROUND_PLAN)
+        app = h["app"]
+
+        with TestClient(app) as client:
+            # Round 0 is the conversation; the exercise is round 1.
+            client.post(f"/api/v1/interview/{h['interview_id']}/advance", json={})
+            resp = client.get(f"/api/v1/interview/{h['interview_id']}/round/1")
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        serialized = json.dumps(body)
+        assert '"answer"' not in serialized
+        assert '"why"' not in serialized
+        assert "rubric" not in serialized
+        # But it must still carry what the candidate needs to answer.
+        assert len(body["question"]["questions"]) == 4
+        assert len(body["question"]["questions"][0]["options"]) == 4
+
+    def test_cannot_skip_ahead_to_a_later_round(self, monkeypatch):
+        h = self._setup(monkeypatch, "skip", CODE_ROUND_PLAN)
+        with TestClient(h["app"]) as client:
+            resp = client.get(f"/api/v1/interview/{h['interview_id']}/round/1")
+        assert resp.status_code == 409
+
+    def test_mcq_is_scored_deterministically_without_a_model(self, monkeypatch):
+        h = self._setup(monkeypatch, "mcq", MCQ_ROUND_PLAN)
+        app = h["app"]
+
+        with TestClient(app) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/advance", json={})
+            # mcq-ib-technicals answer key is [1, 1, 2, 1]; get three right.
+            resp = client.post(
+                f"/api/v1/interview/{h['interview_id']}/round/1/submit",
+                json={"mcq_answers": [1, 1, 2, 0], "seconds_taken": 90},
+            )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert h["calls"]["review"] == 0, "MCQ must not spend a model call"
+        assert [d["correct"] for d in body["mcq_detail"]] == [True, True, True, False]
+        assert 1 <= body["score"] <= 10
+
+    def test_submitted_round_cannot_be_replayed(self, monkeypatch):
+        h = self._setup(monkeypatch, "replay", MCQ_ROUND_PLAN)
+        with TestClient(h["app"]) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/advance", json={})
+            first = client.post(
+                f"/api/v1/interview/{h['interview_id']}/round/1/submit", json={"mcq_answers": [0, 0, 0, 0]}
+            )
+            # A second attempt at a better score must be refused.
+            second = client.post(
+                f"/api/v1/interview/{h['interview_id']}/round/1/submit", json={"mcq_answers": [1, 1, 2, 1]}
+            )
+        assert first.status_code == 200
+        assert second.status_code == 409
+
+    def test_code_round_result_hides_the_interviewer_notes(self, monkeypatch):
+        # Those notes are the debrief's ammunition -- showing them would let
+        # the candidate prepare for the exact question coming next.
+        h = self._setup(monkeypatch, "notes", CODE_ROUND_PLAN)
+        app = h["app"]
+
+        with TestClient(app) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/advance", json={})
+            resp = client.post(
+                f"/api/v1/interview/{h['interview_id']}/round/1/submit",
+                json={"answer": "def merge_intervals(x): return x", "language": "python", "pasted": True},
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert h["calls"]["review"] == 1
+        assert "interviewer_notes" not in json.dumps(body)
+        assert "Press on the empty-input case." not in json.dumps(body)
+        assert body["problems"] == ["Did not handle empty input."]
+
+    def test_one_voice_for_the_whole_interview(self, monkeypatch):
+        # The interviewer must not become a different person after the
+        # coding round. Every segment mints its own token, so they have to
+        # agree on a voice without anything being stored.
+        h = self._setup(monkeypatch, "onevoice", CODE_ROUND_PLAN)
+        app = h["app"]
+
+        with TestClient(app) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/advance", json={})
+            client.post(
+                f"/api/v1/interview/{h['interview_id']}/round/1/submit",
+                json={"answer": "def merge_intervals(x): return x", "language": "python"},
+            )
+            client.post(f"/api/v1/interview/{h['interview_id']}/voice-token", json={})
+
+        voices = h["calls"]["voices"]
+        assert len(voices) >= 2, "expected a token at /start and another for the debrief"
+        assert all(v == voices[0] for v in voices), f"voice changed mid-interview: {voices}"
+        assert voices[0], "a voice must actually be chosen, not left to the API default"
+
+    def test_different_interviews_get_different_voices(self, monkeypatch):
+        # Variety across interviews is the point of deriving it rather than
+        # pinning one globally. Sampled over many ids so this cannot pass by
+        # luck on a single collision.
+        from src.interview.llm_client import voice_for_interview
+        from src.config import GEMINI_LIVE_VOICES
+
+        picked = {voice_for_interview(uuid.uuid4()) for _ in range(300)}
+        assert len(picked) > 1, "every interview drew the same voice"
+        assert picked <= set(GEMINI_LIVE_VOICES)
+        # A hash spread over 300 draws should reach most of a 20-voice list.
+        assert len(picked) >= len(GEMINI_LIVE_VOICES) // 2
+
+    def test_the_same_interview_always_resolves_to_one_voice(self, monkeypatch):
+        from src.interview.llm_client import voice_for_interview
+
+        interview_id = uuid.uuid4()
+        assert len({voice_for_interview(interview_id) for _ in range(20)}) == 1
+        # str and UUID forms must agree -- routes pass both.
+        assert voice_for_interview(interview_id) == voice_for_interview(str(interview_id))
+
+    def test_interviewer_is_told_its_own_agenda(self, monkeypatch):
+        # Observed failure: asked to move to a coding round, the
+        # interviewer replied "I have no coding round scheduled for you
+        # today" while two exercises were scheduled. It had a begin_round
+        # tool and no idea whether there was anything to begin.
+        h = self._setup(monkeypatch, "agenda-known", CODE_ROUND_PLAN)
+        instruction = h["calls"]["instruction"]
+
+        assert "TODAY'S AGENDA" in instruction
+        assert "Merge overlapping intervals" in instruction, "the scheduled exercise must be named"
+        assert "Coding exercise" in instruction, "and its format stated"
+        assert "you are here" in instruction
+        assert "call begin_round to move to the next item" in instruction
+
+    def test_interviewer_is_forbidden_from_narrating_the_next_screen(self, monkeypatch):
+        # Observed: having finished the last round, the interviewer told the
+        # candidate "the system will move you directly to the design
+        # challenge next." No such round exists anywhere. Knowing the
+        # agenda was not enough -- it had to be told not to predict the
+        # screen at all, because it does not control it.
+        h = self._setup(monkeypatch, "no-narrate", CODE_ROUND_PLAN)
+        instruction = h["calls"]["instruction"]
+
+        assert "NEVER NARRATE WHAT THE SCREEN IS ABOUT TO DO" in instruction
+        assert "the system will move you to" in instruction
+        assert "no design challenge" in instruction.lower() or "There was no design challenge" in instruction
+        assert "call end_interview" in instruction
+
+    def test_conversation_only_interview_is_told_there_is_nothing_next(self, monkeypatch):
+        # The opposite failure: promising an exercise that does not exist.
+        h = self._setup(
+            monkeypatch,
+            "agenda-empty",
+            [{"kind": "CONVERSATION", "question_id": "", "minutes": 10, "focus": "Resume."}],
+        )
+        instruction = h["calls"]["instruction"]
+        assert "There is nothing scheduled after this" in instruction
+        assert "Do not promise the candidate an exercise" in instruction
+
+    def test_agenda_follows_the_candidate_into_the_debrief(self, monkeypatch):
+        h = self._setup(monkeypatch, "agenda-debrief", CODE_ROUND_PLAN)
+        app = h["app"]
+
+        with TestClient(app) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/advance", json={})
+            client.post(
+                f"/api/v1/interview/{h['interview_id']}/round/1/submit",
+                json={"answer": "def merge_intervals(x): return x", "language": "python"},
+            )
+            voice = client.post(f"/api/v1/interview/{h['interview_id']}/voice-token", json={})
+
+        instruction = voice.json()["system_instruction"]
+        assert "TODAY'S AGENDA" in instruction
+        # Round 1 is done, so nothing remains and it must not invent more.
+        assert "There is nothing scheduled after this" in instruction
+
+    def test_hidden_expected_values_never_reach_the_client(self, monkeypatch):
+        # This is what makes hidden tests hidden rather than merely
+        # undisplayed: the inputs must travel (the code runs in the
+        # browser) but the expected outputs must not, or tweaking until the
+        # visible tests go green is enough to game the round.
+        from src.interview.catalogue import get_question, public_question
+
+        entry = get_question("merge-intervals")
+        pub = public_question(entry)
+        cases = pub["harness"]["cases"]
+
+        hidden = [c for c in cases if c.get("hidden")]
+        visible = [c for c in cases if not c.get("hidden")]
+        assert hidden, "expected some hidden cases"
+        assert visible, "expected some visible cases"
+
+        for case in hidden:
+            assert "expected" not in case, f"hidden case {case.get('name')!r} leaked its expected value"
+            # The inputs still have to be there or the code cannot be run.
+            assert case.get("args") is not None or case.get("ops") is not None
+
+        # Visible cases keep theirs: the worked examples print them anyway.
+        for case in visible:
+            assert "expected" in case
+
+    def test_reported_outputs_are_graded_against_server_side_expectations(self, monkeypatch):
+        from src.interview.catalogue import get_question
+        from src.interview import service
+
+        entry = get_question("merge-intervals")
+        cases = entry["harness"]["cases"]
+
+        # Claim every case produced exactly what it should.
+        honest = [
+            {"name": c["name"], "got": json.dumps(c["expected"], separators=(",", ":"))} for c in cases
+        ]
+        graded = service.grade_reported_cases(entry, honest)
+        assert graded["hidden_passed"] == graded["hidden_total"] > 0
+        assert graded["visible_passed"] == graded["visible_total"] > 0
+
+        # Now claim a hidden case produced nonsense.
+        hidden_name = next(c["name"] for c in cases if c.get("hidden"))
+        lying = [
+            {
+                "name": c["name"],
+                "got": json.dumps("nope" if c["name"] == hidden_name else c["expected"], separators=(",", ":")),
+            }
+            for c in cases
+        ]
+        graded = service.grade_reported_cases(entry, lying)
+        assert graded["hidden_passed"] == graded["hidden_total"] - 1
+        assert hidden_name in graded["failed_hidden"]
+
+    def test_conduct_reaches_the_reviewer_and_the_debrief(self, monkeypatch):
+        # The paste flag was being written to the database and read by
+        # nothing -- recorded but invisible, which is the same as absent.
+        h = self._setup(monkeypatch, "conduct", CODE_ROUND_PLAN)
+        app = h["app"]
+
+        with TestClient(app) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION})
+            client.post(f"/api/v1/interview/{h['interview_id']}/advance", json={})
+            client.post(
+                f"/api/v1/interview/{h['interview_id']}/round/1/submit",
+                json={
+                    "answer": "def merge_intervals(x): return x",
+                    "language": "python",
+                    "seconds_taken": 37,
+                    "pasted": True,
+                    "runs": 4,
+                    "failed_runs": 3,
+                },
+            )
+            voice = client.post(f"/api/v1/interview/{h['interview_id']}/voice-token", json={})
+
+        # The reviewer was told.
+        review_prompt = h["calls"]["review_prompt"]
+        assert "PASTED" in review_prompt
+        assert "37s" in review_prompt
+        assert "4 time(s)" in review_prompt
+
+        # And so was the interviewer, for the debrief.
+        instruction = voice.json()["system_instruction"]
+        assert "PASTED" in instruction
+        assert "Do not accuse them" in instruction
+
+    def test_voice_token_reseeds_with_the_submission_and_review(self, monkeypatch):
+        h = self._setup(monkeypatch, "reseed", CODE_ROUND_PLAN)
+        app = h["app"]
+
+        with TestClient(app) as client:
+            client.post(
+                f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION}
+            )
+            client.post(f"/api/v1/interview/{h['interview_id']}/advance", json={})
+            client.post(
+                f"/api/v1/interview/{h['interview_id']}/round/1/submit",
+                json={"answer": "def merge_intervals(x): return sorted(x)", "language": "python"},
+            )
+            resp = client.post(f"/api/v1/interview/{h['interview_id']}/voice-token", json={})
+
+        assert resp.status_code == 200, resp.text
+        instruction = resp.json()["system_instruction"]
+        # Carries the conversation (ephemeral tokens ignore resumption
+        # handles, so this is the ONLY way it remembers).
+        assert "Redis, read-through" in instruction
+        assert "do NOT restart the interview" in instruction.lower() or "not restart" in instruction.lower()
+        # Carries the submission and the review's notes.
+        assert "sorted(x)" in instruction
+        assert "Press on the empty-input case." in instruction
+
+    def test_interview_without_a_plan_still_works(self, monkeypatch):
+        # Every interview created before this feature has plan = NULL.
+        h = self._setup(monkeypatch, "legacy", CODE_ROUND_PLAN)
+        interview_id = h["interview_id"]
+
+        async def wipe_plan():
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import text
+
+                await db.execute(
+                    text('UPDATE "InterviewSessions" SET plan = NULL WHERE id = :i'), {"i": interview_id}
+                )
+                await db.commit()
+
+        _run(wipe_plan)
+
+        with TestClient(h["app"]) as client:
+            # No exercise rounds exist, so asking for one 404s rather than
+            # exploding, and voice still mints.
+            missing = client.get(f"/api/v1/interview/{interview_id}/round/0")
+            voice = client.post(f"/api/v1/interview/{interview_id}/voice-token", json={})
+
+        assert missing.status_code == 409  # round 0 is a conversation
+        assert voice.status_code == 200
+
+
 class TestEligibility:
     def test_true_for_owner_of_done_session(self, monkeypatch):
         holder = {}
@@ -709,7 +1098,18 @@ class TestInterviewLeaderboardRoutes:
         with TestClient(app) as client:
             lb_resp = client.get("/interview-leaderboard?limit=100")
         assert lb_resp.status_code == 200
-        assert any(e["score"] == 7 for e in lb_resp.json()["entries"])
+        body = lb_resp.json()
+        # Deliberately NOT "is our score-7 row in the top 100": the route
+        # caps limit at 100 and this suite has run against the same dev
+        # database enough times that over a hundred higher scores exist, so
+        # that assertion fails on accumulation rather than on a defect.
+        # The board is checked for shape and ordering; that THIS interview
+        # scored 7 is asserted through /me below, which is user-scoped and
+        # cannot be crowded out.
+        assert body["total"] >= 1
+        assert len(body["entries"]) <= 100
+        scores = [e["score"] for e in body["entries"]]
+        assert scores == sorted(scores, reverse=True), "leaderboard must be ordered by score"
 
         app.dependency_overrides[get_current_user] = lambda: _FakeCurrUser(holder["user_id"])
         with TestClient(app) as client:

@@ -19,6 +19,24 @@ SCORE_MIN = 1
 SCORE_MAX = 10
 
 
+class ExerciseReview(BaseModel):
+    """
+    The automated read on one exercise submission.
+
+    `interviewer_notes` is the field that matters. It is NOT shown to the
+    candidate -- it is fed into the debrief's system instruction so the
+    interviewer can go straight at the weakest part of the answer instead
+    of asking them to walk through it. Probing showed this is what turns a
+    generic debrief into a real interrogation.
+    """
+    correct: bool
+    complexity: str
+    strengths: List[str]
+    problems: List[str]
+    interviewer_notes: str
+    score: int
+
+
 class InterviewScoreResponse(BaseModel):
     """
     Asked of Gemini once, after the live session ends, over the full

@@ -28,6 +28,7 @@ what turns them back into readable speaker turns.
 """
 
 import datetime
+import json
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -97,8 +98,19 @@ def merge_into_utterances(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 async def create_interview_session(
-    db: AsyncSession, *, user_id: str | uuid.UUID, resume_session_id: str | uuid.UUID, job_description: str
+    db: AsyncSession,
+    *,
+    user_id: str | uuid.UUID,
+    resume_session_id: str | uuid.UUID,
+    job_description: str,
+    interview_id: uuid.UUID | None = None,
 ) -> InterviewSessions:
+    """
+    interview_id may be supplied by the caller so the id exists BEFORE the
+    row does. /start needs it to choose the interview's voice, which is
+    derived from the id, while still minting the token before writing
+    anything -- a mint failure then leaves nothing to clean up.
+    """
     # turn_count / max_turns are vestigial: a live conversation has no
     # turns to count, and its length is bounded by the token's expiry
     # instead. The columns are written as zeroes rather than dropped --
@@ -106,7 +118,7 @@ async def create_interview_session(
     # to take while production's automated migration path is this new.
     # Flagged for a later cleanup migration.
     interview = InterviewSessions(
-        id=uuid.uuid4(),
+        id=interview_id or uuid.uuid4(),
         user_id=user_id,
         resume_session_id=resume_session_id,
         status=InterviewStatusEnum.IN_PROGRESS.value,
@@ -141,6 +153,139 @@ async def set_transcript_blob_path(db: AsyncSession, interview: InterviewSession
         await db.rollback()
         raise
     return interview
+
+
+async def set_plan(db: AsyncSession, interview: InterviewSessions, plan: Dict[str, Any]) -> InterviewSessions:
+    interview.plan = plan
+    interview.current_round = 0
+    interview.updated_at = datetime.datetime.utcnow()
+    try:
+        await db.commit()
+        await db.refresh(interview)
+    except Exception:
+        await db.rollback()
+        raise
+    return interview
+
+
+async def record_round_result(
+    db: AsyncSession, interview: InterviewSessions, result: Dict[str, Any]
+) -> InterviewSessions:
+    """
+    Appends one exercise result and advances the round pointer.
+
+    The pointer lives here rather than on the client so a submission
+    cannot be replayed for a second grading, and a client cannot jump
+    ahead to a round it prefers. Re-assigned rather than mutated in place:
+    SQLAlchemy does not reliably detect in-place mutation of a JSONB list.
+    """
+    interview.round_results = [*(interview.round_results or []), result]
+    interview.current_round = (interview.current_round or 0) + 1
+    interview.updated_at = datetime.datetime.utcnow()
+    try:
+        await db.commit()
+        await db.refresh(interview)
+    except Exception:
+        await db.rollback()
+        raise
+    return interview
+
+
+def grade_reported_cases(
+    question: Dict[str, Any], reported: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Compares the outputs the browser reported against the expected values,
+    which never left this process.
+
+    This is what makes hidden tests genuinely hidden rather than merely
+    undisplayed: the candidate's machine ran the code and said what it
+    produced, but only the server knows what it should have produced.
+
+    Client-reported, so it inherits the same trust boundary as the
+    transcript -- a determined client could lie about its outputs. It is
+    not the score on its own; it is evidence handed to the reviewer, and
+    the reviewer reads the actual code.
+    """
+    harness = question.get("harness") or {}
+    by_name = {}
+    for index, case in enumerate(harness.get("cases", [])):
+        by_name[case.get("name") or f"case {index + 1}"] = case
+
+    visible_passed = visible_total = hidden_passed = hidden_total = 0
+    failed_hidden: List[str] = []
+
+    for item in reported:
+        case = by_name.get(item.get("name"))
+        if case is None:
+            continue
+        expected = json.dumps(case.get("expected"), sort_keys=True, separators=(",", ":"))
+        try:
+            got = json.dumps(json.loads(item.get("got") or "null"), sort_keys=True, separators=(",", ":"))
+        except (ValueError, TypeError):
+            got = None
+        passed = got == expected
+
+        if case.get("hidden"):
+            hidden_total += 1
+            hidden_passed += 1 if passed else 0
+            if not passed:
+                failed_hidden.append(case.get("name", "?"))
+        else:
+            visible_total += 1
+            visible_passed += 1 if passed else 0
+
+    return {
+        "visible_passed": visible_passed,
+        "visible_total": visible_total,
+        "hidden_passed": hidden_passed,
+        "hidden_total": hidden_total,
+        "failed_hidden": failed_hidden,
+    }
+
+
+def score_mcq(question: Dict[str, Any], answers: List[int]) -> Dict[str, Any]:
+    """
+    Auto-scores an MCQ round. No model in the loop: the answer key is right
+    here, so grading is deterministic, instant and free.
+
+    Unanswered questions score zero rather than raising -- a candidate who
+    ran out of time still gets a graded round.
+    """
+    questions = question.get("questions", [])
+    correct = 0
+    detail = []
+    for index, q in enumerate(questions):
+        given = answers[index] if index < len(answers) else None
+        hit = given == q["answer"]
+        correct += 1 if hit else 0
+        detail.append(
+            {
+                "prompt": q["prompt"],
+                "given": given,
+                "answer": q["answer"],
+                "correct": hit,
+                "why": q.get("why", ""),
+            }
+        )
+
+    total = len(questions) or 1
+    return {
+        "correct": correct == total,
+        "complexity": "n/a",
+        "strengths": [f"{correct} of {total} correct."],
+        "problems": [f"Got wrong: {d['prompt'][:70]}" for d in detail if not d["correct"]] or [],
+        "interviewer_notes": (
+            f"Scored {correct}/{total}. Press on: "
+            + "; ".join(d["prompt"][:60] for d in detail if not d["correct"])
+            if correct < total
+            else f"Scored {correct}/{total} -- clean sweep, so push somewhere harder."
+        ),
+        # Map to the same 1-10 band every other round uses, so blending
+        # later does not have to special-case MCQ.
+        "score": max(1, round(1 + 9 * (correct / total))),
+        "detail": detail,
+    }
 
 
 async def mark_interview_abandoned(db: AsyncSession, interview: InterviewSessions) -> InterviewSessions:

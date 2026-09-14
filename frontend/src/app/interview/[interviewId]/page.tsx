@@ -15,9 +15,11 @@ import { useAuth } from "@/lib/auth-context";
 import { useLiveInterview } from "@/hooks/use-live-interview";
 import { takeInterviewStart } from "@/lib/interview-handoff";
 import type { InterviewStartResponse } from "@/lib/interview-api";
+import { motion } from "framer-motion";
 import { InterviewerPresence } from "@/components/interview/interviewer-presence";
 import { TranscriptPane } from "@/components/interview/transcript-pane";
 import { ResumePane } from "@/components/interview/resume-pane";
+import { RoundStage, RoundVerdict } from "@/components/interview/round-stage";
 import { ResultsSummary } from "@/components/interview/results-summary";
 
 function formatClock(seconds: number): string {
@@ -135,6 +137,66 @@ export default function InterviewRoomPage({ params }: { params: Promise<{ interv
     );
   }
 
+  // The handoff: the interviewer has said what's coming and the screen is
+  // about to change. A beat of explanation beats a hard cut.
+  if (live.phase === "handoff") {
+    return (
+      <RoomShell>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="flex flex-1 flex-col items-center justify-center gap-5 text-center"
+        >
+          <motion.div
+            layoutId="interviewer-presence"
+            className="flex h-24 w-24 items-center justify-center rounded-full border-[3px] border-black bg-brand-lime shadow-[5px_5px_0_#000]"
+          >
+            <span className="font-display text-3xl uppercase tracking-tighter text-black">RR</span>
+          </motion.div>
+          {live.handoffLine ? (
+            <p className="max-w-md font-mono text-sm italic text-brand-lime/90">&ldquo;{live.handoffLine}&rdquo;</p>
+          ) : null}
+          <div className="flex items-center gap-2 font-mono text-[11px] font-semibold text-white/50">
+            <Loader2 size={13} className="animate-spin" />
+            Setting up your workspace
+          </div>
+        </motion.div>
+      </RoomShell>
+    );
+  }
+
+  if (live.phase === "exercise" && live.round) {
+    return (
+      <RoomShell wide>
+        <RoundStage
+          question={live.round.question}
+          secondsLeft={live.roundSecondsLeft}
+          submitting={live.submittingRound}
+          onSubmit={live.submitRound}
+          presence={
+            <InterviewerPresence amplitude={live.amplitude} speaking={false} thinking={false} idle />
+          }
+          transcript={<TranscriptPane lines={live.lines} interim="" />}
+          onDryRun={live.dryRun}
+        />
+      </RoomShell>
+    );
+  }
+
+  if (live.phase === "round-verdict" && live.roundResult) {
+    return (
+      <RoomShell>
+        <RoundVerdict
+          score={live.roundResult.score}
+          strengths={live.roundResult.strengths}
+          problems={live.roundResult.problems}
+          continuing={false}
+          onContinue={() => void live.continueToDebrief()}
+        />
+      </RoomShell>
+    );
+  }
+
   const connecting = live.phase === "connecting";
 
   return (
@@ -223,11 +285,21 @@ export default function InterviewRoomPage({ params }: { params: Promise<{ interv
 
 // Deliberately no Navbar: this is a call, and a nav rail full of exits is
 // the wrong shape for one. Matches Meet, which hides its own chrome too.
-function RoomShell({ children }: { children: React.ReactNode }) {
+function RoomShell({ children, wide = false }: { children: React.ReactNode; wide?: boolean }) {
   return (
     <div className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-brand-blue font-mono selection:bg-brand-lime selection:text-brand-blue">
       <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(to_right,#ffffff15_1px,transparent_1px),linear-gradient(to_bottom,#ffffff15_1px,transparent_1px)] bg-[size:4rem_4rem]" />
-      <div className="relative z-10 mx-auto flex h-full w-full max-w-6xl flex-col px-4 md:px-8">{children}</div>
+      {/* A conversation reads better in a column; an IDE does not. The
+          exercise round gets close to the full viewport, because a 28%
+          problem panel inside a 1152px box is a column of six words. */}
+      <div
+        className={[
+          "relative z-10 mx-auto flex h-full w-full flex-col px-4",
+          wide ? "max-w-[2000px] md:px-6" : "max-w-6xl md:px-8",
+        ].join(" ")}
+      >
+        {children}
+      </div>
     </div>
   );
 }

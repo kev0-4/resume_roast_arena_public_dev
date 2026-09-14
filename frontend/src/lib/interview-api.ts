@@ -23,8 +23,188 @@ export interface InterviewStartResponse {
   /** The anonymized resume, for the in-room reference pane. Never the
    *  roast -- that would hand over the list of weak spots in advance. */
   resume_text: string;
+  /** The planned shape of the interview, so the rounds are never a
+   *  mid-session surprise. Empty for interviews that predate planning. */
+  agenda: AgendaItem[];
   /** ISO8601 -- when the session must end. Drives the countdown. */
   expires_at: string;
+}
+
+export type RoundFormat = "CODE" | "SQL" | "MCQ" | "WRITTEN";
+
+/** One line of the agenda shown before the candidate joins. */
+export interface AgendaItem {
+  label: string;
+  detail: string;
+  minutes: number;
+}
+
+export interface SqlTable {
+  table: string;
+  columns: string[];
+}
+
+export interface McqQuestion {
+  prompt: string;
+  options: string[];
+}
+
+export interface CodeCase {
+  name?: string;
+  /** Hidden cases arrive WITHOUT `expected` -- the server keeps it. */
+  hidden?: boolean;
+  args?: unknown[];
+  construct?: unknown[];
+  ops?: [string, unknown[]][];
+  expected: unknown;
+}
+
+/** Test cases for a CODE question. `entry` is per-language because the
+ *  starters are idiomatic per language (merge_intervals vs mergeIntervals). */
+export interface CodeHarness {
+  kind: "call" | "ops";
+  entry: Record<string, string>;
+  cases: CodeCase[];
+}
+
+/** Everything needed to run a SQL answer in the candidate's own browser. */
+export interface SqlHarness {
+  setup: string[];
+  verify: string;
+  expected: unknown[][];
+  /** The candidate's statement is a SELECT, so wrap it as a view first. */
+  wrap_candidate_as_view?: boolean;
+}
+
+export interface WorkedExample {
+  input: string;
+  output: string;
+  explanation?: string;
+}
+
+/** A question as the candidate may see it -- the answer key and rubric are
+ *  stripped server-side and never reach the browser. */
+export interface RoundQuestion {
+  id: string;
+  format: RoundFormat;
+  difficulty: string;
+  topics: string[];
+  minutes: number;
+  prompt?: string;
+  examples?: WorkedExample[];
+  constraints?: string[];
+  starter?: Record<string, string>;
+  schema?: SqlTable[];
+  harness?: SqlHarness | CodeHarness;
+  questions?: McqQuestion[];
+}
+
+export interface DryRunResult {
+  looks_correct: boolean;
+  summary: string;
+  problems: string[];
+}
+
+/** "Run" for Java and C/C++: a server-side READ of the code, never an
+ *  execution. Presented as an assessment, never as a test result. */
+export async function dryRunRound(
+  interviewId: string,
+  index: number,
+  idToken: string,
+  body: { answer: string; language: string },
+): Promise<DryRunResult> {
+  const resp = await fetch(`${API_BASE_URL}/api/v1/interview/${interviewId}/round/${index}/dry-run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) throw await errorFromResponse(resp, "Could not check that code");
+  return resp.json();
+}
+
+export interface InterviewRound {
+  index: number;
+  minutes: number;
+  question: RoundQuestion;
+}
+
+export interface McqAnswerDetail {
+  prompt: string;
+  given: number | null;
+  answer: number;
+  correct: boolean;
+  why: string;
+}
+
+export interface RoundResult {
+  index: number;
+  score: number;
+  strengths: string[];
+  problems: string[];
+  mcq_detail?: McqAnswerDetail[] | null;
+  next_round_kind?: string | null;
+  next_round_index?: number | null;
+}
+
+export async function getInterviewRound(
+  interviewId: string,
+  index: number,
+  idToken: string,
+): Promise<InterviewRound> {
+  const resp = await fetch(`${API_BASE_URL}/api/v1/interview/${interviewId}/round/${index}`, {
+    headers: { Authorization: `Bearer ${idToken}` },
+    cache: "no-store",
+  });
+  if (!resp.ok) throw await errorFromResponse(resp, "Could not load this round");
+  return resp.json();
+}
+
+/** Leaves a conversation round. Driven by the interviewer's begin_round tool. */
+export async function advanceInterviewRound(interviewId: string, idToken: string): Promise<RoundResult> {
+  const resp = await fetch(`${API_BASE_URL}/api/v1/interview/${interviewId}/advance`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify({}),
+  });
+  if (!resp.ok) throw await errorFromResponse(resp, "Could not move to the next round");
+  return resp.json();
+}
+
+export async function submitInterviewRound(
+  interviewId: string,
+  index: number,
+  idToken: string,
+  body: {
+    answer?: string;
+    mcq_answers?: number[];
+    language?: string | null;
+    seconds_taken: number;
+    pasted: boolean;
+    runs?: number;
+    failed_runs?: number;
+    /** What their code produced per case, including hidden ones whose
+     *  expected values the browser was never given. */
+    case_outputs?: { name: string; got: string }[];
+  },
+): Promise<RoundResult> {
+  const resp = await fetch(`${API_BASE_URL}/api/v1/interview/${interviewId}/round/${index}/submit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) throw await errorFromResponse(resp, "Could not submit this round");
+  return resp.json();
+}
+
+/** Re-opens voice after an exercise, re-seeded with everything that happened. */
+export async function mintVoiceToken(interviewId: string, idToken: string): Promise<InterviewStartResponse> {
+  const resp = await fetch(`${API_BASE_URL}/api/v1/interview/${interviewId}/voice-token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify({}),
+  });
+  if (!resp.ok) throw await errorFromResponse(resp, "Could not bring the interviewer back");
+  return resp.json();
 }
 
 /** Reported at /complete, from the interviewer's own tool calls. */

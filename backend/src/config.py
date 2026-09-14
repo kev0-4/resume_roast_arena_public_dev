@@ -48,6 +48,30 @@ GEMINI_INTERVIEW_MODEL = os.getenv("GEMINI_INTERVIEW_MODEL", GEMINI_ROAST_MODEL)
 # models accept bidiGenerateContent at all.
 GEMINI_LIVE_MODEL = os.getenv("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview")
 
+# The interviewer's voice is chosen PER INTERVIEW and then pinned for the
+# whole of it.
+#
+# Without pinning, the API picks a voice per session, and a multi-round
+# interview opens several -- so the interviewer audibly became a different
+# person after the coding round. Pinning one global voice fixes that but
+# makes every interview sound identical, which is worse for a product
+# people run repeatedly. Deriving it from the interview id gives both: a
+# different interviewer each time, the same one throughout.
+#
+# All 20 verified accepted by gemini-3.1-flash-live-preview -- an invalid
+# name would break every interview unlucky enough to draw it, and would
+# present as a dead session rather than a config error.
+GEMINI_LIVE_VOICES = tuple(
+    v.strip()
+    for v in os.getenv(
+        "GEMINI_LIVE_VOICES",
+        "Puck,Charon,Kore,Fenrir,Aoede,Leda,Orus,Zephyr,Autonoe,Callirrhoe,"
+        "Enceladus,Iapetus,Umbriel,Algieba,Despina,Erinome,Laomedeia,Schedar,"
+        "Achird,Sadachbia",
+    ).split(",")
+    if v.strip()
+)
+
 # Ephemeral-token lifetimes, both deliberately short.
 #
 # NEW_SESSION is the window in which the browser must OPEN its socket; once

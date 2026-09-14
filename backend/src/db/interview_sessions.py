@@ -33,6 +33,16 @@ class InterviewSessions(Base):
 
     transcript_blob_path: Optional[str] = Column(Text, nullable=True)
 
+    # The planned round structure, decided once at /start from the resume
+    # and job description. Null on interviews created before rounds
+    # existed, which the routes read as conversation-only.
+    plan: Optional[dict] = Column(JSONB, nullable=True)
+    # One entry per completed exercise round: submission, automated review,
+    # seconds taken, and whether the answer was pasted in.
+    round_results: Optional[list] = Column(JSONB, nullable=True)
+    # Held server-side so a client cannot skip ahead or replay a round.
+    current_round = Column(Integer, default=0, nullable=False, server_default="0")
+
     score: Optional[int] = Column(Integer, nullable=True)
     strengths: Optional[list] = Column(JSONB, nullable=True)
     weaknesses: Optional[list] = Column(JSONB, nullable=True)
