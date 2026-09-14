@@ -49,6 +49,22 @@ export interface McqQuestion {
   options: string[];
 }
 
+export interface CodeCase {
+  name?: string;
+  args?: unknown[];
+  construct?: unknown[];
+  ops?: [string, unknown[]][];
+  expected: unknown;
+}
+
+/** Test cases for a CODE question. `entry` is per-language because the
+ *  starters are idiomatic per language (merge_intervals vs mergeIntervals). */
+export interface CodeHarness {
+  kind: "call" | "ops";
+  entry: Record<string, string>;
+  cases: CodeCase[];
+}
+
 /** Everything needed to run a SQL answer in the candidate's own browser. */
 export interface SqlHarness {
   setup: string[];
@@ -77,8 +93,31 @@ export interface RoundQuestion {
   constraints?: string[];
   starter?: Record<string, string>;
   schema?: SqlTable[];
-  harness?: SqlHarness;
+  harness?: SqlHarness | CodeHarness;
   questions?: McqQuestion[];
+}
+
+export interface DryRunResult {
+  looks_correct: boolean;
+  summary: string;
+  problems: string[];
+}
+
+/** "Run" for Java and C/C++: a server-side READ of the code, never an
+ *  execution. Presented as an assessment, never as a test result. */
+export async function dryRunRound(
+  interviewId: string,
+  index: number,
+  idToken: string,
+  body: { answer: string; language: string },
+): Promise<DryRunResult> {
+  const resp = await fetch(`${API_BASE_URL}/api/v1/interview/${interviewId}/round/${index}/dry-run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) throw await errorFromResponse(resp, "Could not check that code");
+  return resp.json();
 }
 
 export interface InterviewRound {

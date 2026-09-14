@@ -177,6 +177,7 @@ export default function InterviewRoomPage({ params }: { params: Promise<{ interv
             <InterviewerPresence amplitude={live.amplitude} speaking={false} thinking={false} idle />
           }
           transcript={<TranscriptPane lines={live.lines} interim="" />}
+          onDryRun={live.dryRun}
         />
       </RoomShell>
     );

@@ -17,10 +17,10 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Check, Clipboard, Loader2, Send } from "lucide-react";
-import type { RoundQuestion } from "@/lib/interview-api";
+import type { CodeHarness, DryRunResult, RoundQuestion, SqlHarness } from "@/lib/interview-api";
 import { CollapsedProblemTab, McqPane, Panel, ProblemPanel, WrittenPane } from "./round-panes";
 import { LANGUAGE_LABELS } from "./code-editor";
-import { SqlRunPanel } from "./run-panel";
+import { CodeRunPanel, SqlRunPanel } from "./run-panel";
 
 // CodeMirror and its grammars are several hundred KB and most interviews --
 // every HR, IB and conversation-only session -- never open an editor. Keep
@@ -50,6 +50,8 @@ export interface RoundStageProps {
    *  animate across from the conversation layout rather than being rebuilt. */
   presence: React.ReactNode;
   transcript: React.ReactNode;
+  /** Server-side read for languages with no browser runtime. */
+  onDryRun?: (args: { answer: string; language: string }) => Promise<DryRunResult>;
 }
 
 export function RoundStage({
@@ -59,6 +61,7 @@ export function RoundStage({
   onSubmit,
   presence,
   transcript,
+  onDryRun,
 }: RoundStageProps) {
   const languages = useMemo(() => {
     if (question.format === "SQL") return ["sql"];
@@ -222,11 +225,21 @@ export function RoundStage({
           )}
         </Panel>
 
-        {/* Self-check before submitting. Only where we can actually run the
-            answer in the browser -- the score still comes from the server. */}
-        {question.format === "SQL" && question.harness ? (
+        {/* Self-check before submitting. The score still comes from the
+            server's review either way -- this only spares the candidate
+            submitting an answer they were never able to try. */}
+        {question.harness ? (
           <div className="mt-3">
-            <SqlRunPanel sql={code} harness={question.harness} />
+            {question.format === "SQL" ? (
+              <SqlRunPanel sql={code} harness={question.harness as SqlHarness} />
+            ) : question.format === "CODE" && onDryRun ? (
+              <CodeRunPanel
+                code={code}
+                language={language}
+                harness={question.harness as CodeHarness}
+                onDryRun={onDryRun}
+              />
+            ) : null}
           </div>
         ) : null}
 

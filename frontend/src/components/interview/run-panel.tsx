@@ -11,9 +11,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, Check, Loader2, Play, X } from "lucide-react";
-import type { SqlHarness } from "@/lib/interview-api";
-import { getRuntime, runtimeStatus, subscribeToRuntimes } from "@/lib/runners/runtime";
+import type { CodeHarness, DryRunResult, SqlHarness } from "@/lib/interview-api";
+import {
+  disposeRuntime,
+  getRuntime,
+  runtimeForFormat,
+  runtimeStatus,
+  subscribeToRuntimes,
+} from "@/lib/runners/runtime";
 import type { SqlRunResult } from "@/lib/runners/sql.worker";
+import type { CaseResult, CodeRunResult } from "@/lib/runners/python.worker";
 
 type Outcome =
   | { kind: "idle" }
@@ -170,4 +177,181 @@ function RowTable({ title, rows, accent }: { title: string; rows: unknown[][]; a
   );
 }
 
-export { Check };
+/**
+ * "Run" for a CODE round.
+ *
+ * Python and JavaScript execute in the browser against real test cases.
+ * Java and C/C++ have no credible browser runtime, so their Run goes to
+ * the server for a READ of the code -- and says so, because telling
+ * someone their code passes without running it would be a lie.
+ */
+export function CodeRunPanel({
+  code,
+  language,
+  harness,
+  onDryRun,
+}: {
+  code: string;
+  language: string;
+  harness: CodeHarness;
+  onDryRun: (args: { answer: string; language: string }) => Promise<DryRunResult>;
+}) {
+  const [cases, setCases] = useState<CaseResult[] | null>(null);
+  const [failure, setFailure] = useState<{ message: string; phase?: string } | null>(null);
+  const [dry, setDry] = useState<DryRunResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState(() => runtimeStatus("python"));
+
+  useEffect(() => subscribeToRuntimes(() => setStatus(runtimeStatus("python"))), []);
+
+  const kind = runtimeForFormat("CODE", language);
+  const entry = harness.entry[language];
+
+  const run = useCallback(async () => {
+    if (!code.trim()) return;
+    setBusy(true);
+    setCases(null);
+    setFailure(null);
+    setDry(null);
+    try {
+      if (!kind || !entry) {
+        // Java / C++: assessed, not executed.
+        setDry(await onDryRun({ answer: code, language }));
+        return;
+      }
+      const worker = await getRuntime(kind);
+      const result = await new Promise<CodeRunResult>((resolve, reject) => {
+        const onMessage = (event: MessageEvent<CodeRunResult>) => {
+          clearTimeout(timer);
+          worker.removeEventListener("message", onMessage);
+          resolve(event.data);
+        };
+        // An infinite loop is the expected failure here, not an edge case.
+        // Killing the worker is the only way to stop synchronous code, so
+        // the runtime is dropped and the next run boots a fresh one.
+        const timer = setTimeout(() => {
+          worker.removeEventListener("message", onMessage);
+          disposeRuntime(kind);
+          reject(new Error("Your code ran for over 10 seconds and was stopped — check for an infinite loop."));
+        }, 10000);
+        worker.addEventListener("message", onMessage);
+        worker.postMessage({ kind: harness.kind, entry, code, cases: harness.cases });
+      });
+
+      if (!result.ok) setFailure({ message: result.error ?? "Something went wrong.", phase: result.phase });
+      else setCases(result.results ?? []);
+    } catch (e) {
+      setFailure({ message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  }, [code, language, kind, entry, harness, onDryRun]);
+
+  const passed = cases?.filter((c) => c.passed).length ?? 0;
+  const runnable = kind !== null;
+
+  return (
+    <div className="flex shrink-0 flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => void run()}
+          disabled={busy || !code.trim()}
+          className="flex items-center gap-1.5 rounded-full border-2 border-black bg-white px-4 py-1.5 font-mono text-[11px] font-black uppercase tracking-wide text-black shadow-[3px_3px_0_#000] transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[2px_2px_0_#000] disabled:opacity-40 disabled:shadow-none"
+        >
+          {busy ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} strokeWidth={3} />}
+          {busy ? (runnable ? "Running" : "Checking") : runnable ? "Run tests" : "Check my code"}
+        </button>
+
+        {/* Never imply Java/C++ were executed. */}
+        {!runnable ? (
+          <span className="font-mono text-[10px] text-white/45">
+            {LANGUAGE_NOTE[language] ?? "read by the interviewer, not executed"}
+          </span>
+        ) : status === "warming" && !busy ? (
+          <span className="font-mono text-[10px] text-white/45">loading Python in the background…</span>
+        ) : null}
+
+        {cases ? (
+          <span
+            className={`font-mono text-[10px] font-bold ${passed === cases.length ? "text-brand-lime" : "text-amber-300"}`}
+          >
+            {passed}/{cases.length} tests passing
+          </span>
+        ) : null}
+      </div>
+
+      <AnimatePresence initial={false}>
+        {cases || failure || dry ? (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            {failure ? (
+              <div className="flex items-start gap-2 rounded-xl border-2 border-red-500/60 bg-red-500/10 px-3 py-2">
+                <AlertTriangle size={13} className="mt-0.5 shrink-0 text-red-400" />
+                <div className="min-w-0">
+                  <p className="font-mono text-[11px] font-bold text-red-300">
+                    {failure.phase === "define" ? "Your code didn't load." : "Couldn't run it."}
+                  </p>
+                  <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[10.5px] leading-snug text-red-200/80">
+                    {failure.message}
+                  </pre>
+                </div>
+              </div>
+            ) : dry ? (
+              <div className="rounded-xl border-2 border-sky-500/50 bg-sky-500/10 px-3 py-2">
+                <p className="mb-1 font-mono text-[11px] font-bold text-sky-300">
+                  Read, not run — {dry.looks_correct ? "looks about right" : "there are problems"}
+                </p>
+                <p className="font-mono text-[10.5px] text-sky-100/70">{dry.summary}</p>
+                {dry.problems.length ? (
+                  <ul className="mt-1.5 flex flex-col gap-0.5">
+                    {dry.problems.map((problem, i) => (
+                      <li key={i} className="font-mono text-[10.5px] text-sky-100/70">
+                        &bull; {problem}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : (
+              <div className="max-h-40 overflow-auto rounded-xl border-2 border-black/30 bg-black/30 px-3 py-2">
+                {cases?.map((result, i) => (
+                  <div key={i} className="border-b border-white/5 py-1 last:border-0">
+                    <p className="flex items-center gap-1.5 font-mono text-[11px]">
+                      {result.passed ? (
+                        <Check size={11} strokeWidth={3} className="shrink-0 text-brand-lime" />
+                      ) : (
+                        <X size={11} strokeWidth={3} className="shrink-0 text-amber-400" />
+                      )}
+                      <span className={result.passed ? "text-white/55" : "text-white/85"}>{result.name}</span>
+                    </p>
+                    {!result.passed ? (
+                      <div className="mt-0.5 pl-4">
+                        {result.error ? (
+                          <pre className="whitespace-pre-wrap font-mono text-[10px] text-red-300/80">{result.error}</pre>
+                        ) : (
+                          <pre className="whitespace-pre-wrap break-words font-mono text-[10px] leading-snug text-white/50">
+                            got {result.got}
+                            {"\n"}want {result.expected}
+                          </pre>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+const LANGUAGE_NOTE: Record<string, string> = {
+  java: "Java can't run in a browser — this is a read of your code",
+  cpp: "C/C++ can't run in a browser — this is a read of your code",
+};

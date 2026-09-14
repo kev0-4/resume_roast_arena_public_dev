@@ -39,6 +39,19 @@ class InterviewRoundResponse(BaseModel):
     question: dict
 
 
+class InterviewDryRunResult(BaseModel):
+    """
+    A read of the code for languages we cannot execute in the browser.
+
+    Not a test result, and the UI must not present it as one -- nothing was
+    run. It exists so a Java or C++ candidate gets some feedback rather
+    than nothing at all.
+    """
+    looks_correct: bool
+    summary: str
+    problems: list[str]
+
+
 class InterviewRoundResult(BaseModel):
     """
     What the candidate is told after submitting.

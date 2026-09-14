@@ -15,6 +15,7 @@ import { LiveInterviewSession } from "@/lib/live-session";
 import {
   advanceInterviewRound,
   completeInterview,
+  dryRunRound,
   getInterviewRound,
   mintVoiceToken,
   postTranscriptChunks,
@@ -315,6 +316,17 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
     [start, round, submittingRound, roundSecondsLeft, getIdToken],
   );
 
+  /** Server-side read of Java/C++, which have no browser runtime. */
+  const dryRun = useCallback(
+    async (args: { answer: string; language: string }) => {
+      if (!start || !round) throw new Error("No round in progress.");
+      const idToken = await getIdToken();
+      if (!idToken) throw new Error("Your session expired.");
+      return dryRunRound(start.interview_id, round.index, idToken, args);
+    },
+    [start, round, getIdToken],
+  );
+
   const submitRoundRef = useRef(submitRound);
   useEffect(() => {
     submitRoundRef.current = submitRound;
@@ -583,10 +595,16 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
     if (phase !== "live" || !start?.agenda?.length) return;
     // Only warm what this interview will actually use. A conversation-only
     // or MCQ interview downloads nothing at all.
-    const needsSql = start.agenda.some((item) => item.label === "SQL");
-    if (!needsSql) return;
+    // Only what this interview will use. A conversation-only, MCQ, HR or
+    // IB interview downloads nothing at all.
+    const kinds: ("sql" | "python")[] = [];
+    if (start.agenda.some((item) => item.label === "SQL")) kinds.push("sql");
+    // Python is the default language on every CODE round, so a coding
+    // round is worth warming for even though they could switch away.
+    if (start.agenda.some((item) => item.label === "Coding")) kinds.push("python");
+    if (!kinds.length) return;
 
-    const timer = setTimeout(() => warmRuntime("sql"), WARM_DELAY_MS);
+    const timer = setTimeout(() => kinds.forEach(warmRuntime), WARM_DELAY_MS);
     return () => clearTimeout(timer);
   }, [phase, start]);
 
@@ -618,6 +636,7 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
     submittingRound,
     handoffLine,
     submitRound,
+    dryRun,
     continueToDebrief,
     connect,
     toggleMute,

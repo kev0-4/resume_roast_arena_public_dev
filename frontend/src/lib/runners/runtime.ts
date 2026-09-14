@@ -14,7 +14,7 @@
 //   4. If the round opens before warming finished, it finishes then, with
 //      progress on screen rather than a frozen editor.
 
-export type RuntimeKind = "sql" | "python";
+export type RuntimeKind = "sql" | "python" | "javascript";
 
 export type RuntimeStatus = "cold" | "warming" | "ready" | "failed";
 
@@ -29,6 +29,7 @@ interface RuntimeState {
 const states: Record<RuntimeKind, RuntimeState> = {
   sql: { status: "cold", promise: null, worker: null },
   python: { status: "cold", promise: null, worker: null },
+  javascript: { status: "cold", promise: null, worker: null },
 };
 
 const listeners = new Set<() => void>();
@@ -46,13 +47,23 @@ export function runtimeStatus(kind: RuntimeKind): RuntimeStatus {
   return states[kind].status;
 }
 
-/** Which runtime, if any, a round of this format needs. */
+/**
+ * Which runtime, if any, a round of this format and language needs.
+ *
+ * Java and C/C++ return null on purpose: neither has a credible browser
+ * runtime, so their Run goes to the server for an assessment instead.
+ */
 export function runtimeForFormat(format: string, language?: string | null): RuntimeKind | null {
   if (format === "SQL") return "sql";
-  if (format === "CODE" && language === "python") return "python";
-  // JavaScript runs natively with no download; Java and C/C++ have no
-  // credible browser runtime and go to the server instead.
+  if (format !== "CODE") return null;
+  if (language === "python") return "python";
+  if (language === "javascript") return "javascript";
   return null;
+}
+
+/** True when this language runs in the browser rather than on the server. */
+export function runsInBrowser(format: string, language?: string | null): boolean {
+  return runtimeForFormat(format, language) !== null;
 }
 
 /** Resolves when the browser is doing nothing more important. */
@@ -69,10 +80,16 @@ function whenIdle(timeout = 4000): Promise<void> {
 }
 
 function spawn(kind: RuntimeKind): Worker {
-  if (kind === "sql") {
-    return new Worker(new URL("./sql.worker.ts", import.meta.url), { type: "module" });
+  // Static URLs, not a computed path: the bundler has to see each worker
+  // at build time to emit it as its own chunk.
+  switch (kind) {
+    case "sql":
+      return new Worker(new URL("./sql.worker.ts", import.meta.url), { type: "module" });
+    case "python":
+      return new Worker(new URL("./python.worker.ts", import.meta.url), { type: "module" });
+    case "javascript":
+      return new Worker(new URL("./javascript.worker.ts", import.meta.url), { type: "module" });
   }
-  throw new Error(`No worker for runtime ${kind}`);
 }
 
 /**
@@ -138,6 +155,21 @@ export function warmRuntime(kind: RuntimeKind): void {
 /** Get a runtime, waiting for it, for a round that needs it now. */
 export function getRuntime(kind: RuntimeKind): Promise<Worker> {
   return ensure(kind, false);
+}
+
+/**
+ * Kill one runtime.
+ *
+ * The only way to stop synchronous code that will not stop on its own, so
+ * a runaway loop costs the candidate a re-boot rather than the round.
+ */
+export function disposeRuntime(kind: RuntimeKind): void {
+  const state = states[kind];
+  state.worker?.terminate();
+  state.worker = null;
+  state.promise = null;
+  state.status = "cold";
+  notify();
 }
 
 /** Frees the WASM heap once an interview is over. */

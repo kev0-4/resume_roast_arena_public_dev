@@ -63,6 +63,7 @@ from ..schemas.interview_schemas import (
     InterviewCompleteRequest,
     InterviewRoundResponse,
     InterviewRoundResult,
+    InterviewDryRunResult,
     InterviewScoreResult,
     InterviewDetailResponse,
     TranscriptEntry,
@@ -506,6 +507,70 @@ async def submit_interview_round(
         mcq_detail=review.get("detail"),
         next_round_kind=next_planned.kind if next_planned else None,
         next_round_index=index + 1 if next_planned else None,
+    )
+
+
+class DryRunRequest(BaseModel):
+    answer: str = Field(default="", max_length=20000)
+    language: str = Field(..., max_length=20)
+
+
+@interview_router.post("/interview/{interview_id}/round/{index}/dry-run", response_model=InterviewDryRunResult)
+async def dry_run_round(
+    interview_id: str,
+    index: int,
+    body: DryRunRequest,
+    db: AsyncSession = Depends(get_db_sqlalchemy),
+    curr_user: Users = Depends(get_current_user),
+):
+    """
+    "Run" for languages with no browser runtime -- Java and C/C++.
+
+    This does NOT execute anything. It is a read of the code by the same
+    cheap model that grades the submission, returned as a self-check so
+    those candidates are not left staring at an editor with no feedback
+    while a Python candidate gets real test results.
+
+    Labelled honestly in the UI as an assessment rather than a test run,
+    because telling someone their code "passes" without running it would
+    be a lie. Executing Java and C++ properly needs a server sandbox, and
+    that is a separate decision with real security surface.
+
+    Deliberately does not advance the round or store anything: it is a
+    scratchpad, and the submission still goes through /submit.
+    """
+    interview = await _get_owned_interview(interview_id, curr_user, db)
+    if interview.status != InterviewStatusEnum.IN_PROGRESS.value:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Interview is {interview.status}")
+
+    plan = _plan_of(interview)
+    planned = interview_planner.find_round(plan, index)
+    if planned is None or planned.kind != "EXERCISE":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such exercise round")
+
+    entry = catalogue.get_question(planned.question_id)
+    if entry is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That question is no longer available")
+
+    if not body.answer.strip():
+        return InterviewDryRunResult(
+            looks_correct=False,
+            summary="There's nothing to check yet.",
+            problems=[],
+        )
+
+    async with _gemini_call_guard():
+        review, _usage, _model = await interview_llm.review_submission(
+            interview_prompts.build_review_prompt(entry, body.answer, body.language)
+        )
+
+    return InterviewDryRunResult(
+        looks_correct=review.correct,
+        # The candidate gets the read, never the interviewer_notes -- those
+        # are for the debrief, and handing them over would let the
+        # candidate rehearse the exact question coming next.
+        summary=f"Reads as {review.complexity}." if review.complexity not in ("", "n/a") else "Read through.",
+        problems=review.problems[:4],
     )
 
 
