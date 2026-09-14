@@ -13,6 +13,7 @@ import { MicCapture, PcmPlayer } from "@/lib/live-audio";
 import { disposeRuntimes, warmRuntime } from "@/lib/runners/runtime";
 import { LiveInterviewSession } from "@/lib/live-session";
 import {
+  ApiError,
   advanceInterviewRound,
   completeInterview,
   dryRunRound,
@@ -261,8 +262,41 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
    * teardown matters because the handoff line it just spoke is the last
    * thing said, and it explains the screen change.
    */
-  const beginRound = useCallback(async () => {
-    if (!start) return;
+  /**
+   * The interviewer asked to move to an exercise.
+   *
+   * Order matters, and getting it wrong killed a live interview. The
+   * server is asked FIRST, while the socket is still up: if there is no
+   * next round -- a conversation-only plan, which is a perfectly normal
+   * outcome -- nothing is torn down and the conversation simply carries
+   * on. Tearing down first meant a refused advance left the candidate on
+   * a dead error screen with the interview unrecoverable.
+   *
+   * Returns whether the handoff actually happened, so the tool call can be
+   * answered truthfully rather than always acked as success.
+   */
+  const beginRound = useCallback(async (): Promise<{ ok: boolean; reason?: string }> => {
+    if (!start) return { ok: false, reason: "no interview in progress" };
+
+    let index: number;
+    try {
+      const idToken = await getIdToken();
+      if (!idToken) throw new Error("Your session expired.");
+      const advanced = await advanceInterviewRound(start.interview_id, idToken);
+      index = advanced.next_round_index ?? 1;
+    } catch (err) {
+      // Nothing has been torn down, so the interview continues exactly as
+      // it was. The model is told why and can carry on talking.
+      return {
+        ok: false,
+        reason:
+          err instanceof ApiError && err.status === 409
+            ? "There are no further rounds scheduled. Continue the conversation, and call end_interview when you have covered enough."
+            : "That round could not be started. Continue the conversation.",
+      };
+    }
+
+    // Committed now: the round exists, so hand the screen over.
     setPhase("handoff");
     await waitForPlaybackToDrain();
     await teardown();
@@ -271,17 +305,15 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
     try {
       const idToken = await getIdToken();
       if (!idToken) throw new Error("Your session expired.");
-      const advanced = await advanceInterviewRound(start.interview_id, idToken);
-      const index = advanced.next_round_index ?? 1;
       const fetched = await getInterviewRound(start.interview_id, index, idToken);
       setRound(fetched);
       setRoundSecondsLeft(fetched.minutes * 60);
       setPhase("exercise");
+      return { ok: true };
     } catch (err) {
-      // Failing to load a round must not strand them: fall through to
-      // scoring what they have rather than a dead screen.
-      setError(err instanceof Error ? err.message : "Could not start that round.");
+      setError(err instanceof Error ? err.message : "Could not load that round.");
       setPhase("error");
+      return { ok: false, reason: "the round failed to load" };
     }
   }, [start, teardown, flush, getIdToken, waitForPlaybackToDrain]);
 
@@ -456,7 +488,21 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
                 // Show what it said as it handed over, so the screen
                 // changing under them is explained rather than abrupt.
                 setHandoffLine(String(call.args?.handoff ?? ""));
-                void beginRoundRef.current();
+                // Answered with the REAL outcome rather than a blanket ok.
+                // A refused advance (no rounds scheduled) has to reach the
+                // model, or it carries on believing the screen changed and
+                // talks to a candidate who is still looking at its face.
+                void (async () => {
+                  const outcome = await beginRoundRef.current();
+                  if (!outcome.ok) {
+                    sessionRef.current?.respondToTool(calls, {
+                      ok: false,
+                      reason: outcome.reason,
+                    });
+                  }
+                })();
+                // Answered above, asynchronously -- skip the blanket ack.
+                return;
               }
             }
             // Must acknowledge, or the model waits on us and the room goes

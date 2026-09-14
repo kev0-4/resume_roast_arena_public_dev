@@ -99,9 +99,16 @@ stated minutes.
 software engineer writes code. A data or ETL engineer is tested on SQL \
 before anything else. An investment banking or HR candidate should never \
 be shown a code editor -- use MCQ and WRITTEN formats for them.
-- It is correct and expected to plan ZERO exercise rounds when the real \
-interview for this role is a conversation. Do not add an exercise just to \
-have one.
+- If the role WRITES CODE OR SQL as a core part of the job -- any \
+engineering role, any data or analytics role -- you should include at \
+least one exercise. Someone interviewing for an engineering job expects \
+to be asked to write something, and a conversation-only engineering \
+interview will feel like the product forgot to test them.
+- Plan ZERO exercise rounds only when the real interview for this role \
+genuinely IS just a conversation and nothing in the catalogue fits -- for \
+example a people or HR role with no listed MCQ or written question that \
+suits it. Do not add an exercise just to have one, and never force a \
+technical exercise onto a non-technical candidate.
 - Never invent a question_id. Only ids listed above exist.
 
 `focus` is one short sentence on why that round suits this candidate. \

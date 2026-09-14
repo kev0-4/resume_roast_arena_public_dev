@@ -4,6 +4,16 @@
     "format": "CODE",
     "verticals": [
       "swe",
+      "frontend",
+      "backend",
+      "fullstack",
+      "mobile",
+      "platform",
+      "devops",
+      "sre",
+      "embedded",
+      "ml",
+      "data-engineer",
       "etl"
     ],
     "difficulty": "medium",
@@ -355,7 +365,18 @@
     "id": "merge-intervals",
     "format": "CODE",
     "verticals": [
-      "swe"
+      "swe",
+      "frontend",
+      "backend",
+      "fullstack",
+      "mobile",
+      "platform",
+      "devops",
+      "sre",
+      "embedded",
+      "ml",
+      "data-engineer",
+      "etl"
     ],
     "difficulty": "easy",
     "topics": [
@@ -665,7 +686,17 @@
     "format": "CODE",
     "verticals": [
       "swe",
-      "backend"
+      "frontend",
+      "backend",
+      "fullstack",
+      "mobile",
+      "platform",
+      "devops",
+      "sre",
+      "embedded",
+      "ml",
+      "data-engineer",
+      "etl"
     ],
     "difficulty": "medium",
     "topics": [
@@ -957,7 +988,10 @@
     "format": "SQL",
     "verticals": [
       "etl",
-      "data"
+      "data",
+      "data-engineer",
+      "analytics",
+      "backend"
     ],
     "difficulty": "medium",
     "topics": [
@@ -1052,7 +1086,9 @@
     "verticals": [
       "etl",
       "data",
-      "analytics"
+      "data-engineer",
+      "analytics",
+      "backend"
     ],
     "difficulty": "medium",
     "topics": [
@@ -1194,7 +1230,10 @@
     "verticals": [
       "etl",
       "data",
-      "analytics"
+      "data-engineer",
+      "analytics",
+      "backend",
+      "fullstack"
     ],
     "difficulty": "medium",
     "topics": [
