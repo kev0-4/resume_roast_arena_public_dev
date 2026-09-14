@@ -102,8 +102,17 @@ export class LiveInterviewSession {
           }
           if (content.interrupted) callbacks.onInterrupted();
         },
-        onerror: (e: ErrorEvent) => callbacks.onError(e.message || "Live connection error"),
-        onclose: (e: CloseEvent) => callbacks.onClose(e.reason || "closed"),
+        // Logged as well as surfaced: a close or error mid-interview is the
+        // single most useful line in the log when the room goes quiet, and
+        // the UI path for it can itself be what's broken.
+        onerror: (e: ErrorEvent) => {
+          console.error("[interview] live socket error:", e.message);
+          callbacks.onError(e.message || "Live connection error");
+        },
+        onclose: (e: CloseEvent) => {
+          console.warn(`[interview] live socket closed: code=${e.code} reason=${e.reason || "(none)"}`);
+          callbacks.onClose(e.reason || "closed");
+        },
       },
     });
   }

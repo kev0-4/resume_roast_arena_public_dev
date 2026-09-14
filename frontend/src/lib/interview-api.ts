@@ -142,11 +142,12 @@ export async function postTranscriptChunks(
   interviewId: string,
   chunks: TranscriptChunk[],
   idToken: string,
+  clientDiag?: Record<string, unknown>,
 ): Promise<{ accepted: number; total_chunks: number }> {
   const resp = await fetch(`${API_BASE_URL}/api/v1/interview/${interviewId}/transcript`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
-    body: JSON.stringify({ chunks }),
+    body: JSON.stringify({ chunks, client_diag: clientDiag ?? null }),
   });
   if (!resp.ok) throw await errorFromResponse(resp, "Could not save the transcript");
   return resp.json();

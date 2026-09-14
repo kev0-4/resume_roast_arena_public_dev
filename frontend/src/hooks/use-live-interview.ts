@@ -76,18 +76,51 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
   const skippedRef = useRef(0);
   const endedByInterviewerRef = useRef<{ reason: string; category: string } | null>(null);
   const speakingRef = useRef(false);
+  /** Wall-clock of the last message of ANY kind from the server. The single
+   *  most useful number when the room goes quiet: it separates "the socket
+   *  is dead" from "the model is thinking". */
+  const lastServerMessageRef = useRef<number>(0);
+  const audioChunksRef = useRef(0);
+  /** Barge-in events. If the interviewer's own voice reaches the mic, the
+   *  API's default START_OF_ACTIVITY_INTERRUPTS makes it cut off its own
+   *  generation -- this counter is what proves or disproves that. */
+  const interruptedRef = useRef(0);
+  const toolCallsRef = useRef<string[]>([]);
+  const socketEventRef = useRef<string>("");
   // Guards the end sequence: clock expiry, socket close and the button can
   // all fire at once, and scoring must only ever run once.
   const endingRef = useRef(false);
 
   const flush = useCallback(async () => {
-    if (!start || pendingRef.current.length === 0) return;
+    if (!start) return;
+    const mic = micRef.current?.stats();
+    const diag = {
+      quiet_s: lastServerMessageRef.current
+        ? Number(((performance.now() - lastServerMessageRef.current) / 1000).toFixed(1))
+        : null,
+      audio_chunks: audioChunksRef.current,
+      backlog_s: Number((playerRef.current?.backlogSeconds() ?? 0).toFixed(1)),
+      interrupted: interruptedRef.current,
+      tool_calls: toolCallsRef.current.slice(-5),
+      mic_chunks: mic?.chunksSent ?? 0,
+      // A high suppressed count means echo is reaching the mic, i.e. the
+      // candidate is on speakers rather than headphones.
+      mic_suppressed: mic?.suppressed ?? 0,
+      echo_floor: mic?.echoFloor ?? 0,
+      mic_rate: mic?.sampleRate ?? 0,
+      play_rate: playerRef.current?.sampleRate() ?? 0,
+      speaking: speakingRef.current,
+      mic_live: micRef.current !== null,
+      socket: socketEventRef.current || null,
+    };
+    // Sent even with an empty batch: a stalled session produces no new
+    // transcript, which is exactly when the telemetry matters most.
     const batch = pendingRef.current;
     pendingRef.current = [];
     try {
       const idToken = await getIdToken();
       if (!idToken) return;
-      await postTranscriptChunks(start.interview_id, batch, idToken);
+      await postTranscriptChunks(start.interview_id, batch, idToken, diag);
     } catch {
       // Put them back and retry on the next flush -- losing transcript is
       // worse than sending a chunk twice, and the server dedupes on seq.
@@ -187,6 +220,10 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
     try {
       const player = new PcmPlayer((isSpeaking) => {
         speakingRef.current = isSpeaking;
+        // The mic needs to know, so it can hold back the interviewer's own
+        // voice coming back through the speakers. Without this the model
+        // interrupts itself and eventually stops responding altogether.
+        micRef.current?.setInterviewerSpeaking(isSpeaking);
         setSpeaking(isSpeaking);
       });
       await player.start();
@@ -203,6 +240,8 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
         callbacks: {
           onOpen: () => setPhase("live"),
           onAudio: (b64) => {
+            lastServerMessageRef.current = performance.now();
+            audioChunksRef.current += 1;
             if (!gotAudioRef.current) {
               gotAudioRef.current = true;
               setFirstAudioMs(Math.round(performance.now() - connectStartRef.current));
@@ -210,6 +249,7 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
             playerRef.current?.enqueue(b64);
           },
           onTranscript: (speaker, text, isFinal) => {
+            lastServerMessageRef.current = performance.now();
             if (!isFinal) {
               setInterim(text);
               return;
@@ -219,8 +259,14 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
           },
           // Barge-in: the user talked over the interviewer. Drop queued audio
           // so the voice cuts mid-word like a real interruption.
-          onInterrupted: () => playerRef.current?.clear(),
+          onInterrupted: () => {
+            interruptedRef.current += 1;
+            lastServerMessageRef.current = performance.now();
+            playerRef.current?.clear();
+          },
           onToolCall: (calls) => {
+            lastServerMessageRef.current = performance.now();
+            for (const call of calls) toolCallsRef.current.push(call.name ?? "?");
             for (const call of calls) {
               if (call.name === "end_interview") {
                 const ended = {
@@ -248,12 +294,16 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
             sessionRef.current?.respondToTool(calls, { ok: true });
           },
           onError: (message) => {
+            socketEventRef.current = `error:${message}`;
             setError(message);
             setPhase("error");
           },
           // A close mid-interview still counts as an interview -- score what
           // was said rather than stranding the row IN_PROGRESS forever.
-          onClose: () => void endRef.current(),
+          onClose: (reason) => {
+            socketEventRef.current = `close:${reason}`;
+            void endRef.current();
+          },
         },
       });
 
@@ -311,6 +361,31 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
     const id = setInterval(() => void flush(), FLUSH_INTERVAL_MS);
     return () => clearInterval(id);
   }, [phase, flush]);
+
+  // Diagnostic heartbeat. The room going quiet has several very different
+  // causes that look identical from the outside -- a dead socket, a model
+  // that is still thinking, a mic that stopped capturing, or audio that
+  // arrived long ago and is stuck behind a playback backlog. This prints
+  // enough to tell them apart, and Next forwards it into the dev server log.
+  useEffect(() => {
+    if (phase !== "live") return;
+    const id = setInterval(() => {
+      const quietFor = lastServerMessageRef.current
+        ? ((performance.now() - lastServerMessageRef.current) / 1000).toFixed(1)
+        : "n/a";
+      const mic = micRef.current?.stats();
+      // console.warn rather than .info purely because Next's dev server
+      // forwards it to the terminal log, where it can be read without
+      // asking anyone to copy out of DevTools.
+      console.warn(
+        `[interview] quiet=${quietFor}s audioChunks=${audioChunksRef.current} ` +
+          `backlog=${(playerRef.current?.backlogSeconds() ?? 0).toFixed(1)}s ` +
+          `micChunks=${mic?.chunksSent ?? 0} micRate=${mic?.sampleRate ?? 0} ` +
+          `playRate=${playerRef.current?.sampleRate() ?? 0} speaking=${speakingRef.current} muted=${muted}`,
+      );
+    }, 5000);
+    return () => clearInterval(id);
+  }, [phase, muted]);
 
   // Last resort for a closed tab: best-effort, and deliberately not relied
   // upon -- the 5s flush above is what actually keeps the transcript safe.

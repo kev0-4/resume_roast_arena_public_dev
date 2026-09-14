@@ -215,6 +215,13 @@ class TranscriptChunkIn(BaseModel):
 
 class TranscriptPostRequest(BaseModel):
     chunks: List[TranscriptChunkIn] = Field(..., max_length=_MAX_CHUNKS_PER_POST)
+    # Client-side telemetry for the live session, piggybacked on the flush
+    # that already happens every 5s. It rides here rather than on a route of
+    # its own because browser console output does NOT reach the dev server
+    # log reliably -- verified: the SDK's own warnings appear, ours never
+    # did -- so this is the only channel that gets session telemetry to
+    # somewhere readable. Free-form on purpose; it is only ever logged.
+    client_diag: dict | None = None
 
 
 @interview_router.post("/interview/{interview_id}/transcript", response_model=InterviewTranscriptAck)
@@ -245,6 +252,9 @@ async def post_interview_transcript(
     tab loses at most the last few seconds instead of the whole interview.
     """
     interview = await _get_owned_interview(interview_id, curr_user, db)
+
+    if body.client_diag is not None:
+        print(f"[interview-diag] {interview.id} {json.dumps(body.client_diag, default=str)[:600]}", flush=True)
 
     if interview.status != InterviewStatusEnum.IN_PROGRESS.value:
         raise HTTPException(

@@ -19,6 +19,10 @@ class PcmPlaybackProcessor extends AudioWorkletProcessor {
     this.queue = [];
     this.offset = 0;
     this.wasPlaying = false;
+    // Reported back so the page can tell "the model is slow" apart from
+    // "the model answered ages ago and we're still playing a backlog".
+    this.queuedSamples = 0;
+    this.sinceReport = 0;
 
     this.port.onmessage = (event) => {
       const data = event.data;
@@ -26,9 +30,12 @@ class PcmPlaybackProcessor extends AudioWorkletProcessor {
         // Interruption: drop everything still pending.
         this.queue = [];
         this.offset = 0;
+        this.queuedSamples = 0;
         return;
       }
-      this.queue.push(new Int16Array(data));
+      const chunk = new Int16Array(data);
+      this.queue.push(chunk);
+      this.queuedSamples += chunk.length;
     };
   }
 
@@ -48,6 +55,7 @@ class PcmPlaybackProcessor extends AudioWorkletProcessor {
 
       written += toWrite;
       this.offset += toWrite;
+      this.queuedSamples -= toWrite;
 
       if (this.offset >= current.length) {
         this.queue.shift();
@@ -64,7 +72,15 @@ class PcmPlaybackProcessor extends AudioWorkletProcessor {
     const isPlaying = this.queue.length > 0 || written > 0;
     if (isPlaying !== this.wasPlaying) {
       this.wasPlaying = isPlaying;
-      this.port.postMessage({ playing: isPlaying });
+      this.port.postMessage({ playing: isPlaying, queuedSamples: this.queuedSamples });
+    }
+
+    // Periodic depth report (~every 250ms) so a growing backlog is visible
+    // even while playback state itself never changes.
+    this.sinceReport += out.length;
+    if (this.sinceReport >= sampleRate / 4) {
+      this.sinceReport = 0;
+      this.port.postMessage({ queuedSamples: this.queuedSamples });
     }
 
     return true;
