@@ -146,6 +146,20 @@ def public_question(entry: Dict[str, Any]) -> Dict[str, Any]:
         # question you can answer and one you have to guess at.
         public["examples"] = entry.get("examples", [])
         public["constraints"] = entry.get("constraints", [])
+    if entry["format"] == "CODE" and entry.get("harness"):
+        harness = entry["harness"]
+        # Hidden cases keep their INPUTS -- the code runs in the browser, so
+        # they have to travel -- but never their expected output. The client
+        # reports what it got and the server decides whether that is right,
+        # so tweaking until the visible tests go green buys nothing.
+        public["harness"] = {
+            "kind": harness["kind"],
+            "entry": harness["entry"],
+            "cases": [
+                {k: v for k, v in case.items() if not (case.get("hidden") and k == "expected")}
+                for case in harness["cases"]
+            ],
+        }
     if entry["format"] == "CODE":
         public["starter"] = entry["starter"]
     if entry["format"] == "SQL":

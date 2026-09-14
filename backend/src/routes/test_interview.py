@@ -812,6 +812,92 @@ class TestRounds:
         # str and UUID forms must agree -- routes pass both.
         assert voice_for_interview(interview_id) == voice_for_interview(str(interview_id))
 
+    def test_hidden_expected_values_never_reach_the_client(self, monkeypatch):
+        # This is what makes hidden tests hidden rather than merely
+        # undisplayed: the inputs must travel (the code runs in the
+        # browser) but the expected outputs must not, or tweaking until the
+        # visible tests go green is enough to game the round.
+        from src.interview.catalogue import get_question, public_question
+
+        entry = get_question("merge-intervals")
+        pub = public_question(entry)
+        cases = pub["harness"]["cases"]
+
+        hidden = [c for c in cases if c.get("hidden")]
+        visible = [c for c in cases if not c.get("hidden")]
+        assert hidden, "expected some hidden cases"
+        assert visible, "expected some visible cases"
+
+        for case in hidden:
+            assert "expected" not in case, f"hidden case {case.get('name')!r} leaked its expected value"
+            # The inputs still have to be there or the code cannot be run.
+            assert case.get("args") is not None or case.get("ops") is not None
+
+        # Visible cases keep theirs: the worked examples print them anyway.
+        for case in visible:
+            assert "expected" in case
+
+    def test_reported_outputs_are_graded_against_server_side_expectations(self, monkeypatch):
+        from src.interview.catalogue import get_question
+        from src.interview import service
+
+        entry = get_question("merge-intervals")
+        cases = entry["harness"]["cases"]
+
+        # Claim every case produced exactly what it should.
+        honest = [
+            {"name": c["name"], "got": json.dumps(c["expected"], separators=(",", ":"))} for c in cases
+        ]
+        graded = service.grade_reported_cases(entry, honest)
+        assert graded["hidden_passed"] == graded["hidden_total"] > 0
+        assert graded["visible_passed"] == graded["visible_total"] > 0
+
+        # Now claim a hidden case produced nonsense.
+        hidden_name = next(c["name"] for c in cases if c.get("hidden"))
+        lying = [
+            {
+                "name": c["name"],
+                "got": json.dumps("nope" if c["name"] == hidden_name else c["expected"], separators=(",", ":")),
+            }
+            for c in cases
+        ]
+        graded = service.grade_reported_cases(entry, lying)
+        assert graded["hidden_passed"] == graded["hidden_total"] - 1
+        assert hidden_name in graded["failed_hidden"]
+
+    def test_conduct_reaches_the_reviewer_and_the_debrief(self, monkeypatch):
+        # The paste flag was being written to the database and read by
+        # nothing -- recorded but invisible, which is the same as absent.
+        h = self._setup(monkeypatch, "conduct", CODE_ROUND_PLAN)
+        app = h["app"]
+
+        with TestClient(app) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION})
+            client.post(f"/api/v1/interview/{h['interview_id']}/advance", json={})
+            client.post(
+                f"/api/v1/interview/{h['interview_id']}/round/1/submit",
+                json={
+                    "answer": "def merge_intervals(x): return x",
+                    "language": "python",
+                    "seconds_taken": 37,
+                    "pasted": True,
+                    "runs": 4,
+                    "failed_runs": 3,
+                },
+            )
+            voice = client.post(f"/api/v1/interview/{h['interview_id']}/voice-token", json={})
+
+        # The reviewer was told.
+        review_prompt = h["calls"]["review_prompt"]
+        assert "PASTED" in review_prompt
+        assert "37s" in review_prompt
+        assert "4 time(s)" in review_prompt
+
+        # And so was the interviewer, for the debrief.
+        instruction = voice.json()["system_instruction"]
+        assert "PASTED" in instruction
+        assert "Do not accuse them" in instruction
+
     def test_voice_token_reseeds_with_the_submission_and_review(self, monkeypatch):
         h = self._setup(monkeypatch, "reseed", CODE_ROUND_PLAN)
         app = h["app"]

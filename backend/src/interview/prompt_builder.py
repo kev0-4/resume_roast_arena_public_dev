@@ -253,7 +253,64 @@ threaten to end the interview without actually calling the tool: saying \
 """
 
 
-def build_review_prompt(question: Dict[str, Any], submission: str, language: str | None = None) -> str:
+def describe_conduct(
+    *,
+    seconds_taken: int = 0,
+    pasted: bool = False,
+    runs: int = 0,
+    failed_runs: int = 0,
+    hidden_passed: int | None = None,
+    hidden_total: int | None = None,
+) -> str:
+    """
+    How the answer was produced, as opposed to what it says.
+
+    This exists because the signals were being recorded and then used by
+    nothing. A paste flag written to the database and read by no prompt is
+    not a feature -- it told nobody anything. Same for run history: the
+    agreed design is to record it and let the interviewer press on it,
+    rather than silently deduct points for testing, which would just teach
+    candidates to stop testing.
+    """
+    lines = []
+
+    if seconds_taken:
+        minutes, seconds = divmod(seconds_taken, 60)
+        clock = f"{minutes}m {seconds}s" if minutes else f"{seconds}s"
+        lines.append(f"- They took {clock}.")
+
+    if pasted:
+        lines.append(
+            "- They PASTED code in rather than typing it. That is not proof of anything on its own, "
+            "but combined with the time taken it is worth knowing. Do not accuse them. Do make them "
+            "explain a specific line or decision in their own words -- someone who wrote it can, "
+            "and someone who did not will struggle."
+        )
+
+    if runs:
+        if failed_runs == 0:
+            lines.append(f"- They ran the tests {runs} time(s), passing every time.")
+        else:
+            lines.append(
+                f"- They ran the tests {runs} time(s), {failed_runs} of which failed before they got it working. "
+                "Iterating is normal and good; only press if the pattern looks like guessing rather than reasoning."
+            )
+    elif runs == 0 and seconds_taken:
+        lines.append("- They never ran the tests before submitting.")
+
+    if hidden_total:
+        lines.append(
+            f"- Against hidden tests they never saw: {hidden_passed}/{hidden_total} passed. "
+            "They do not know this number. If they failed some, find out whether they understand why "
+            "without telling them which case broke."
+        )
+
+    return "\n".join(lines)
+
+
+def build_review_prompt(
+    question: Dict[str, Any], submission: str, language: str | None = None, conduct: str = ""
+) -> str:
     """
     Grades one exercise submission without executing it.
 
@@ -291,6 +348,7 @@ THE CANDIDATE SUBMITTED:
 
 {submission.strip() or "(nothing -- they submitted an empty answer)"}
 
+{("---" + chr(10) + "HOW THEY PRODUCED IT -- context, not a verdict:" + chr(10) + chr(10) + conduct + chr(10)) if conduct else ""}
 ---
 TASK:
 
@@ -314,6 +372,7 @@ def build_debrief_addendum(
     question: Dict[str, Any],
     submission: str,
     review: Dict[str, Any] | None,
+    conduct: str = "",
 ) -> str:
     """
     Appended to the live system instruction when voice returns after an
@@ -345,6 +404,15 @@ An automated review of that submission found:
 The sharpest thing to press on: {review.get("interviewer_notes", "")}
 """
 
+    conduct_block = ""
+    if conduct:
+        conduct_block = f"""
+HOW THEY PRODUCED IT -- context for you, never to be read out as an
+accusation:
+
+{conduct}
+"""
+
     return f"""
 
 ---
@@ -362,7 +430,7 @@ Question set ({question["format"]}): {question.get("prompt", "")}
 Their submission:
 
 {submission.strip() or "(they submitted nothing)"}
-{review_block}
+{review_block}{conduct_block}
 ---
 TASK: Open the debrief by going straight at the weakest part of that
 submission. Do not praise it first and do not ask them to walk through it

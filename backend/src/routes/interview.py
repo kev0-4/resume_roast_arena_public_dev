@@ -423,6 +423,13 @@ async def advance_interview_round(
     )
 
 
+class ReportedCase(BaseModel):
+    """One test case as the BROWSER says it went. The server holds the
+    expected value and decides whether that is actually right."""
+    name: str = Field(..., max_length=120)
+    got: str = Field(default="", max_length=4000)
+
+
 class RoundSubmitRequest(BaseModel):
     # CODE / SQL / WRITTEN answer text, or MCQ selected option indexes.
     answer: str = Field(default="", max_length=20000)
@@ -433,6 +440,15 @@ class RoundSubmitRequest(BaseModel):
     # pasting from another tab, so this becomes a signal for the debrief
     # rather than a gate the product pretends to enforce.
     pasted: bool = False
+    # How many times they ran the tests, and how many of those failed.
+    # Recorded as CONTEXT for the interviewer, deliberately not as a
+    # deduction: penalising failed runs would teach candidates to stop
+    # testing, which is the opposite of what we want from an engineer.
+    runs: int = Field(default=0, ge=0, le=500)
+    failed_runs: int = Field(default=0, ge=0, le=500)
+    # What their code produced for each case, including the hidden ones
+    # whose expected values they never received.
+    case_outputs: List[ReportedCase] = Field(default_factory=list, max_length=100)
 
 
 @interview_router.post("/interview/{interview_id}/round/{index}/submit", response_model=InterviewRoundResult)
@@ -470,13 +486,27 @@ async def submit_interview_round(
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That question is no longer available")
 
+    # Graded here, against expected values the client never received.
+    cases = interview_service.grade_reported_cases(
+        entry, [c.model_dump() for c in body.case_outputs]
+    )
+
+    conduct = interview_prompts.describe_conduct(
+        seconds_taken=body.seconds_taken,
+        pasted=body.pasted,
+        runs=body.runs,
+        failed_runs=body.failed_runs,
+        hidden_passed=cases["hidden_passed"] if cases["hidden_total"] else None,
+        hidden_total=cases["hidden_total"] or None,
+    )
+
     if entry["format"] == "MCQ":
         review = interview_service.score_mcq(entry, body.mcq_answers)
         submission = json.dumps(body.mcq_answers)
     else:
         async with _gemini_call_guard():
             raw_review, _usage, _model = await interview_llm.review_submission(
-                interview_prompts.build_review_prompt(entry, body.answer, body.language)
+                interview_prompts.build_review_prompt(entry, body.answer, body.language, conduct)
             )
         review = raw_review.model_dump()
         submission = body.answer
@@ -492,6 +522,10 @@ async def submit_interview_round(
             "submission": submission,
             "seconds_taken": body.seconds_taken,
             "pasted": body.pasted,
+            "runs": body.runs,
+            "failed_runs": body.failed_runs,
+            "cases": cases,
+            "conduct": conduct,
             "review": review,
         },
     )
@@ -614,7 +648,11 @@ async def mint_voice_token(
         entry = catalogue.get_question(last["question_id"])
         if entry:
             instruction += interview_prompts.build_debrief_addendum(
-                utterances, entry, last.get("submission", ""), last.get("review")
+                utterances,
+                entry,
+                last.get("submission", ""),
+                last.get("review"),
+                last.get("conduct", ""),
             )
 
     # Same voice as every other segment of this interview -- it is derived

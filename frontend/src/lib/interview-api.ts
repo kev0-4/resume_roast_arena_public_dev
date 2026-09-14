@@ -51,6 +51,8 @@ export interface McqQuestion {
 
 export interface CodeCase {
   name?: string;
+  /** Hidden cases arrive WITHOUT `expected` -- the server keeps it. */
+  hidden?: boolean;
   args?: unknown[];
   construct?: unknown[];
   ops?: [string, unknown[]][];
@@ -178,6 +180,11 @@ export async function submitInterviewRound(
     language?: string | null;
     seconds_taken: number;
     pasted: boolean;
+    runs?: number;
+    failed_runs?: number;
+    /** What their code produced per case, including hidden ones whose
+     *  expected values the browser was never given. */
+    case_outputs?: { name: string; got: string }[];
   },
 ): Promise<RoundResult> {
   const resp = await fetch(`${API_BASE_URL}/api/v1/interview/${interviewId}/round/${index}/submit`, {

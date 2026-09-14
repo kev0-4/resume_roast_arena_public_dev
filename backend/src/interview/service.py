@@ -28,6 +28,7 @@ what turns them back into readable speaker turns.
 """
 
 import datetime
+import json
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -188,6 +189,59 @@ async def record_round_result(
         await db.rollback()
         raise
     return interview
+
+
+def grade_reported_cases(
+    question: Dict[str, Any], reported: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Compares the outputs the browser reported against the expected values,
+    which never left this process.
+
+    This is what makes hidden tests genuinely hidden rather than merely
+    undisplayed: the candidate's machine ran the code and said what it
+    produced, but only the server knows what it should have produced.
+
+    Client-reported, so it inherits the same trust boundary as the
+    transcript -- a determined client could lie about its outputs. It is
+    not the score on its own; it is evidence handed to the reviewer, and
+    the reviewer reads the actual code.
+    """
+    harness = question.get("harness") or {}
+    by_name = {}
+    for index, case in enumerate(harness.get("cases", [])):
+        by_name[case.get("name") or f"case {index + 1}"] = case
+
+    visible_passed = visible_total = hidden_passed = hidden_total = 0
+    failed_hidden: List[str] = []
+
+    for item in reported:
+        case = by_name.get(item.get("name"))
+        if case is None:
+            continue
+        expected = json.dumps(case.get("expected"), sort_keys=True, separators=(",", ":"))
+        try:
+            got = json.dumps(json.loads(item.get("got") or "null"), sort_keys=True, separators=(",", ":"))
+        except (ValueError, TypeError):
+            got = None
+        passed = got == expected
+
+        if case.get("hidden"):
+            hidden_total += 1
+            hidden_passed += 1 if passed else 0
+            if not passed:
+                failed_hidden.append(case.get("name", "?"))
+        else:
+            visible_total += 1
+            visible_passed += 1 if passed else 0
+
+    return {
+        "visible_passed": visible_passed,
+        "visible_total": visible_total,
+        "hidden_passed": hidden_passed,
+        "hidden_total": hidden_total,
+        "failed_hidden": failed_hidden,
+    }
 
 
 def score_mcq(question: Dict[str, Any], answers: List[int]) -> Dict[str, Any]:

@@ -172,6 +172,39 @@ export function disposeRuntime(kind: RuntimeKind): void {
   notify();
 }
 
+/**
+ * Runs code against a set of cases and returns the per-case outcome.
+ *
+ * Shared by the Run button (visible cases only, for self-check) and by
+ * submit (every case, including hidden ones whose expected values the
+ * browser was never given). One implementation so the two can never
+ * disagree about how a case is executed.
+ */
+export async function runCode(
+  kind: RuntimeKind,
+  payload: { kind: "call" | "ops"; entry: string; code: string; cases: unknown[] },
+  timeoutMs = 10000,
+): Promise<{ ok: boolean; results?: { name: string; passed: boolean; got?: string; expected: string; error?: string }[]; error?: string; phase?: string }> {
+  const worker = await getRuntime(kind);
+  return new Promise((resolve, reject) => {
+    const onMessage = (event: MessageEvent) => {
+      clearTimeout(timer);
+      worker.removeEventListener("message", onMessage);
+      resolve(event.data);
+    };
+    // Terminating the worker is the only way to stop synchronous code that
+    // will not stop on its own. The runtime is dropped so the next run
+    // boots a clean one -- a runaway loop costs a reboot, not the round.
+    const timer = setTimeout(() => {
+      worker.removeEventListener("message", onMessage);
+      disposeRuntime(kind);
+      reject(new Error("Your code ran for too long and was stopped — check for an infinite loop."));
+    }, timeoutMs);
+    worker.addEventListener("message", onMessage);
+    worker.postMessage(payload);
+  });
+}
+
 /** Frees the WASM heap once an interview is over. */
 export function disposeRuntimes(): void {
   for (const kind of Object.keys(states) as RuntimeKind[]) {

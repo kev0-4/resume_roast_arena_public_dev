@@ -291,7 +291,15 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
   }, [beginRound]);
 
   const submitRound = useCallback(
-    async (payload: { answer: string; mcqAnswers: number[]; language: string | null; pasted: boolean }) => {
+    async (payload: {
+      answer: string;
+      mcqAnswers: number[];
+      language: string | null;
+      pasted: boolean;
+      runs?: number;
+      failedRuns?: number;
+      caseOutputs?: { name: string; got: string }[];
+    }) => {
       if (!start || !round || submittingRound) return;
       setSubmittingRound(true);
       try {
@@ -303,6 +311,9 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
           language: payload.language,
           seconds_taken: round.minutes * 60 - roundSecondsLeft,
           pasted: payload.pasted,
+          runs: payload.runs ?? 0,
+          failed_runs: payload.failedRuns ?? 0,
+          case_outputs: payload.caseOutputs ?? [],
         });
         setRoundResult(result);
         setPhase("round-verdict");

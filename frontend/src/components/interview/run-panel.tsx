@@ -12,13 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, Check, Loader2, Play, X } from "lucide-react";
 import type { CodeHarness, DryRunResult, SqlHarness } from "@/lib/interview-api";
-import {
-  disposeRuntime,
-  getRuntime,
-  runtimeForFormat,
-  runtimeStatus,
-  subscribeToRuntimes,
-} from "@/lib/runners/runtime";
+import { getRuntime, runCode, runtimeForFormat, runtimeStatus, subscribeToRuntimes } from "@/lib/runners/runtime";
 import type { SqlRunResult } from "@/lib/runners/sql.worker";
 import type { CaseResult, CodeRunResult } from "@/lib/runners/python.worker";
 
@@ -190,11 +184,16 @@ export function CodeRunPanel({
   language,
   harness,
   onDryRun,
+  onRunRecorded,
 }: {
   code: string;
   language: string;
   harness: CodeHarness;
   onDryRun: (args: { answer: string; language: string }) => Promise<DryRunResult>;
+  /** Run history goes to the interviewer as context. Deliberately NOT a
+   *  score deduction: penalising failed runs would teach candidates to
+   *  stop testing, which is the opposite of what we want. */
+  onRunRecorded?: (failed: boolean) => void;
 }) {
   const [cases, setCases] = useState<CaseResult[] | null>(null);
   const [failure, setFailure] = useState<{ message: string; phase?: string } | null>(null);
@@ -216,36 +215,35 @@ export function CodeRunPanel({
     try {
       if (!kind || !entry) {
         // Java / C++: assessed, not executed.
-        setDry(await onDryRun({ answer: code, language }));
+        const assessment = await onDryRun({ answer: code, language });
+        setDry(assessment);
+        onRunRecorded?.(!assessment.looks_correct);
         return;
       }
-      const worker = await getRuntime(kind);
-      const result = await new Promise<CodeRunResult>((resolve, reject) => {
-        const onMessage = (event: MessageEvent<CodeRunResult>) => {
-          clearTimeout(timer);
-          worker.removeEventListener("message", onMessage);
-          resolve(event.data);
-        };
-        // An infinite loop is the expected failure here, not an edge case.
-        // Killing the worker is the only way to stop synchronous code, so
-        // the runtime is dropped and the next run boots a fresh one.
-        const timer = setTimeout(() => {
-          worker.removeEventListener("message", onMessage);
-          disposeRuntime(kind);
-          reject(new Error("Your code ran for over 10 seconds and was stopped — check for an infinite loop."));
-        }, 10000);
-        worker.addEventListener("message", onMessage);
-        worker.postMessage({ kind: harness.kind, entry, code, cases: harness.cases });
-      });
+      // Only the VISIBLE cases here. Hidden ones run at submit time and
+      // their outcome is never shown, so tweaking until green buys nothing.
+      const visible = harness.cases.filter((c) => !c.hidden);
+      const result = (await runCode(kind, {
+        kind: harness.kind,
+        entry,
+        code,
+        cases: visible,
+      })) as CodeRunResult;
 
-      if (!result.ok) setFailure({ message: result.error ?? "Something went wrong.", phase: result.phase });
-      else setCases(result.results ?? []);
+      if (!result.ok) {
+        setFailure({ message: result.error ?? "Something went wrong.", phase: result.phase });
+        onRunRecorded?.(true);
+      } else {
+        const results = result.results ?? [];
+        setCases(results);
+        onRunRecorded?.(results.some((r) => !r.passed));
+      }
     } catch (e) {
       setFailure({ message: e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy(false);
     }
-  }, [code, language, kind, entry, harness, onDryRun]);
+  }, [code, language, kind, entry, harness, onDryRun, onRunRecorded]);
 
   const passed = cases?.filter((c) => c.passed).length ?? 0;
   const runnable = kind !== null;

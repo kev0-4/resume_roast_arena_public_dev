@@ -21,6 +21,7 @@ import type { CodeHarness, DryRunResult, RoundQuestion, SqlHarness } from "@/lib
 import { CollapsedProblemTab, McqPane, Panel, ProblemPanel, WrittenPane } from "./round-panes";
 import { LANGUAGE_LABELS } from "./code-editor";
 import { CodeRunPanel, SqlRunPanel } from "./run-panel";
+import { runCode, runtimeForFormat } from "@/lib/runners/runtime";
 
 // CodeMirror and its grammars are several hundred KB and most interviews --
 // every HR, IB and conversation-only session -- never open an editor. Keep
@@ -45,7 +46,15 @@ export interface RoundStageProps {
   question: RoundQuestion;
   secondsLeft: number;
   submitting: boolean;
-  onSubmit: (payload: { answer: string; mcqAnswers: number[]; language: string | null; pasted: boolean }) => void;
+  onSubmit: (payload: {
+    answer: string;
+    mcqAnswers: number[];
+    language: string | null;
+    pasted: boolean;
+    runs?: number;
+    failedRuns?: number;
+    caseOutputs?: { name: string; got: string }[];
+  }) => void;
   /** The interviewer tile and transcript, passed in so the SAME elements
    *  animate across from the conversation layout rather than being rebuilt. */
   presence: React.ReactNode;
@@ -76,6 +85,12 @@ export function RoundStage({
   );
   const [problemOpen, setProblemOpen] = useState(true);
   const pastedRef = useRef(false);
+  // Run history. Recorded and handed to the interviewer as context, never
+  // deducted from the score -- penalising failed runs would push people to
+  // stop testing, which is exactly the habit this button exists to build.
+  const runsRef = useRef(0);
+  const failedRunsRef = useRef(0);
+  const [submitPhase, setSubmitPhase] = useState<"idle" | "grading">("idle");
 
   // Switching language swaps in that language's starter, but never discards
   // work: only replace the buffer if it is still untouched starter code.
@@ -96,13 +111,43 @@ export function RoundStage({
     !submitting &&
     (question.format === "MCQ" ? answered > 0 : (question.format === "WRITTEN" ? written : code).trim().length > 0);
 
-  const submit = () =>
+  const submit = async () => {
+    const harness = question.harness as CodeHarness | undefined;
+    const kind = runtimeForFormat(question.format, language);
+    let caseOutputs: { name: string; got: string }[] = [];
+
+    // On submit -- and only on submit -- every case runs, including the
+    // hidden ones the candidate was never shown expected values for. The
+    // server holds those values and decides what passed, so tweaking until
+    // the visible tests go green buys nothing.
+    if (question.format === "CODE" && harness?.cases && kind && harness.entry[language]) {
+      setSubmitPhase("grading");
+      try {
+        const result = await runCode(kind, {
+          kind: harness.kind,
+          entry: harness.entry[language],
+          code,
+          cases: harness.cases,
+        });
+        caseOutputs = (result.results ?? []).map((r) => ({ name: r.name, got: r.got ?? "" }));
+      } catch {
+        // A failed grading run must not block submission -- the reviewer
+        // reads the code either way.
+      } finally {
+        setSubmitPhase("idle");
+      }
+    }
+
     onSubmit({
       answer: question.format === "WRITTEN" ? written : code,
       mcqAnswers: answers.map((a) => a ?? -1),
       language: question.format === "MCQ" || question.format === "WRITTEN" ? null : language,
       pasted: pastedRef.current,
+      runs: runsRef.current,
+      failedRuns: failedRunsRef.current,
+      caseOutputs,
     });
+  };
 
   const markPasted = () => {
     pastedRef.current = true;
@@ -124,7 +169,7 @@ export function RoundStage({
   useEffect(() => {
     if (!clockStartedRef.current || secondsLeft > 0 || submitting || autoSubmittedRef.current) return;
     autoSubmittedRef.current = true;
-    submit();
+    void submit();
     // submit is recreated every render from live state; depending on it
     // would re-arm this effect constantly. secondsLeft is the real trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -238,6 +283,10 @@ export function RoundStage({
                 language={language}
                 harness={question.harness as CodeHarness}
                 onDryRun={onDryRun}
+                onRunRecorded={(failed) => {
+                  runsRef.current += 1;
+                  if (failed) failedRunsRef.current += 1;
+                }}
               />
             ) : null}
           </div>
@@ -245,7 +294,7 @@ export function RoundStage({
 
         <motion.button
           layout
-          onClick={submit}
+          onClick={() => void submit()}
           disabled={!canSubmit}
           className={[
             "mt-3 flex shrink-0 items-center justify-center gap-2 rounded-full border-2 border-black px-7 py-3 font-display text-sm uppercase tracking-wide transition-all",
@@ -254,10 +303,10 @@ export function RoundStage({
               : "cursor-not-allowed border-black/20 bg-black/10 text-black/30",
           ].join(" ")}
         >
-          {submitting ? (
+          {submitting || submitPhase === "grading" ? (
             <>
               <Loader2 size={15} className="animate-spin" />
-              Marking your answer
+              {submitPhase === "grading" ? "Running every test" : "Marking your answer"}
             </>
           ) : (
             <>
