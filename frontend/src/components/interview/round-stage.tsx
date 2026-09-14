@@ -106,11 +106,19 @@ export function RoundStage({
 
   // Auto-submit at zero. This lives here rather than in the hook because
   // the answer buffer is here -- submitting from outside would post an
-  // empty answer and bin everything they had written. Guarded so the
-  // effect re-running cannot submit twice.
+  // empty answer and bin everything they had written.
+  //
+  // It only arms once the clock has actually been seen running. Firing on
+  // a zero that was never counted down to would submit an empty answer the
+  // instant the round opened, which is the worst possible failure for this
+  // screen.
   const autoSubmittedRef = useRef(false);
+  const clockStartedRef = useRef(false);
   useEffect(() => {
-    if (secondsLeft > 0 || submitting || autoSubmittedRef.current) return;
+    if (secondsLeft > 0) clockStartedRef.current = true;
+  }, [secondsLeft]);
+  useEffect(() => {
+    if (!clockStartedRef.current || secondsLeft > 0 || submitting || autoSubmittedRef.current) return;
     autoSubmittedRef.current = true;
     submit();
     // submit is recreated every render from live state; depending on it

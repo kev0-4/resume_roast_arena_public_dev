@@ -93,6 +93,16 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
   const skippedRef = useRef(0);
   const endedByInterviewerRef = useRef<{ reason: string; category: string } | null>(null);
   const speakingRef = useRef(false);
+  /**
+   * True while WE are closing the socket on purpose.
+   *
+   * onClose exists to rescue a dropped connection by scoring what was
+   * said, which is right for a real drop and catastrophic for a
+   * deliberate one: closing the socket to start a coding round looked
+   * exactly like a dropped call, so the interview ended the instant the
+   * editor appeared. The socket cannot tell these apart on its own.
+   */
+  const closingOnPurposeRef = useRef(false);
   /** Wall-clock of the last message of ANY kind from the server. The single
    *  most useful number when the room goes quiet: it separates "the socket
    *  is dead" from "the model is thinking". */
@@ -183,6 +193,9 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
   }, []);
 
   const teardown = useCallback(async () => {
+    // Every teardown in this hook is deliberate, so mark it before the
+    // socket can report the close back to us.
+    closingOnPurposeRef.current = true;
     sessionRef.current?.close();
     sessionRef.current = null;
     await micRef.current?.stop();
@@ -351,7 +364,12 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
         systemInstruction: payload.system_instruction,
         tools: payload.tools,
         callbacks: {
-          onOpen: () => setPhase("live"),
+          onOpen: () => {
+            // A fresh connection is live again, so a LATER close is once
+            // more a genuine drop and must still rescue the interview.
+            closingOnPurposeRef.current = false;
+            setPhase("live");
+          },
           onAudio: (b64) => {
             lastServerMessageRef.current = performance.now();
             audioChunksRef.current += 1;
@@ -420,6 +438,8 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
           // was said rather than stranding the row IN_PROGRESS forever.
           onClose: (reason) => {
             socketEventRef.current = `close:${reason}`;
+            // A close we asked for is part of the flow, not a failure.
+            if (closingOnPurposeRef.current) return;
             void endRef.current();
           },
         },
