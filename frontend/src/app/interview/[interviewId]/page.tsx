@@ -15,9 +15,11 @@ import { useAuth } from "@/lib/auth-context";
 import { useLiveInterview } from "@/hooks/use-live-interview";
 import { takeInterviewStart } from "@/lib/interview-handoff";
 import type { InterviewStartResponse } from "@/lib/interview-api";
+import { motion } from "framer-motion";
 import { InterviewerPresence } from "@/components/interview/interviewer-presence";
 import { TranscriptPane } from "@/components/interview/transcript-pane";
 import { ResumePane } from "@/components/interview/resume-pane";
+import { RoundStage, RoundVerdict } from "@/components/interview/round-stage";
 import { ResultsSummary } from "@/components/interview/results-summary";
 
 function formatClock(seconds: number): string {
@@ -130,6 +132,65 @@ export default function InterviewRoomPage({ params }: { params: Promise<{ interv
           body="Put headphones on -- without them the interviewer hears itself through your mic and talks over its own questions. It speaks first, so just answer out loud, and you can cut it off mid-sentence. If you're stuck you can ask to move on, though it'll push back once and skipping counts against your score. It can also end the interview early if you waste its time."
           onAction={() => void live.connect()}
           actionLabel="Join the interview"
+        />
+      </RoomShell>
+    );
+  }
+
+  // The handoff: the interviewer has said what's coming and the screen is
+  // about to change. A beat of explanation beats a hard cut.
+  if (live.phase === "handoff") {
+    return (
+      <RoomShell>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="flex flex-1 flex-col items-center justify-center gap-5 text-center"
+        >
+          <motion.div
+            layoutId="interviewer-presence"
+            className="flex h-24 w-24 items-center justify-center rounded-full border-[3px] border-black bg-brand-lime shadow-[5px_5px_0_#000]"
+          >
+            <span className="font-display text-3xl uppercase tracking-tighter text-black">RR</span>
+          </motion.div>
+          {live.handoffLine ? (
+            <p className="max-w-md font-mono text-sm italic text-brand-lime/90">&ldquo;{live.handoffLine}&rdquo;</p>
+          ) : null}
+          <div className="flex items-center gap-2 font-mono text-[11px] font-semibold text-white/50">
+            <Loader2 size={13} className="animate-spin" />
+            Setting up your workspace
+          </div>
+        </motion.div>
+      </RoomShell>
+    );
+  }
+
+  if (live.phase === "exercise" && live.round) {
+    return (
+      <RoomShell>
+        <RoundStage
+          question={live.round.question}
+          secondsLeft={live.roundSecondsLeft}
+          submitting={live.submittingRound}
+          onSubmit={live.submitRound}
+          presence={
+            <InterviewerPresence amplitude={live.amplitude} speaking={false} thinking={false} idle />
+          }
+          transcript={<TranscriptPane lines={live.lines} interim="" />}
+        />
+      </RoomShell>
+    );
+  }
+
+  if (live.phase === "round-verdict" && live.roundResult) {
+    return (
+      <RoomShell>
+        <RoundVerdict
+          score={live.roundResult.score}
+          strengths={live.roundResult.strengths}
+          problems={live.roundResult.problems}
+          continuing={false}
+          onContinue={() => void live.continueToDebrief()}
         />
       </RoomShell>
     );

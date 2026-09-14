@@ -12,10 +12,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MicCapture, PcmPlayer } from "@/lib/live-audio";
 import { LiveInterviewSession } from "@/lib/live-session";
 import {
+  advanceInterviewRound,
   completeInterview,
+  getInterviewRound,
+  mintVoiceToken,
   postTranscriptChunks,
+  submitInterviewRound,
+  type InterviewRound,
   type InterviewScoreResult,
   type InterviewStartResponse,
+  type RoundResult,
   type TranscriptChunk,
   type TranscriptSpeaker,
 } from "@/lib/interview-api";
@@ -24,6 +30,9 @@ export type InterviewPhase =
   | "greenroom" // mic not yet granted; waiting on the user's click
   | "connecting"
   | "live"
+  | "handoff" // interviewer called begin_round; screen is changing
+  | "exercise" // coding / SQL / MCQ / written round, socket closed
+  | "round-verdict" // showing what they scored before voice returns
   | "ending" // flushing transcript
   | "scoring"
   | "done"
@@ -57,6 +66,14 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
   const [endedByInterviewer, setEndedByInterviewer] = useState<{ reason: string; category: string } | null>(null);
   /** Questions the candidate declined. Counts against the score. */
   const [skippedCount, setSkippedCount] = useState(0);
+  /** The exercise round in progress, once the interviewer hands over. */
+  const [round, setRound] = useState<InterviewRound | null>(null);
+  const [roundSecondsLeft, setRoundSecondsLeft] = useState(0);
+  const [roundResult, setRoundResult] = useState<RoundResult | null>(null);
+  const [submittingRound, setSubmittingRound] = useState(false);
+  /** What the interviewer said as it handed over, so the screen change is
+   *  explained rather than abrupt. */
+  const [handoffLine, setHandoffLine] = useState("");
   /** Time from "connect" to the interviewer's first audio. The entire
    *  justification for this rebuild, so it is measured, not assumed. */
   const [firstAudioMs, setFirstAudioMs] = useState<number | null>(null);
@@ -211,11 +228,107 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
     endRef.current = end;
   }, [end]);
 
-  const connect = useCallback(async () => {
+  /**
+   * The interviewer handed over to an exercise.
+   *
+   * Voice is torn down FIRST and deliberately: the socket stays closed for
+   * the whole round, which is where the cost saving lives. The flush before
+   * teardown matters because the handoff line it just spoke is the last
+   * thing said, and it explains the screen change.
+   */
+  const beginRound = useCallback(async () => {
     if (!start) return;
+    setPhase("handoff");
+    await waitForPlaybackToDrain();
+    await teardown();
+    await flush();
+
+    try {
+      const idToken = await getIdToken();
+      if (!idToken) throw new Error("Your session expired.");
+      const advanced = await advanceInterviewRound(start.interview_id, idToken);
+      const index = advanced.next_round_index ?? 1;
+      const fetched = await getInterviewRound(start.interview_id, index, idToken);
+      setRound(fetched);
+      setRoundSecondsLeft(fetched.minutes * 60);
+      setPhase("exercise");
+    } catch (err) {
+      // Failing to load a round must not strand them: fall through to
+      // scoring what they have rather than a dead screen.
+      setError(err instanceof Error ? err.message : "Could not start that round.");
+      setPhase("error");
+    }
+  }, [start, teardown, flush, getIdToken, waitForPlaybackToDrain]);
+
+  const beginRoundRef = useRef(beginRound);
+  useEffect(() => {
+    beginRoundRef.current = beginRound;
+  }, [beginRound]);
+
+  const submitRound = useCallback(
+    async (payload: { answer: string; mcqAnswers: number[]; language: string | null; pasted: boolean }) => {
+      if (!start || !round || submittingRound) return;
+      setSubmittingRound(true);
+      try {
+        const idToken = await getIdToken();
+        if (!idToken) throw new Error("Your session expired.");
+        const result = await submitInterviewRound(start.interview_id, round.index, idToken, {
+          answer: payload.answer,
+          mcq_answers: payload.mcqAnswers,
+          language: payload.language,
+          seconds_taken: round.minutes * 60 - roundSecondsLeft,
+          pasted: payload.pasted,
+        });
+        setRoundResult(result);
+        setPhase("round-verdict");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not submit that round.");
+        setPhase("error");
+      } finally {
+        setSubmittingRound(false);
+      }
+    },
+    [start, round, submittingRound, roundSecondsLeft, getIdToken],
+  );
+
+  const submitRoundRef = useRef(submitRound);
+  useEffect(() => {
+    submitRoundRef.current = submitRound;
+  }, [submitRound]);
+
+  // connectWith is defined below (it needs the socket callbacks), so the
+  // debrief reaches it through a ref rather than forcing the whole
+  // connection setup to move above the round lifecycle.
+  const connectWithRef = useRef<((payload: InterviewStartResponse) => Promise<void>) | null>(null);
+
+  /**
+   * Voice returns for the debrief.
+   *
+   * A brand-new token, re-seeded server-side with the transcript, the
+   * submission and the review -- ephemeral tokens ignore session resumption
+   * handles, so this is the only way the interviewer remembers any of it.
+   */
+  const continueToDebrief = useCallback(async () => {
+    if (!start) return;
+    setPhase("connecting");
+    try {
+      const idToken = await getIdToken();
+      if (!idToken) throw new Error("Your session expired.");
+      const payload = await mintVoiceToken(start.interview_id, idToken);
+      setRound(null);
+      setRoundResult(null);
+      await connectWithRef.current?.(payload);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not bring the interviewer back.");
+      setPhase("error");
+    }
+  }, [start, getIdToken]);
+
+  const connectWith = useCallback(async (payload: InterviewStartResponse) => {
     setPhase("connecting");
     setError(null);
     connectStartRef.current = performance.now();
+    gotAudioRef.current = false;
 
     try {
       const player = new PcmPlayer((isSpeaking) => {
@@ -233,10 +346,10 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
       sessionRef.current = session;
 
       await session.connect({
-        token: start.token,
-        model: start.model,
-        systemInstruction: start.system_instruction,
-        tools: start.tools,
+        token: payload.token,
+        model: payload.model,
+        systemInstruction: payload.system_instruction,
+        tools: payload.tools,
         callbacks: {
           onOpen: () => setPhase("live"),
           onAudio: (b64) => {
@@ -287,6 +400,11 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
               } else if (call.name === "skip_question") {
                 skippedRef.current += 1;
                 setSkippedCount(skippedRef.current);
+              } else if (call.name === "begin_round") {
+                // Show what it said as it handed over, so the screen
+                // changing under them is explained rather than abrupt.
+                setHandoffLine(String(call.args?.handoff ?? ""));
+                void beginRoundRef.current();
               }
             }
             // Must acknowledge, or the model waits on us and the room goes
@@ -328,7 +446,15 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
       setPhase("error");
       await teardown();
     }
-  }, [start, appendFragment, teardown, waitForPlaybackToDrain]);
+  }, [appendFragment, teardown, waitForPlaybackToDrain]);
+
+  useEffect(() => {
+    connectWithRef.current = connectWith;
+  }, [connectWith]);
+
+  const connect = useCallback(async () => {
+    if (start) await connectWith(start);
+  }, [start, connectWith]);
 
   const toggleMute = useCallback(() => {
     setMuted((prev) => {
@@ -361,6 +487,18 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
     const id = setInterval(() => void flush(), FLUSH_INTERVAL_MS);
     return () => clearInterval(id);
   }, [phase, flush]);
+
+  // The round clock only counts. Auto-submitting at zero is RoundStage's
+  // job, not this hook's, because the answer buffer lives there -- firing
+  // the submit from here would post an empty answer and throw away
+  // everything the candidate had typed.
+  useEffect(() => {
+    if (phase !== "exercise") return;
+    const id = setInterval(() => {
+      setRoundSecondsLeft((left) => Math.max(0, left - 1));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [phase]);
 
   // Diagnostic heartbeat. The room going quiet has several very different
   // causes that look identical from the outside -- a dead socket, a model
@@ -410,6 +548,13 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
     firstAudioMs,
     endedByInterviewer,
     skippedCount,
+    round,
+    roundSecondsLeft,
+    roundResult,
+    submittingRound,
+    handoffLine,
+    submitRound,
+    continueToDebrief,
     connect,
     toggleMute,
     end,
