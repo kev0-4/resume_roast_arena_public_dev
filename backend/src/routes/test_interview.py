@@ -1084,7 +1084,18 @@ class TestInterviewLeaderboardRoutes:
         with TestClient(app) as client:
             lb_resp = client.get("/interview-leaderboard?limit=100")
         assert lb_resp.status_code == 200
-        assert any(e["score"] == 7 for e in lb_resp.json()["entries"])
+        body = lb_resp.json()
+        # Deliberately NOT "is our score-7 row in the top 100": the route
+        # caps limit at 100 and this suite has run against the same dev
+        # database enough times that over a hundred higher scores exist, so
+        # that assertion fails on accumulation rather than on a defect.
+        # The board is checked for shape and ordering; that THIS interview
+        # scored 7 is asserted through /me below, which is user-scoped and
+        # cannot be crowded out.
+        assert body["total"] >= 1
+        assert len(body["entries"]) <= 100
+        scores = [e["score"] for e in body["entries"]]
+        assert scores == sorted(scores, reverse=True), "leaderboard must be ordered by score"
 
         app.dependency_overrides[get_current_user] = lambda: _FakeCurrUser(holder["user_id"])
         with TestClient(app) as client:
