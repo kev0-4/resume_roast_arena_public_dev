@@ -182,6 +182,65 @@ def conversation_only_plan(reason: str = "planner unavailable") -> InterviewPlan
     )
 
 
+def build_agenda_block(plan: InterviewPlan, current_round: int = 0) -> str:
+    """
+    The agenda, written for the INTERVIEWER to read.
+
+    This exists because it was missing and the interviewer noticed: asked
+    to move to a coding round, it replied "I have no coding round
+    scheduled for you today" while two SQL exercises were in fact
+    scheduled. It had a begin_round tool and no knowledge of whether there
+    was anything to begin, so it improvised -- and improvising about the
+    agenda means lying to the candidate.
+    """
+    lines = []
+    for index, planned in enumerate(plan.rounds):
+        marker = " <- you are here" if index == current_round else ""
+        if planned.kind == "CONVERSATION":
+            lines.append(f"{index + 1}. This conversation, about {planned.minutes} minutes{marker}")
+            continue
+        entry = get_question(planned.question_id)
+        if entry is None:
+            continue
+        kind = {
+            "CODE": "Coding exercise",
+            "SQL": "SQL exercise",
+            "MCQ": "Quick-fire questions",
+            "WRITTEN": "Written answer",
+        }.get(entry["format"], entry["format"])
+        lines.append(
+            f"{index + 1}. {kind}: \"{entry.get('title', planned.question_id)}\" "
+            f"({planned.minutes} minutes){marker}"
+        )
+
+    remaining = len(plan.rounds) - current_round - 1
+    if remaining > 0:
+        closing = (
+            "When you have covered enough ground here, call begin_round to move to the next item.\n"
+            "If the candidate asks what is coming, or asks to move on to it, answer ACCURATELY "
+            "from this list -- and if they are ready, just call begin_round."
+        )
+    else:
+        closing = (
+            "There is nothing scheduled after this. Do not promise the candidate an exercise, a "
+            "coding round, or anything else that is not on this list. When you have covered enough "
+            "ground, call end_interview."
+        )
+
+    return f"""
+
+---
+TODAY'S AGENDA -- this is the whole interview. Do not misstate it:
+
+{chr(10).join(lines)}
+
+{closing}
+
+Note the FORMAT of each item. A SQL exercise is not a coding puzzle and a
+coding puzzle is not a SQL exercise; describe what is actually scheduled.
+"""
+
+
 def plan_summary(plan: InterviewPlan) -> List[Dict[str, Any]]:
     """Agenda for the candidate -- shown before they join."""
     summary = []

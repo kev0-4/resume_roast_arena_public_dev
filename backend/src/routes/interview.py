@@ -203,7 +203,7 @@ async def start_interview(
     )
     system_instruction = interview_prompts.build_live_system_instruction(
         system_context, conversation_minutes
-    )
+    ) + interview_planner.build_agenda_block(plan, 0)
 
     # The id is generated here rather than by the DB so the voice -- which
     # is derived from it -- is known before the token is minted, while the
@@ -648,7 +648,9 @@ async def mint_voice_token(
     )
     plan_now = _plan_of(interview)
     remaining_minutes = next((r.minutes for r in plan_now.rounds if r.kind == "CONVERSATION"), 10)
-    instruction = interview_prompts.build_live_system_instruction(system_context, remaining_minutes)
+    instruction = interview_prompts.build_live_system_instruction(
+        system_context, remaining_minutes
+    ) + interview_planner.build_agenda_block(plan_now, interview.current_round or 0)
 
     chunks = await _read_transcript(interview)
     utterances = interview_service.merge_into_utterances(chunks)

@@ -812,6 +812,48 @@ class TestRounds:
         # str and UUID forms must agree -- routes pass both.
         assert voice_for_interview(interview_id) == voice_for_interview(str(interview_id))
 
+    def test_interviewer_is_told_its_own_agenda(self, monkeypatch):
+        # Observed failure: asked to move to a coding round, the
+        # interviewer replied "I have no coding round scheduled for you
+        # today" while two exercises were scheduled. It had a begin_round
+        # tool and no idea whether there was anything to begin.
+        h = self._setup(monkeypatch, "agenda-known", CODE_ROUND_PLAN)
+        instruction = h["calls"]["instruction"]
+
+        assert "TODAY'S AGENDA" in instruction
+        assert "Merge overlapping intervals" in instruction, "the scheduled exercise must be named"
+        assert "Coding exercise" in instruction, "and its format stated"
+        assert "you are here" in instruction
+        assert "call begin_round to move to the next item" in instruction
+
+    def test_conversation_only_interview_is_told_there_is_nothing_next(self, monkeypatch):
+        # The opposite failure: promising an exercise that does not exist.
+        h = self._setup(
+            monkeypatch,
+            "agenda-empty",
+            [{"kind": "CONVERSATION", "question_id": "", "minutes": 10, "focus": "Resume."}],
+        )
+        instruction = h["calls"]["instruction"]
+        assert "There is nothing scheduled after this" in instruction
+        assert "Do not promise the candidate an exercise" in instruction
+
+    def test_agenda_follows_the_candidate_into_the_debrief(self, monkeypatch):
+        h = self._setup(monkeypatch, "agenda-debrief", CODE_ROUND_PLAN)
+        app = h["app"]
+
+        with TestClient(app) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/advance", json={})
+            client.post(
+                f"/api/v1/interview/{h['interview_id']}/round/1/submit",
+                json={"answer": "def merge_intervals(x): return x", "language": "python"},
+            )
+            voice = client.post(f"/api/v1/interview/{h['interview_id']}/voice-token", json={})
+
+        instruction = voice.json()["system_instruction"]
+        assert "TODAY'S AGENDA" in instruction
+        # Round 1 is done, so nothing remains and it must not invent more.
+        assert "There is nothing scheduled after this" in instruction
+
     def test_hidden_expected_values_never_reach_the_client(self, monkeypatch):
         # This is what makes hidden tests hidden rather than merely
         # undisplayed: the inputs must travel (the code runs in the
