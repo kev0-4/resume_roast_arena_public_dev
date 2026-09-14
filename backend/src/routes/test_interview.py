@@ -826,6 +826,20 @@ class TestRounds:
         assert "you are here" in instruction
         assert "call begin_round to move to the next item" in instruction
 
+    def test_interviewer_is_forbidden_from_narrating_the_next_screen(self, monkeypatch):
+        # Observed: having finished the last round, the interviewer told the
+        # candidate "the system will move you directly to the design
+        # challenge next." No such round exists anywhere. Knowing the
+        # agenda was not enough -- it had to be told not to predict the
+        # screen at all, because it does not control it.
+        h = self._setup(monkeypatch, "no-narrate", CODE_ROUND_PLAN)
+        instruction = h["calls"]["instruction"]
+
+        assert "NEVER NARRATE WHAT THE SCREEN IS ABOUT TO DO" in instruction
+        assert "the system will move you to" in instruction
+        assert "no design challenge" in instruction.lower() or "There was no design challenge" in instruction
+        assert "call end_interview" in instruction
+
     def test_conversation_only_interview_is_told_there_is_nothing_next(self, monkeypatch):
         # The opposite failure: promising an exercise that does not exist.
         h = self._setup(

@@ -38,7 +38,10 @@ INTERVIEW_TOOLS = [
                     "End the interview now and send the candidate to scoring. Call this when you "
                     "have genuinely covered enough ground, or when the candidate is wasting your "
                     "time and has not corrected course after one warning. Say your closing line "
-                    "BEFORE calling this."
+                    "BEFORE calling this -- and keep that line to how the interview went. Do NOT "
+                    "describe what happens next or what screen they will see: you do not control "
+                    "it and saying so has already misled a candidate about a round that did not "
+                    "exist."
                 ),
                 "parameters": {
                     "type": "OBJECT",
