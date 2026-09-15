@@ -155,6 +155,56 @@ async def set_transcript_blob_path(db: AsyncSession, interview: InterviewSession
     return interview
 
 
+async def touch_interview(db: AsyncSession, interview: InterviewSessions) -> InterviewSessions:
+    """
+    Records that this interview is still alive, without changing anything
+    else about it.
+
+    Exists because the transcript route only writes to the row when the blob
+    PATH changes -- which is once, on the first flush. Every later flush
+    wrote to blob storage and left the row untouched, so updated_at stopped
+    tracking activity about five seconds into every interview. The stale
+    sweep reads updated_at to decide what is dead, so it has to mean what it
+    says.
+    """
+    interview.updated_at = datetime.datetime.utcnow()
+    try:
+        await db.commit()
+        await db.refresh(interview)
+    except Exception:
+        await db.rollback()
+        raise
+    return interview
+
+
+async def list_stale_in_progress_interview_ids(
+    db: AsyncSession, cutoff: datetime.datetime, limit: int = 50
+) -> List[uuid.UUID]:
+    """
+    Interviews still marked IN_PROGRESS with no activity since `cutoff`.
+
+    Returns bare ids, not ORM rows, on purpose: the caller finalizes these
+    one at a time and each finalize commits, which expires every other
+    object still in the session. Re-fetching each row by id immediately
+    before using it is this codebase's established way around that (the
+    same MissingGreenlet trap documented in workers/cleanup/test_sweep.py).
+
+    Bounded and oldest-first: finalizing a backlog costs one Gemini call
+    per interview that has speech in it, so a pass takes the longest-dead
+    ones and leaves the rest for the next interval.
+    """
+    stmt = (
+        select(InterviewSessions.id)
+        .where(
+            InterviewSessions.status == InterviewStatusEnum.IN_PROGRESS.value,
+            InterviewSessions.updated_at < cutoff,
+        )
+        .order_by(InterviewSessions.updated_at.asc())
+        .limit(limit)
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
 async def set_plan(db: AsyncSession, interview: InterviewSessions, plan: Dict[str, Any]) -> InterviewSessions:
     interview.plan = plan
     interview.current_round = 0
@@ -413,6 +463,7 @@ async def list_my_interviews(
             InterviewSessions.job_description,
             InterviewSessions.created_at,
             InterviewSessions.completed_at,
+            InterviewSessions.updated_at,
         )
         .where(InterviewSessions.user_id == user_id)
         .order_by(InterviewSessions.created_at.desc())
@@ -429,6 +480,7 @@ async def list_my_interviews(
             "job_description": row.job_description,
             "created_at": row.created_at,
             "completed_at": row.completed_at,
+            "updated_at": row.updated_at,
         }
         for row in result.all()
     ]

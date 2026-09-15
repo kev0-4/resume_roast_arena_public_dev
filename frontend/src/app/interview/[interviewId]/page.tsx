@@ -14,13 +14,33 @@ import { Loader2, Mic, MicOff, PhoneOff } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useLiveInterview } from "@/hooks/use-live-interview";
 import { takeInterviewStart } from "@/lib/interview-handoff";
-import type { InterviewStartResponse } from "@/lib/interview-api";
+import { ApiError, mintVoiceToken, type InterviewStartResponse } from "@/lib/interview-api";
 import { motion } from "framer-motion";
 import { InterviewerPresence } from "@/components/interview/interviewer-presence";
 import { TranscriptPane } from "@/components/interview/transcript-pane";
 import { ResumePane } from "@/components/interview/resume-pane";
 import { RoundStage, RoundVerdict } from "@/components/interview/round-stage";
 import { ResultsSummary } from "@/components/interview/results-summary";
+
+// In-flight rejoin mints, keyed by interview id.
+//
+// Same hazard interview-handoff.ts's `taken` map exists for: React
+// double-invokes effects in development, so the rejoin fired twice and
+// minted two ephemeral tokens for one arrival. Each is a real, billable,
+// single-use credential, so the second was pure waste. Sharing the promise
+// makes the arrival idempotent without a guard that could leave the page
+// stuck on its loading shell when the first attempt is the cancelled one.
+const rejoinsInFlight = new Map<string, Promise<InterviewStartResponse>>();
+
+function rejoin(interviewId: string, idToken: string): Promise<InterviewStartResponse> {
+  const existing = rejoinsInFlight.get(interviewId);
+  if (existing) return existing;
+  const attempt = mintVoiceToken(interviewId, idToken).finally(() => {
+    rejoinsInFlight.delete(interviewId);
+  });
+  rejoinsInFlight.set(interviewId, attempt);
+  return attempt;
+}
 
 function formatClock(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -32,23 +52,59 @@ export default function InterviewRoomPage({ params }: { params: Promise<{ interv
   const { interviewId } = use(params);
   const { getIdToken } = useAuth();
 
-  // `undefined` = not looked yet, `null` = looked and it wasn't there.
+  // `undefined` = not resolved yet, `null` = resolved and there's no way in.
   const [start, setStart] = useState<InterviewStartResponse | null | undefined>(undefined);
+  const [closedReason, setClosedReason] = useState<string | null>(null);
 
-  // sessionStorage only exists client-side, so this cannot be a lazy
-  // useState initializer: the server prerender would read null, the client
-  // would read the token, and the two renders would disagree.
+  // Two ways into this room, in priority order.
   //
-  // eslint's set-state-in-effect is suppressed rather than worked around,
-  // because this is the case its own message carves out -- reading once
-  // from an external system that React cannot see. There is nothing to
-  // await here, so wrapping it in an async IIFE (this codebase's usual
-  // shape for that rule) would only hide the call from the linter without
-  // changing what it does.
+  // 1. The handoff stash, set by /interview/new. sessionStorage only exists
+  //    client-side, so this cannot be a lazy useState initializer: the
+  //    server prerender would read null, the client would read the token,
+  //    and the two renders would disagree.
+  // 2. Failing that, a rejoin. The stashed token is single-use and gone
+  //    after a refresh, but the INTERVIEW may well still be live -- so ask
+  //    for a fresh one. The server grants it only while the interview is
+  //    genuinely IN_PROGRESS, which is the same window the My Interviews
+  //    page offers its Rejoin button for. It re-seeds the interviewer from
+  //    the transcript we already stored, so the conversation picks up
+  //    knowing everything that was already said.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setStart(takeInterviewStart(interviewId));
-  }, [interviewId]);
+    let cancelled = false;
+    (async () => {
+      const stashed = takeInterviewStart(interviewId);
+      if (stashed) {
+        if (!cancelled) setStart(stashed);
+        return;
+      }
+      try {
+        const idToken = await getIdToken();
+        if (!idToken) {
+          if (!cancelled) {
+            setClosedReason("Sign in again to pick this interview back up.");
+            setStart(null);
+          }
+          return;
+        }
+        const resumed = await rejoin(interviewId, idToken);
+        if (!cancelled) setStart(resumed);
+      } catch (err) {
+        if (cancelled) return;
+        // 409 is the specific, common case worth naming: the interview
+        // already ended, so there is a real score to point at rather than
+        // a vague failure.
+        setClosedReason(
+          err instanceof ApiError && err.status === 409
+            ? "This interview has already finished. Its score is waiting on your My Interviews page."
+            : null,
+        );
+        setStart(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [interviewId, getIdToken]);
 
   const live = useLiveInterview(start ?? null, getIdToken);
 
@@ -56,15 +112,22 @@ export default function InterviewRoomPage({ params }: { params: Promise<{ interv
     return <RoomShell>{null}</RoomShell>;
   }
 
-  // No token in the handoff: a refresh, a shared link, or a direct visit.
-  // None of these are recoverable -- the token was single-use and is gone.
+  // No handoff AND no rejoin: the interview is genuinely over (finished,
+  // finalized by the stale sweep, or never theirs to begin with).
   if (start === null) {
     return (
       <RoomShell>
         <CenteredCard
           title="This interview room has closed"
-          body="Live interviews can't be resumed or reopened -- the session credential is used once and expires. Start a fresh one and you'll be talking in a few seconds."
-          action={{ href: "/interview/new", label: "Start a new interview" }}
+          body={
+            closedReason ??
+            "We couldn't reopen this interview. If it's still live you can rejoin it from My Interviews; otherwise start a fresh one."
+          }
+          action={
+            closedReason
+              ? { href: "/interview/history", label: "My interviews" }
+              : { href: "/interview/new", label: "Start a new interview" }
+          }
         />
       </RoomShell>
     );
