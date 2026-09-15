@@ -168,6 +168,42 @@ async def set_plan(db: AsyncSession, interview: InterviewSessions, plan: Dict[st
     return interview
 
 
+async def questions_already_asked(db: AsyncSession, user_id) -> List[str]:
+    """
+    Every question id this user has already been planned, oldest first.
+
+    The planner is otherwise given the resume and the job description and
+    nothing else, so it has no way to avoid repeating itself -- and it
+    does. Across one real account's eight interviews, from one resume
+    against eight DIFFERENT job descriptions, `lru-cache-design` was
+    chosen five times. A bigger catalogue slows that down; it does not
+    stop it, because the model keeps picking the best fit for a resume
+    that has not changed.
+
+    Read from `plan` rather than `round_results`: a question the candidate
+    was SHOWN has been spent even if they never submitted it, so an
+    abandoned interview must not recycle its questions.
+
+    Oldest first, because the caller needs least-recently-seen when it has
+    to allow a repeat after all.
+    """
+    stmt = (
+        select(InterviewSessions.plan)
+        .where(InterviewSessions.user_id == user_id)
+        .where(InterviewSessions.plan.isnot(None))
+        .order_by(InterviewSessions.created_at.asc())
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+
+    ordered: List[str] = []
+    for plan in rows:
+        for planned in (plan or {}).get("rounds", []):
+            question_id = planned.get("question_id")
+            if question_id and question_id not in ordered:
+                ordered.append(question_id)
+    return ordered
+
+
 async def record_round_result(
     db: AsyncSession, interview: InterviewSessions, result: Dict[str, Any]
 ) -> InterviewSessions:

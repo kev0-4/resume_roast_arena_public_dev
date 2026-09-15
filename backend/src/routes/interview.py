@@ -184,11 +184,17 @@ async def start_interview(
     # Plan the round structure before anything expensive happens. A failure
     # here degrades to the conversation-only interview that shipped in #19
     # rather than blocking a candidate who has already waited for a roast.
+    # What this candidate has already been shown, so the planner does not
+    # hand them the same exercise a second time. Enforced in validate_plan
+    # as well as asked for in the prompt -- the model's output is not
+    # trusted anywhere else in that file either.
+    already_asked = await interview_service.questions_already_asked(db, curr_user.id)
+
     try:
         raw_plan, _usage, _model = await interview_llm.generate_plan(
-            interview_planner.build_planning_prompt(resume_text, body.job_description)
+            interview_planner.build_planning_prompt(resume_text, body.job_description, already_asked)
         )
-        plan = interview_planner.validate_plan(raw_plan)
+        plan = interview_planner.validate_plan(raw_plan, already_asked)
     except Exception as e:  # noqa: BLE001 -- any planner failure is non-fatal by design
         emit_event(
             "interview.plan_failed",
