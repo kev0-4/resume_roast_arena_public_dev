@@ -21,7 +21,7 @@ conversation-only interview -- which is exactly what ships today and is
 never a broken experience.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from pydantic import BaseModel
 
@@ -52,13 +52,24 @@ class InterviewPlan(BaseModel):
     rounds: List[PlannedRound]
 
 
-def build_planning_prompt(anonymized_resume_text: str, job_description: str) -> str:
+def build_planning_prompt(
+    anonymized_resume_text: str,
+    job_description: str,
+    already_asked: Sequence[str] = (),
+) -> str:
     catalogue = planner_index()
+    already = set(already_asked)
+
+    # Excluded questions are removed from the list entirely rather than
+    # listed and forbidden. Naming them would put the exact ids we do not
+    # want back in front of the model, and this prompt already asks it to
+    # respect several rules at once.
     catalogue_lines = "\n".join(
         f"- {e['id']} | {e['format']} | {e['difficulty']} | {e['minutes']}min | "
         f"verticals: {', '.join(e['verticals'])} | topics: {', '.join(e['topics'])}"
         for e in catalogue
-    )
+        if e["id"] not in already
+    ) or "(no unseen questions remain for this candidate)"
 
     return f"""\
 You are planning the structure of a mock interview. You are NOT conducting \
@@ -116,7 +127,7 @@ technical exercise onto a non-technical candidate.
 """
 
 
-def validate_plan(plan: InterviewPlan) -> InterviewPlan:
+def validate_plan(plan: InterviewPlan, already_asked: Sequence[str] = ()) -> InterviewPlan:
     """
     Makes whatever the model returned safe to run.
 
@@ -125,8 +136,20 @@ def validate_plan(plan: InterviewPlan) -> InterviewPlan:
     interview cannot start because the planner returned a bad id. The worst
     case degrades to a conversation-only interview, which is precisely the
     product that ships today.
+
+    `already_asked` (oldest first) is enforced HERE as well as asked for in
+    the prompt, for the same reason every other rule in this function is:
+    the model's output is not trusted. A question this candidate has
+    already been shown is dropped exactly like a hallucinated id.
+
+    The one deliberate exception is at the bottom -- if enforcing that
+    would leave the candidate with no exercise at all, one repeat is
+    allowed back in, the least recently seen. An empty round is a worse
+    experience than a familiar question, and a candidate who has exhausted
+    their vertical should still get an interview.
     """
     rounds: List[PlannedRound] = []
+    seen_order = {question_id: index for index, question_id in enumerate(already_asked)}
 
     conversation_minutes = MIN_CONVERSATION_MINUTES
     for planned in plan.rounds:
@@ -145,6 +168,8 @@ def validate_plan(plan: InterviewPlan) -> InterviewPlan:
         )
     )
 
+    repeats: List[PlannedRound] = []
+
     for planned in plan.rounds:
         if planned.kind.upper() != "EXERCISE":
             continue
@@ -156,15 +181,28 @@ def validate_plan(plan: InterviewPlan) -> InterviewPlan:
             # replacement -- a wrong-but-plausible question is worse than
             # one fewer round.
             continue
-        rounds.append(
-            PlannedRound(
-                kind="EXERCISE",
-                question_id=entry["id"],
-                # The catalogue's own timing wins over the model's.
-                minutes=entry["minutes"],
-                focus=planned.focus or "",
-            )
+        candidate = PlannedRound(
+            kind="EXERCISE",
+            question_id=entry["id"],
+            # The catalogue's own timing wins over the model's.
+            minutes=entry["minutes"],
+            focus=planned.focus or "",
         )
+        if entry["id"] in seen_order:
+            repeats.append(candidate)
+            continue
+        if any(r.question_id == entry["id"] for r in rounds):
+            # The model named the same question twice in one plan.
+            continue
+        rounds.append(candidate)
+
+    if len(rounds) == 1 and repeats:
+        # Nothing unseen survived. Take the single least-recently-seen
+        # repeat rather than sending them into a conversation-only
+        # interview they did not ask for. One is enough: two stale
+        # questions is not twice the interview.
+        repeats.sort(key=lambda r: seen_order.get(r.question_id, 0))
+        rounds.append(repeats[0])
 
     return InterviewPlan(
         vertical=(plan.vertical or "unknown").strip().lower()[:40],

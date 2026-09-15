@@ -1480,5 +1480,1135 @@
     ],
     "rubric": "Auto-scored.",
     "title": "Employment practice and process"
+  },
+  {
+    "id": "virtual-list-range",
+    "format": "CODE",
+    "verticals": [
+      "frontend",
+      "fullstack",
+      "swe",
+      "mobile"
+    ],
+    "difficulty": "easy",
+    "topics": [
+      "virtualisation",
+      "rendering",
+      "arithmetic"
+    ],
+    "minutes": 10,
+    "title": "Which rows should a virtual list render?",
+    "prompt": "A long list is rendered virtually: only the rows currently on screen are in the DOM.\n\nWrite visible_range(item_count, item_height, viewport_height, scroll_top, overscan) returning [start, end] -- the half-open range of indices to render, so `end` is the first index NOT rendered.\n\nEvery row is item_height tall. A row must be rendered if any part of it is inside the viewport. `overscan` is the number of extra rows to render on EACH side, so that a fast scroll does not show blank space.\n\nThe range must always be a valid slice of the list: never below 0, never past item_count.",
+    "starter": {
+      "python": "import math\n\n\ndef visible_range(item_count: int, item_height: int, viewport_height: int,\n                  scroll_top: float, overscan: int) -> list[int]:\n    pass\n",
+      "javascript": "function visibleRange(itemCount, itemHeight, viewportHeight, scrollTop, overscan) {\n}\n",
+      "java": "class Solution {\n    public int[] visibleRange(int itemCount, int itemHeight, int viewportHeight,\n                              double scrollTop, int overscan) {\n        return new int[0];\n    }\n}\n",
+      "cpp": "vector<int> visibleRange(int itemCount, int itemHeight, int viewportHeight,\n                         double scrollTop, int overscan) {\n}\n"
+    },
+    "rubric": "Strong: floor for the first index, ceil for the last, overscan applied before clamping, and BOTH ends clamped to [0, item_count]. Weak: truncating instead of flooring (which breaks on a negative scroll_top from rubber-banding), forgetting to clamp the end so the list renders past its own length, or an off-by-one that drops the partially visible row at the bottom. Ask what happens when the viewport is taller than the whole list, and what a negative scroll_top should do.",
+    "examples": [
+      {
+        "input": "item_count=100, item_height=50, viewport_height=200, scroll_top=0, overscan=0",
+        "output": "[0, 4]",
+        "explanation": "200px of viewport fits exactly four 50px rows: indices 0,1,2,3."
+      },
+      {
+        "input": "item_count=100, item_height=50, viewport_height=200, scroll_top=125, overscan=0",
+        "output": "[2, 7]",
+        "explanation": "Row 2 starts at 100 and is half scrolled off, so it is still partly visible. The viewport ends at 325, inside row 6, so row 6 renders and `end` is 7."
+      },
+      {
+        "input": "item_count=100, item_height=50, viewport_height=200, scroll_top=0, overscan=2",
+        "output": "[0, 6]",
+        "explanation": "Two extra rows each side, but the start clamps at 0 rather than going to -2."
+      }
+    ],
+    "constraints": [
+      "0 <= item_count <= 10^6",
+      "item_height > 0, viewport_height >= 0, overscan >= 0",
+      "scroll_top may be negative (rubber-band scrolling) and need not be a whole number.",
+      "Return [0, 0] when there is nothing to render."
+    ],
+    "harness": {
+      "kind": "call",
+      "entry": {
+        "python": "visible_range",
+        "javascript": "visibleRange"
+      },
+      "cases": [
+        {
+          "name": "top of the list",
+          "args": [
+            100,
+            50,
+            200,
+            0,
+            0
+          ],
+          "expected": [
+            0,
+            4
+          ],
+          "hidden": false
+        },
+        {
+          "name": "scrolled to a partial row",
+          "args": [
+            100,
+            50,
+            200,
+            125,
+            0
+          ],
+          "expected": [
+            2,
+            7
+          ],
+          "hidden": false
+        },
+        {
+          "name": "overscan widens both edges",
+          "args": [
+            100,
+            50,
+            200,
+            300,
+            2
+          ],
+          "expected": [
+            4,
+            12
+          ],
+          "hidden": false
+        },
+        {
+          "name": "overscan clamps at the top",
+          "args": [
+            100,
+            50,
+            200,
+            0,
+            2
+          ],
+          "expected": [
+            0,
+            6
+          ],
+          "hidden": false
+        },
+        {
+          "name": "scrolled to the end clamps to the count",
+          "args": [
+            10,
+            50,
+            200,
+            450,
+            0
+          ],
+          "expected": [
+            9,
+            10
+          ],
+          "hidden": true
+        },
+        {
+          "name": "viewport taller than the whole list",
+          "args": [
+            3,
+            50,
+            500,
+            0,
+            0
+          ],
+          "expected": [
+            0,
+            3
+          ],
+          "hidden": true
+        },
+        {
+          "name": "no items at all",
+          "args": [
+            0,
+            50,
+            200,
+            0,
+            2
+          ],
+          "expected": [
+            0,
+            0
+          ],
+          "hidden": true
+        },
+        {
+          "name": "negative scroll from rubber-banding",
+          "args": [
+            100,
+            50,
+            200,
+            -30,
+            0
+          ],
+          "expected": [
+            0,
+            4
+          ],
+          "hidden": true
+        }
+      ]
+    }
+  },
+  {
+    "id": "event-emitter",
+    "format": "CODE",
+    "verticals": [
+      "frontend",
+      "fullstack",
+      "swe",
+      "mobile"
+    ],
+    "difficulty": "medium",
+    "topics": [
+      "events",
+      "data structures",
+      "api design"
+    ],
+    "minutes": 12,
+    "title": "Build an event emitter",
+    "prompt": "Implement the EventEmitter class -- the pub/sub primitive behind almost every UI framework.\n\n  - on(event, handler_id) registers a handler for an event.\n  - once(event, handler_id) registers a handler that fires at most once.\n  - off(event, handler_id) removes every handler with that id FROM THAT EVENT ONLY.\n  - emit(event) fires the handlers for that event and returns their ids, in the order they were registered.\n\nHandlers are identified by a string instead of being real functions, so the result of emit is something you can return and compare.\n\nThe same id may be registered more than once on the same event, and each registration fires separately. Emitting an event nobody listens to is not an error.",
+    "starter": {
+      "python": "class EventEmitter:\n    def __init__(self):\n        pass\n\n    def on(self, event: str, handler_id: str) -> None:\n        pass\n\n    def once(self, event: str, handler_id: str) -> None:\n        pass\n\n    def off(self, event: str, handler_id: str) -> None:\n        pass\n\n    def emit(self, event: str) -> list[str]:\n        \"\"\"Ids of the handlers that fired, in registration order.\"\"\"\n        pass\n",
+      "javascript": "class EventEmitter {\n  constructor() {\n  }\n\n  on(event, handlerId) {\n  }\n\n  once(event, handlerId) {\n  }\n\n  off(event, handlerId) {\n  }\n\n  emit(event) {\n  }\n}\n",
+      "java": "class EventEmitter {\n    public EventEmitter() {\n    }\n\n    public void on(String event, String handlerId) {\n    }\n\n    public void once(String event, String handlerId) {\n    }\n\n    public void off(String event, String handlerId) {\n    }\n\n    public List<String> emit(String event) {\n        return new ArrayList<>();\n    }\n}\n",
+      "cpp": "class EventEmitter {\npublic:\n    void on(const string& event, const string& handlerId) {\n    }\n    void once(const string& event, const string& handlerId) {\n    }\n    void off(const string& event, const string& handlerId) {\n    }\n    vector<string> emit(const string& event) {\n    }\n};\n"
+    },
+    "rubric": "Strong: registration order preserved, one-shot handlers removed AFTER firing and only the one-shots, off scoped to a single event, duplicate registrations fired once each. Weak: clearing every handler for an event when a once handler fires, removing one-shots before they fire, off removing the id from all events, or de-duplicating registrations. Ask what happens if a handler registers another handler for the same event while it is being emitted -- the snapshot question.",
+    "examples": [
+      {
+        "input": "on(\"save\", \"a\"); on(\"save\", \"b\"); emit(\"save\")",
+        "output": "[\"a\", \"b\"]",
+        "explanation": "Both fire, in the order they were registered."
+      },
+      {
+        "input": "once(\"save\", \"a\"); emit(\"save\"); emit(\"save\")",
+        "output": "[\"a\"] then []",
+        "explanation": "A once handler fires and is then gone."
+      },
+      {
+        "input": "on(\"save\", \"a\"); on(\"save\", \"b\"); off(\"save\", \"a\"); emit(\"save\")",
+        "output": "[\"b\"]",
+        "explanation": "off removes only the handler named."
+      }
+    ],
+    "constraints": [
+      "Event names and handler ids are non-empty strings.",
+      "emit returns an empty list for an event with no handlers.",
+      "At most 10^4 registrations."
+    ],
+    "harness": {
+      "kind": "ops",
+      "entry": {
+        "python": "EventEmitter",
+        "javascript": "EventEmitter"
+      },
+      "cases": [
+        {
+          "name": "handlers fire in registration order",
+          "construct": [],
+          "ops": [
+            [
+              "on",
+              [
+                "save",
+                "a"
+              ]
+            ],
+            [
+              "on",
+              [
+                "save",
+                "b"
+              ]
+            ],
+            [
+              "emit",
+              [
+                "save"
+              ]
+            ]
+          ],
+          "expected": [
+            null,
+            null,
+            [
+              "a",
+              "b"
+            ]
+          ],
+          "hidden": false
+        },
+        {
+          "name": "a once handler fires exactly once",
+          "construct": [],
+          "ops": [
+            [
+              "once",
+              [
+                "save",
+                "a"
+              ]
+            ],
+            [
+              "emit",
+              [
+                "save"
+              ]
+            ],
+            [
+              "emit",
+              [
+                "save"
+              ]
+            ]
+          ],
+          "expected": [
+            null,
+            [
+              "a"
+            ],
+            []
+          ],
+          "hidden": false
+        },
+        {
+          "name": "off removes the named handler",
+          "construct": [],
+          "ops": [
+            [
+              "on",
+              [
+                "save",
+                "a"
+              ]
+            ],
+            [
+              "on",
+              [
+                "save",
+                "b"
+              ]
+            ],
+            [
+              "off",
+              [
+                "save",
+                "a"
+              ]
+            ],
+            [
+              "emit",
+              [
+                "save"
+              ]
+            ]
+          ],
+          "expected": [
+            null,
+            null,
+            null,
+            [
+              "b"
+            ]
+          ],
+          "hidden": false
+        },
+        {
+          "name": "an event nobody listens to",
+          "construct": [],
+          "ops": [
+            [
+              "emit",
+              [
+                "save"
+              ]
+            ]
+          ],
+          "expected": [
+            []
+          ],
+          "hidden": false
+        },
+        {
+          "name": "a once handler alongside a persistent one",
+          "construct": [],
+          "ops": [
+            [
+              "on",
+              [
+                "save",
+                "a"
+              ]
+            ],
+            [
+              "once",
+              [
+                "save",
+                "b"
+              ]
+            ],
+            [
+              "emit",
+              [
+                "save"
+              ]
+            ],
+            [
+              "emit",
+              [
+                "save"
+              ]
+            ]
+          ],
+          "expected": [
+            null,
+            null,
+            [
+              "a",
+              "b"
+            ],
+            [
+              "a"
+            ]
+          ],
+          "hidden": true
+        },
+        {
+          "name": "the same id registered twice fires twice",
+          "construct": [],
+          "ops": [
+            [
+              "on",
+              [
+                "save",
+                "a"
+              ]
+            ],
+            [
+              "on",
+              [
+                "save",
+                "a"
+              ]
+            ],
+            [
+              "emit",
+              [
+                "save"
+              ]
+            ]
+          ],
+          "expected": [
+            null,
+            null,
+            [
+              "a",
+              "a"
+            ]
+          ],
+          "hidden": true
+        },
+        {
+          "name": "off on one event leaves another alone",
+          "construct": [],
+          "ops": [
+            [
+              "on",
+              [
+                "save",
+                "a"
+              ]
+            ],
+            [
+              "on",
+              [
+                "load",
+                "a"
+              ]
+            ],
+            [
+              "off",
+              [
+                "save",
+                "a"
+              ]
+            ],
+            [
+              "emit",
+              [
+                "save"
+              ]
+            ],
+            [
+              "emit",
+              [
+                "load"
+              ]
+            ]
+          ],
+          "expected": [
+            null,
+            null,
+            null,
+            [],
+            [
+              "a"
+            ]
+          ],
+          "hidden": true
+        },
+        {
+          "name": "a once handler removed before it ever fires",
+          "construct": [],
+          "ops": [
+            [
+              "once",
+              [
+                "save",
+                "a"
+              ]
+            ],
+            [
+              "off",
+              [
+                "save",
+                "a"
+              ]
+            ],
+            [
+              "emit",
+              [
+                "save"
+              ]
+            ]
+          ],
+          "expected": [
+            null,
+            null,
+            []
+          ],
+          "hidden": true
+        }
+      ]
+    }
+  },
+  {
+    "id": "breadcrumb-path",
+    "format": "CODE",
+    "verticals": [
+      "frontend",
+      "fullstack",
+      "swe",
+      "mobile"
+    ],
+    "difficulty": "easy",
+    "topics": [
+      "trees",
+      "recursion",
+      "navigation"
+    ],
+    "minutes": 10,
+    "title": "Build a breadcrumb trail from a nav tree",
+    "prompt": "A navigation menu is a tree. Each node is an object with an `id` and a list of `children`.\n\nWrite breadcrumb_path(tree, target_id) returning the list of ids from the root down to the target, inclusive -- the breadcrumb trail you would render at the top of the page.\n\nReturn an empty list if the target is not in the tree.\n\nThe target can be anywhere: any branch, any depth. A node may have no `children` key at all, which means it is a leaf.",
+    "starter": {
+      "python": "def breadcrumb_path(tree: dict, target_id: str) -> list[str]:\n    pass\n",
+      "javascript": "function breadcrumbPath(tree, targetId) {\n}\n",
+      "java": "class Solution {\n    public List<String> breadcrumbPath(Map<String, Object> tree, String targetId) {\n        return new ArrayList<>();\n    }\n}\n",
+      "cpp": "// Node: { string id; vector<Node> children; }\nvector<string> breadcrumbPath(const Node& tree, const string& targetId) {\n}\n"
+    },
+    "rubric": "Strong: depth-first search that returns the path built on the way back up, searching EVERY child rather than stopping at the first, and treating a missing `children` key as a leaf. Weak: returning just the target id, searching only the first branch, mutating a shared accumulator across sibling branches (the classic backtracking bug), or crashing on a node with no children key. Ask how deep a tree this survives and what it would take to make it iterative.",
+    "examples": [
+      {
+        "input": "tree = {\"id\":\"root\",\"children\":[{\"id\":\"a\",\"children\":[{\"id\":\"a1\"}]}]}, target_id = \"a1\"",
+        "output": "[\"root\", \"a\", \"a1\"]",
+        "explanation": "The trail from the root down to the target, including both ends."
+      },
+      {
+        "input": "target_id = \"root\"",
+        "output": "[\"root\"]",
+        "explanation": "The root is its own breadcrumb trail."
+      },
+      {
+        "input": "target_id = \"nowhere\"",
+        "output": "[]",
+        "explanation": "Not in the tree, so there is no trail."
+      }
+    ],
+    "constraints": [
+      "Ids are unique strings.",
+      "`children` may be missing or empty; either means a leaf.",
+      "The tree may be empty ({}), in which case return [].",
+      "At most 10^4 nodes."
+    ],
+    "harness": {
+      "kind": "call",
+      "entry": {
+        "python": "breadcrumb_path",
+        "javascript": "breadcrumbPath"
+      },
+      "cases": [
+        {
+          "name": "the root itself",
+          "args": [
+            {
+              "id": "root",
+              "children": [
+                {
+                  "id": "a",
+                  "children": [
+                    {
+                      "id": "a1",
+                      "children": []
+                    },
+                    {
+                      "id": "a2",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "id": "b",
+                  "children": [
+                    {
+                      "id": "b1",
+                      "children": []
+                    },
+                    {
+                      "id": "b2",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            "root"
+          ],
+          "expected": [
+            "root"
+          ],
+          "hidden": false
+        },
+        {
+          "name": "a direct child",
+          "args": [
+            {
+              "id": "root",
+              "children": [
+                {
+                  "id": "a",
+                  "children": [
+                    {
+                      "id": "a1",
+                      "children": []
+                    },
+                    {
+                      "id": "a2",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "id": "b",
+                  "children": [
+                    {
+                      "id": "b1",
+                      "children": []
+                    },
+                    {
+                      "id": "b2",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            "a"
+          ],
+          "expected": [
+            "root",
+            "a"
+          ],
+          "hidden": false
+        },
+        {
+          "name": "two levels down",
+          "args": [
+            {
+              "id": "root",
+              "children": [
+                {
+                  "id": "a",
+                  "children": [
+                    {
+                      "id": "a1",
+                      "children": []
+                    },
+                    {
+                      "id": "a2",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "id": "b",
+                  "children": [
+                    {
+                      "id": "b1",
+                      "children": []
+                    },
+                    {
+                      "id": "b2",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            "a1"
+          ],
+          "expected": [
+            "root",
+            "a",
+            "a1"
+          ],
+          "hidden": false
+        },
+        {
+          "name": "not in the tree",
+          "args": [
+            {
+              "id": "root",
+              "children": [
+                {
+                  "id": "a",
+                  "children": [
+                    {
+                      "id": "a1",
+                      "children": []
+                    },
+                    {
+                      "id": "a2",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "id": "b",
+                  "children": [
+                    {
+                      "id": "b1",
+                      "children": []
+                    },
+                    {
+                      "id": "b2",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            "nowhere"
+          ],
+          "expected": [],
+          "hidden": false
+        },
+        {
+          "name": "a later sibling branch",
+          "args": [
+            {
+              "id": "root",
+              "children": [
+                {
+                  "id": "a",
+                  "children": [
+                    {
+                      "id": "a1",
+                      "children": []
+                    },
+                    {
+                      "id": "a2",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "id": "b",
+                  "children": [
+                    {
+                      "id": "b1",
+                      "children": []
+                    },
+                    {
+                      "id": "b2",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            "b"
+          ],
+          "expected": [
+            "root",
+            "b"
+          ],
+          "hidden": true
+        },
+        {
+          "name": "deep inside a later branch",
+          "args": [
+            {
+              "id": "root",
+              "children": [
+                {
+                  "id": "a",
+                  "children": [
+                    {
+                      "id": "a1",
+                      "children": []
+                    },
+                    {
+                      "id": "a2",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "id": "b",
+                  "children": [
+                    {
+                      "id": "b1",
+                      "children": []
+                    },
+                    {
+                      "id": "b2",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            "b2"
+          ],
+          "expected": [
+            "root",
+            "b",
+            "b2"
+          ],
+          "hidden": true
+        },
+        {
+          "name": "a node with no children key",
+          "args": [
+            {
+              "id": "solo"
+            },
+            "solo"
+          ],
+          "expected": [
+            "solo"
+          ],
+          "hidden": true
+        },
+        {
+          "name": "an empty tree",
+          "args": [
+            {},
+            "anything"
+          ],
+          "expected": [],
+          "hidden": true
+        }
+      ]
+    }
+  },
+  {
+    "id": "mcq-frontend-fundamentals",
+    "format": "MCQ",
+    "verticals": [
+      "frontend",
+      "fullstack",
+      "swe",
+      "mobile"
+    ],
+    "difficulty": "medium",
+    "topics": [
+      "event loop",
+      "rendering",
+      "browser",
+      "react"
+    ],
+    "minutes": 4,
+    "title": "Browser fundamentals",
+    "rubric": "Auto-scored. Wrong answers name what to press on in the debrief.",
+    "questions": [
+      {
+        "prompt": "A click handler calls setTimeout(f, 0) and then Promise.resolve().then(g). Which runs first?",
+        "options": [
+          "f, because its delay is 0",
+          "g, because microtasks drain before the next macrotask",
+          "Whichever was registered first",
+          "They run concurrently"
+        ],
+        "answer": 1,
+        "why": "Promise callbacks are microtasks and the microtask queue is drained completely before the event loop takes the next macrotask, which is what setTimeout schedules -- however short the delay."
+      },
+      {
+        "prompt": "Which change forces a layout (reflow) rather than only a repaint?",
+        "options": [
+          "Changing an element's background-color",
+          "Changing an element's visibility to hidden",
+          "Changing an element's width",
+          "Changing an element's color"
+        ],
+        "answer": 2,
+        "why": "Width changes the geometry, so the browser must recompute positions and sizes. Colour and visibility do not move anything, so they only repaint -- visibility: hidden still occupies its box, unlike display: none."
+      },
+      {
+        "prompt": "A GET to another origin with a custom header X-Trace-Id is blocked before it is sent. Why?",
+        "options": [
+          "GET requests cannot be cross-origin",
+          "The custom header makes it non-simple, so the browser sends a CORS preflight first",
+          "The server must be on HTTPS",
+          "Cookies are required for cross-origin requests"
+        ],
+        "answer": 1,
+        "why": "A custom header takes the request outside the 'simple request' set, so the browser sends an OPTIONS preflight. If the server does not answer it with Access-Control-Allow-Headers, the real request is never sent."
+      },
+      {
+        "prompt": "A list re-renders and loses input state in the wrong rows. The keys are the array index. Why does that break?",
+        "options": [
+          "Index keys are always slower",
+          "When items are inserted or reordered, the same index now names a different item, so state is reused for the wrong row",
+          "Keys must be strings, not numbers",
+          "Index keys stop the list re-rendering at all"
+        ],
+        "answer": 1,
+        "why": "The key identifies WHICH item a DOM node belongs to. With index keys, inserting at the front shifts every item to a new index, so the framework matches old state to new items and the state follows position rather than identity."
+      },
+      {
+        "prompt": "Your bundle is 2MB and first paint is slow. Which change reduces what the browser must download BEFORE first paint?",
+        "options": [
+          "Minifying the existing bundle further",
+          "Route-based code splitting so other pages load on demand",
+          "Moving the script tag to the end of the body",
+          "Enabling gzip on the server"
+        ],
+        "answer": 1,
+        "why": "Minification and gzip shrink the same bundle and script position changes when it blocks, but only splitting removes code from the critical path entirely -- the other routes' code is never requested until someone goes there."
+      }
+    ]
+  },
+  {
+    "id": "written-frontend-perf",
+    "format": "WRITTEN",
+    "verticals": [
+      "frontend",
+      "fullstack",
+      "swe",
+      "mobile"
+    ],
+    "difficulty": "medium",
+    "topics": [
+      "performance",
+      "diagnosis",
+      "web vitals"
+    ],
+    "minutes": 10,
+    "title": "A four-second page load",
+    "prompt": "A product listing page has a Largest Contentful Paint of 4.1 seconds on a mid-range Android phone. On your laptop it feels instant.\n\nWhat you know:\n  - The page is server-rendered, then hydrated by a 1.8MB JavaScript bundle.\n  - There are 40 product images, full resolution, no width or height attributes.\n  - Three third-party scripts load in the head: analytics, a chat widget, and A/B testing.\n  - A web font loads from a third-party host and text is invisible until it arrives.\n\nWrite out how you would diagnose and fix this. Be specific about what you would measure first and why, which fix you would ship first, and what you would expect each fix to move. Say what you would NOT do, and what you would need to measure before believing any of it.",
+    "rubric": "Strong: measures before changing anything (field data or a throttled trace, not a laptop), identifies that LCP here is almost certainly an image and attacks that first -- responsive sizes, modern format, priority hint, dimensions to stop layout shift -- and separates LCP from interactivity rather than treating 'slow' as one problem. Recognises the head scripts as render-blocking and the font as a text-invisibility problem with a one-line fix (font-display: swap). Weak: reaching straight for the 1.8MB bundle because it is the biggest number, when hydration affects interactivity more than LCP on a server-rendered page; listing every optimisation with no order or expected effect; no mention of measuring at all. Strongest answers say what they would not do and why, and name the metric each fix should move."
+  },
+  {
+    "id": "mcq-systems-fundamentals",
+    "format": "MCQ",
+    "verticals": [
+      "swe",
+      "frontend",
+      "backend",
+      "fullstack",
+      "mobile",
+      "platform",
+      "devops",
+      "sre",
+      "embedded",
+      "ml",
+      "data-engineer",
+      "etl"
+    ],
+    "difficulty": "medium",
+    "topics": [
+      "http",
+      "databases",
+      "caching",
+      "messaging"
+    ],
+    "minutes": 4,
+    "title": "Systems fundamentals",
+    "rubric": "Auto-scored. Wrong answers name what to press on in the debrief.",
+    "questions": [
+      {
+        "prompt": "A payment endpoint may be retried by clients after a timeout. What makes it safe?",
+        "options": [
+          "Using PUT instead of POST",
+          "An idempotency key the server records, so a repeat of the same key returns the first result instead of charging again",
+          "Returning 200 instead of 201",
+          "Wrapping the handler in a database transaction"
+        ],
+        "answer": 1,
+        "why": "The method alone guarantees nothing: what matters is that the server can recognise a retry as the same logical request. A transaction makes one attempt atomic but does not stop a second attempt charging again."
+      },
+      {
+        "prompt": "A query filtering on `status`, which is 'active' for 98% of rows, ignores its index. Why is that usually correct?",
+        "options": [
+          "Indexes do not work on text columns",
+          "The column is too low-cardinality: reading most of the table through an index is slower than scanning it",
+          "The index must be unique to be used",
+          "The planner only uses indexes on primary keys"
+        ],
+        "answer": 1,
+        "why": "An index lookup costs a jump to the heap per row. When a predicate matches most of the table, that is more random I/O than a sequential scan, so the planner correctly declines the index."
+      },
+      {
+        "prompt": "Two transactions read a row, each add 10 to what they read, and write it back. Under READ COMMITTED, what happens?",
+        "options": [
+          "Both increments are applied; the row gains 20",
+          "One increment is lost; the row gains 10",
+          "The second transaction deadlocks",
+          "The database serialises them automatically"
+        ],
+        "answer": 1,
+        "why": "READ COMMITTED prevents dirty reads, not lost updates. Both read the same starting value and the second write overwrites the first. Fixes are an atomic UPDATE ... SET n = n + 10, SELECT FOR UPDATE, or a higher isolation level."
+      },
+      {
+        "prompt": "A queue guarantees at-least-once delivery. What must the consumer do?",
+        "options": [
+          "Acknowledge before processing so nothing is redelivered",
+          "Handle duplicates -- process idempotently or deduplicate on a message id",
+          "Nothing; at-least-once means exactly once in practice",
+          "Process messages strictly in order"
+        ],
+        "answer": 1,
+        "why": "At-least-once means a message can be delivered more than once, typically when an ack is lost after the work was done. Acking first turns it into at-most-once and silently drops work on a crash."
+      },
+      {
+        "prompt": "A popular cache key expires and many requests hit the database at once. What is this, and what fixes it?",
+        "options": [
+          "A cache stampede; fix by having one request rebuild while others serve stale or wait on a lock",
+          "A memory leak; fix by lowering the TTL",
+          "Cache poisoning; fix by signing cache entries",
+          "Normal behaviour; fix by adding database replicas"
+        ],
+        "answer": 0,
+        "why": "Everything that was served by one key now misses simultaneously. The fix is to let a single rebuilder repopulate it -- with a lock, or by serving stale while refreshing in the background. Lowering the TTL makes it happen more often."
+      }
+    ]
+  },
+  {
+    "id": "mcq-concurrency",
+    "format": "MCQ",
+    "verticals": [
+      "swe",
+      "backend",
+      "fullstack",
+      "platform",
+      "devops",
+      "sre",
+      "embedded",
+      "ml"
+    ],
+    "difficulty": "medium",
+    "topics": [
+      "concurrency",
+      "locking",
+      "atomicity"
+    ],
+    "minutes": 4,
+    "title": "Concurrency",
+    "rubric": "Auto-scored. Wrong answers name what to press on in the debrief.",
+    "questions": [
+      {
+        "prompt": "Two threads run `counter += 1` a million times each on a shared counter with no lock. The final value is below two million. Why?",
+        "options": [
+          "The compiler reordered the loop",
+          "`counter += 1` is a read, an add and a write, and one thread's write can overwrite the other's",
+          "Integers overflow",
+          "Threads do not share memory"
+        ],
+        "answer": 1,
+        "why": "It is three operations, not one. Both threads can read the same value, add one and write the same result, so one increment disappears. This is the definition of a data race and why atomic types or a lock exist."
+      },
+      {
+        "prompt": "Thread A holds lock 1 and waits for lock 2; thread B holds lock 2 and waits for lock 1. What is the simplest general fix?",
+        "options": [
+          "Make the locks reentrant",
+          "Always acquire locks in the same global order",
+          "Use a longer timeout",
+          "Replace both with a single reader-writer lock"
+        ],
+        "answer": 1,
+        "why": "A consistent lock ordering removes the circular wait, which is one of the four conditions a deadlock needs. Timeouts turn a deadlock into a livelock or a retry storm, and reentrancy addresses a different problem entirely."
+      },
+      {
+        "prompt": "Under optimistic locking, what happens when two users edit the same record concurrently?",
+        "options": [
+          "The second write blocks until the first finishes",
+          "The second write fails a version check and must be retried or merged",
+          "Both writes apply and the record holds both",
+          "The database picks the higher user id"
+        ],
+        "answer": 1,
+        "why": "Optimistic locking takes no lock: it writes with `WHERE version = <the one I read>`. If someone else got there first, zero rows update and the caller must handle the conflict. That is the trade -- no contention, but a visible retry."
+      },
+      {
+        "prompt": "A service checks `if not exists: create()`. Under load it sometimes creates duplicates. What is the real fix?",
+        "options": [
+          "Wrap the check and the create in a transaction",
+          "A unique constraint in the database, with the duplicate-key error handled",
+          "Retry the check twice before creating",
+          "Add a short sleep before the create"
+        ],
+        "answer": 1,
+        "why": "Check-then-act is a race whatever the application does, because the gap between the two exists in every process at once. Only the database can decide uniqueness atomically -- and under READ COMMITTED a transaction does not close the gap either."
+      }
+    ]
+  },
+  {
+    "id": "written-debug-production",
+    "format": "WRITTEN",
+    "verticals": [
+      "swe",
+      "frontend",
+      "backend",
+      "fullstack",
+      "mobile",
+      "platform",
+      "devops",
+      "sre",
+      "embedded",
+      "ml",
+      "data-engineer",
+      "etl"
+    ],
+    "difficulty": "medium",
+    "topics": [
+      "debugging",
+      "incident response",
+      "reasoning"
+    ],
+    "minutes": 10,
+    "title": "Checkout is failing for some people",
+    "prompt": "Checkout started failing for about 5% of users at 14:10. It is now 14:40 and it is still happening.\n\nWhat you know:\n  - The last deploy was at 09:00, five hours earlier.\n  - Error rate on the checkout service went from 0.1% to 5% in about two minutes.\n  - The errors are timeouts calling the payments provider.\n  - The payments provider's status page says all systems operational.\n  - CPU and memory on the checkout service are normal. Database looks normal.\n  - Latency to the payments provider is a bimodal distribution: most calls at 80ms, a clear second cluster at 30 seconds.\n\nWalk through how you would work this out. What would you look at first and why? What are your candidate explanations, and what single observation would distinguish them? What would you do to stop the bleeding while you are still investigating?",
+    "rubric": "Strong: treats stopping the bleeding and finding the cause as separate tracks, and says so. Reads the bimodal latency as the key evidence -- a subset of calls failing totally rather than everything slowing down, which points at one bad instance, one bad connection-pool entry, a DNS or routing change, or one provider region. Notes that the deploy being five hours earlier makes it unlikely but not innocent, and that a vendor status page is not evidence of anything. Proposes a distinguishing observation: are the slow calls concentrated on particular hosts, pods or upstream IPs. Mentions a timeout far below 30 seconds and a circuit breaker as mitigation. Weak: 'roll back the deploy' with no reasoning, blaming the provider because it is external, restarting things without a hypothesis, or a generic incident checklist that never engages with the bimodal clue. Push on what they would do if the first hypothesis proved wrong."
   }
 ]

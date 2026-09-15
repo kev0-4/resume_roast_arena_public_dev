@@ -771,6 +771,36 @@ class TestRounds:
         assert "Press on the empty-input case." not in json.dumps(body)
         assert body["problems"] == ["Did not handle empty input."]
 
+    def test_a_second_interview_does_not_repeat_the_first_question(self, monkeypatch):
+        # The bug: the planner is given the resume and the job description
+        # and nothing else. One real account ran eight interviews from ONE
+        # resume against eight DIFFERENT job descriptions and was handed
+        # lru-cache-design five times.
+        # From `src.*`, not `backend.src.*`: the two are distinct module
+        # objects under this suite's dual sys.path, and a dependency
+        # override only matches the exact function the app was built with.
+        # Same reason get_current_user is imported the way it is above.
+        from src.dependencies.rate_limit import check_interview_start_rate_limit
+
+        h = self._setup(monkeypatch, "norepeat", CODE_ROUND_PLAN)
+        app = h["app"]
+        # One interview per account per week, and this test needs two.
+        app.dependency_overrides[check_interview_start_rate_limit] = lambda: None
+
+        first_question = h["start"]["agenda"]
+        assert [a["label"] for a in first_question] == ["Conversation", "Coding"]
+
+        second = _start_interview(app, h["user_id"], h["resume_session_id"])
+
+        # The catalogue handed to the planner the second time must not
+        # contain the question already spent on the first interview.
+        prompt = h["calls"]["plan_prompt"]
+        assert "merge-intervals" not in prompt, (
+            "the second interview offered the planner a question this candidate has already sat"
+        )
+        assert "lru-cache-design" in prompt, "unseen questions must still be offered"
+        assert second["interview_id"] != h["interview_id"]
+
     def test_a_graded_exercise_reaches_the_final_scorer(self, monkeypatch):
         # The bug this guards: round_results was stored, shown to the
         # candidate, fed to the debrief -- and never passed to scoring. One
