@@ -179,7 +179,14 @@ export function RoundStage({
 
   return (
     <motion.div
-      className="flex min-h-0 flex-1 flex-col gap-3 py-3 lg:flex-row"
+      // Below lg the stack (problem + editor + submit + presence +
+      // transcript) genuinely runs taller than a phone screen -- the old
+      // fixed-and-clipped RoomShell above this had nothing scrollable in
+      // between, so the excess was invisible and unreachable rather than
+      // scrolled to. overflow-y-auto here is what that was missing; lg
+      // reverts to the original fit-exactly-to-viewport desktop behavior,
+      // where individual panels scroll internally instead.
+      className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto py-3 lg:flex-row lg:overflow-visible"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.3 }}
@@ -194,7 +201,15 @@ export function RoundStage({
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -24 }}
             transition={{ type: "spring", stiffness: 320, damping: 32 }}
-            className="min-h-[12rem] lg:min-h-0 lg:w-[28%] lg:shrink-0"
+            // h-[38vh], not the old min-h-[12rem]: that showed two
+            // sentences of a multi-paragraph problem with no visible way
+            // to see the rest was scrollable -- framer-motion's layout
+            // animation on this wrapper doesn't play well with a height
+            // that changes with content (see round-panes.tsx's Panel:
+            // that was tried first and produced real content overlapping
+            // real content), so this keeps Panel's own internal scroll
+            // and just gives it enough room to be worth scrolling in.
+            className="h-[38vh] shrink-0 lg:h-auto lg:min-h-0 lg:w-[28%]"
           >
             <ProblemPanel question={question} onCollapse={() => setProblemOpen(false)} />
           </motion.div>
@@ -213,7 +228,15 @@ export function RoundStage({
       </AnimatePresence>
 
       {/* Answering surface */}
-      <motion.div layout className="flex min-h-[20rem] min-w-0 flex-1 flex-col lg:min-h-0">
+      {/* A fixed mobile height (not flex-1) rather than competing for
+          whatever's left over: CodeMirror's height="100%" needs a real,
+          determinate parent height to render at all, and an editor whose
+          size randomly depends on how long the problem statement happens
+          to be is a worse experience than a consistent one. Desktop is
+          unchanged -- lg:h-auto releases this so the row's stretch
+          alignment plus lg:flex-1 (width, in a row) sizes it exactly as
+          before. */}
+      <motion.div layout className="flex h-[55vh] min-h-[20rem] min-w-0 shrink-0 flex-col lg:h-auto lg:min-h-0 lg:flex-1 lg:shrink">
         <Panel
           title={
             question.format === "MCQ"
