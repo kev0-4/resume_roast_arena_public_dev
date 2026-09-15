@@ -70,6 +70,8 @@ from ..schemas.interview_schemas import (
     InterviewLeaderboardEntry,
     InterviewLeaderboardResponse,
     MyInterviewLeaderboardPosition,
+    MyInterviewEntry,
+    MyInterviewsResponse,
     InterviewEligibilityResponse,
 )
 
@@ -806,6 +808,40 @@ async def check_interview_eligibility(
     if session is None or session.user_id != curr_user.id or session.status != JobStatusEnum.DONE.value:
         return InterviewEligibilityResponse(eligible=False)
     return InterviewEligibilityResponse(eligible=True, resume_session_id=str(session.id))
+
+
+@interview_router.get("/interview/me", response_model=MyInterviewsResponse)
+async def get_my_interviews(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db_sqlalchemy),
+    curr_user: Users = Depends(get_current_user),
+):
+    """
+    Backs "My Interviews" in the profile menu -- a candidate's own record
+    of every interview they've started, any status. Registered BEFORE
+    GET /interview/{interview_id} below: FastAPI matches path routes in
+    registration order, and "me" would otherwise be parsed as an
+    interview_id and hit that route's uuid.UUID(...) cast, 404ing.
+    """
+    interviews, total = await interview_service.list_my_interviews(db, curr_user.id, limit, offset)
+    return MyInterviewsResponse(
+        total=total,
+        limit=limit,
+        offset=offset,
+        interviews=[
+            MyInterviewEntry(
+                id=str(row["id"]),
+                status=row["status"],
+                score=row["score"],
+                vertical=row["vertical"],
+                job_description=row["job_description"],
+                created_at=row["created_at"],
+                completed_at=row["completed_at"],
+            )
+            for row in interviews
+        ],
+    )
 
 
 @interview_router.get("/interview/{interview_id}", response_model=InterviewDetailResponse)

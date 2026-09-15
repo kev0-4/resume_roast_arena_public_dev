@@ -141,6 +141,29 @@ class MyInterviewLeaderboardPosition(BaseModel):
     completed_at: datetime
 
 
+class MyInterviewEntry(BaseModel):
+    """
+    One row of a candidate's own interview history -- every status, not
+    just COMPLETED. Unlike the leaderboard (which only ever shows a
+    scored, eligible interview), this is the candidate's own record of
+    what they actually did, including a run that never finished.
+    """
+    id: str
+    status: str
+    score: Optional[int] = None
+    vertical: Optional[str] = None
+    job_description: str
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+
+
+class MyInterviewsResponse(BaseModel):
+    total: int
+    limit: int
+    offset: int
+    interviews: list[MyInterviewEntry]
+
+
 class InterviewEligibilityResponse(BaseModel):
     eligible: bool
     resume_session_id: Optional[str] = None

@@ -660,6 +660,109 @@ class TestGetInterview:
         assert resp.status_code == 404
 
 
+class TestMyInterviews:
+    def test_registered_before_the_id_route_not_swallowed_by_it(self, monkeypatch):
+        # The real regression this guards: GET /interview/{interview_id}
+        # is registered in the same router. If /interview/me were added
+        # AFTER it (or matched loosely), FastAPI would try to parse "me"
+        # as interview_id and this would 404, not return a list.
+        _patch_gemini(monkeypatch)
+        holder = {}
+
+        async def setup():
+            async with AsyncSessionLocal() as db:
+                holder["user_id"] = await _make_user_id(db, f"myint-{uuid.uuid4().hex[:6]}")
+                holder["resume_session_id"] = await _make_done_resume_session_id(db, holder["user_id"])
+
+        _run(setup)
+        app = create_app()
+        _start_interview(app, holder["user_id"], holder["resume_session_id"])
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/interview/me")
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["total"] == 1
+        assert len(body["interviews"]) == 1
+
+    def test_includes_every_status_not_just_completed(self, monkeypatch):
+        # Unlike the public leaderboard, a candidate's OWN history must
+        # show an interview that never finished -- it's still theirs.
+        calls = _patch_gemini(monkeypatch)
+        holder = {}
+
+        async def setup():
+            async with AsyncSessionLocal() as db:
+                holder["user_id"] = await _make_user_id(db, f"myint2-{uuid.uuid4().hex[:6]}")
+                holder["resume_session_id"] = await _make_done_resume_session_id(db, holder["user_id"])
+
+        _run(setup)
+        app = create_app()
+        start = _start_interview(app, holder["user_id"], holder["resume_session_id"])
+        # Left IN_PROGRESS deliberately -- never /complete'd.
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/interview/me")
+
+        assert resp.status_code == 200
+        entry = resp.json()["interviews"][0]
+        assert entry["id"] == start["interview_id"]
+        assert entry["status"] == "IN_PROGRESS"
+        assert entry["score"] is None
+        assert entry["job_description"] == "Backend engineer role at a startup."
+        assert calls["score"] == 0, "an in-progress interview must not have been scored to appear here"
+
+    def test_never_returns_another_users_interviews(self, monkeypatch):
+        _patch_gemini(monkeypatch)
+        holder = {}
+
+        async def setup():
+            async with AsyncSessionLocal() as db:
+                holder["user_id"] = await _make_user_id(db, f"myint3-{uuid.uuid4().hex[:6]}")
+                holder["other_id"] = await _make_user_id(db, f"myint3other-{uuid.uuid4().hex[:6]}")
+                holder["resume_session_id"] = await _make_done_resume_session_id(db, holder["user_id"])
+
+        _run(setup)
+        app = create_app()
+        _start_interview(app, holder["user_id"], holder["resume_session_id"])
+
+        app.dependency_overrides[get_current_user] = lambda: _FakeCurrUser(holder["other_id"])
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/interview/me")
+
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+        assert resp.json()["interviews"] == []
+
+    def test_most_recent_first(self, monkeypatch):
+        _patch_gemini(monkeypatch)
+        holder = {}
+
+        async def setup():
+            async with AsyncSessionLocal() as db:
+                holder["user_id"] = await _make_user_id(db, f"myint4-{uuid.uuid4().hex[:6]}")
+                holder["resume_session_id"] = await _make_done_resume_session_id(db, holder["user_id"])
+
+        _run(setup)
+        app = create_app()
+        first = _start_interview(app, holder["user_id"], holder["resume_session_id"])
+
+        # A second start for the same user in one test -- bypass the real
+        # one-per-week limiter, same as test_a_second_interview_does_not_
+        # repeat_the_first_question does for the identical reason.
+        from src.dependencies.rate_limit import check_interview_start_rate_limit
+
+        app.dependency_overrides[check_interview_start_rate_limit] = lambda: None
+        second = _start_interview(app, holder["user_id"], holder["resume_session_id"])
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/interview/me")
+
+        ids = [row["id"] for row in resp.json()["interviews"]]
+        assert ids == [second["interview_id"], first["interview_id"]]
+
+
 CODE_ROUND_PLAN = [
     {"kind": "CONVERSATION", "question_id": "", "minutes": 8, "focus": "Resume."},
     {"kind": "EXERCISE", "question_id": "merge-intervals", "minutes": 10, "focus": "Arrays."},

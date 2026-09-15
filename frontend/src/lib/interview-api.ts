@@ -280,6 +280,26 @@ export interface MyInterviewLeaderboardPosition {
   completed_at: string;
 }
 
+/** One row of a candidate's own interview history -- every status, not
+ *  just COMPLETED. Unlike the leaderboard, this is their own record of
+ *  what they actually did, including a run that never finished. */
+export interface MyInterviewEntry {
+  id: string;
+  status: string;
+  score: number | null;
+  vertical: string | null;
+  job_description: string;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface MyInterviewsResponse {
+  total: number;
+  limit: number;
+  offset: number;
+  interviews: MyInterviewEntry[];
+}
+
 /** "3 days", "5 hours", "20 minutes" -- the interview cap is weekly, so a
  *  countdown in minutes would read as five figures and tell nobody
  *  anything. Rounds up: promising sooner than reality is worse. */
@@ -396,5 +416,14 @@ export async function getMyInterviewLeaderboardPosition(idToken: string): Promis
     cache: "no-store",
   });
   if (!resp.ok) throw await errorFromResponse(resp, "Could not fetch your interview rank");
+  return resp.json();
+}
+
+export async function getMyInterviews(idToken: string, limit: number, offset: number): Promise<MyInterviewsResponse> {
+  const resp = await fetch(`${API_BASE_URL}/api/v1/interview/me?limit=${limit}&offset=${offset}`, {
+    headers: { Authorization: `Bearer ${idToken}` },
+    cache: "no-store",
+  });
+  if (!resp.ok) throw await errorFromResponse(resp, "Could not load your interview history");
   return resp.json();
 }

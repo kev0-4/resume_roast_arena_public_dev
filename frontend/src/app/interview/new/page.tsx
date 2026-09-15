@@ -144,6 +144,10 @@ function NewInterviewForm() {
           <p className="mt-3 font-mono text-[10px] font-black uppercase tracking-wide text-brand-lime/70">
             One interview per week &middot; make it count
           </p>
+          {/* Deliberately quiet -- a roadmap note, not a pitch. Sits below
+              the rate-limit line so it reads as a footnote, not a claim
+              about what today's interview already does. */}
+          <p className="mt-2 font-mono text-[10px] text-white/30">Deep, multi-round interviews -- coming soon</p>
         </div>
 
         {authLoading ? (
@@ -177,26 +181,43 @@ function NewInterviewForm() {
                 </Link>
               </div>
             ) : (
-              <ul className="space-y-2">
-                {roasts.map((roast) => (
-                  <li key={roast.session_id}>
-                    <button
-                      onClick={() => setSelectedSessionId(roast.session_id)}
-                      className="flex w-full items-center gap-3 rounded-2xl border-2 border-black/10 px-4 py-3 text-left transition-colors hover:border-black/40 hover:bg-brand-blue/[0.03]"
-                    >
-                      <FileText size={18} strokeWidth={2.5} className="shrink-0 text-black/40" />
-                      <span className="flex-1 font-mono text-sm font-semibold text-black">
-                        {roast.composite_score !== null ? `${roast.composite_score}/100` : "Roast"}
-                        {roast.stamp ? <span className="ml-2 text-black/40">{roast.stamp}</span> : null}
-                      </span>
-                      <span className="font-mono text-[10px] font-semibold text-black/35">
-                        {new Date(roast.created_at).toLocaleDateString()}
-                      </span>
-                      <ArrowRight size={16} strokeWidth={2.5} className="shrink-0 text-black/30" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <>
+                <ul className="space-y-2">
+                  {roasts.map((roast) => (
+                    <li key={roast.session_id}>
+                      <button
+                        onClick={() => setSelectedSessionId(roast.session_id)}
+                        className="flex w-full items-center gap-3 rounded-2xl border-2 border-black/10 px-4 py-3 text-left transition-colors hover:border-black/40 hover:bg-brand-blue/[0.03]"
+                      >
+                        <FileText size={18} strokeWidth={2.5} className="shrink-0 text-black/40" />
+                        <span className="flex-1 font-mono text-sm font-semibold text-black">
+                          {roast.composite_score !== null ? `${roast.composite_score}/100` : "Roast"}
+                          {roast.stamp ? <span className="ml-2 text-black/40">{roast.stamp}</span> : null}
+                        </span>
+                        <span className="font-mono text-[10px] font-semibold text-black/35">
+                          {new Date(roast.created_at).toLocaleDateString()}
+                        </span>
+                        <ArrowRight size={16} strokeWidth={2.5} className="shrink-0 text-black/30" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+
+                {/* The list above only ever shows resumes already roasted.
+                    Someone here to defend a DIFFERENT, newer resume had no
+                    way out of this page before -- picking one of these
+                    was the only option shown. */}
+                <div className="mt-4 flex items-center justify-center gap-2 border-t border-black/10 pt-4">
+                  <span className="font-mono text-xs font-semibold text-black/40">Defending a different resume?</span>
+                  <Link
+                    href="/roast"
+                    className="inline-flex items-center gap-1.5 font-mono text-xs font-black uppercase tracking-wide text-brand-blue transition-colors hover:text-brand-blue/70"
+                  >
+                    Get it roasted first
+                    <ArrowRight size={13} strokeWidth={2.5} />
+                  </Link>
+                </div>
+              </>
             )}
           </div>
         ) : (

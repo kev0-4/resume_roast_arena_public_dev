@@ -74,7 +74,16 @@ export default function Home() {
               href="/roast"
               className="pointer-events-auto absolute bottom-[-8%] right-[2%] z-40 block md:right-[14%]"
             >
-              <SpinningRoastBadge />
+              {/* A slight, periodic pop -- not a continuous bounce -- so
+                  the badge reads as clickable without competing with its
+                  own constant spin or feeling restless. One pulse, then
+                  a pause, repeating. */}
+              <motion.div
+                animate={{ scale: [1, 1.08, 1] }}
+                transition={{ duration: 1.6, repeat: Infinity, repeatDelay: 2.4, ease: "easeInOut" }}
+              >
+                <SpinningRoastBadge />
+              </motion.div>
             </Link>
           </div>
         </div>
@@ -117,6 +126,39 @@ export default function Home() {
           Upload your resume. An AI roasts it, ruthlessly and anonymously, then hands
           you a real score and the fixes that actually matter.
         </p>
+
+        {/* Interview Arena teaser, moved up into the hero from the white
+            feature section below -- restyled for it: the white section's
+            solid bg-brand-blue card would be invisible against this same
+            blue, so this takes the dark glass-card treatment the floating
+            ExampleRoastCards already use instead, rather than porting the
+            old block's colors over unchanged. */}
+        <div className="relative z-10 mt-8 flex w-full max-w-2xl flex-col items-center gap-4 rounded-[2rem] border border-white/20 bg-black/70 px-6 py-6 text-center shadow-2xl backdrop-blur-md md:mt-10 md:flex-row md:justify-between md:px-8 md:text-left">
+          <div>
+            <h3 className="font-display text-base uppercase leading-tight text-white md:text-lg">
+              Got Roasted? Defend It.
+            </h3>
+            <p className="mt-1.5 font-mono text-[10.5px] font-medium text-white/60 md:text-[11px]">
+              take a live, brutally honest mock interview against your own resume and climb the Interview Arena
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2.5">
+            {/* Primary action is starting one, not browsing rankings --
+                the arena link is secondary. */}
+            <Link
+              href="/interview/new"
+              className="rounded-full bg-brand-lime px-5 py-2.5 font-display text-[11px] uppercase tracking-tight text-black shadow-sm transition-transform hover:-translate-y-0.5 md:text-xs"
+            >
+              Take Interview
+            </Link>
+            <Link
+              href="/interview-leaderboard"
+              className="rounded-full border border-white/30 px-4 py-2.5 font-display text-[11px] uppercase tracking-tight text-white transition-colors hover:bg-white/10 md:text-xs"
+            >
+              Arena
+            </Link>
+          </div>
+        </div>
       </main>
 
       {/* Bottom feature section */}
@@ -170,37 +212,6 @@ export default function Home() {
               <p className="font-display text-xl">#1 of 56</p>
               <div className="absolute -bottom-2 left-8 h-5 w-5 rotate-45 bg-brand-lime" />
             </div>
-          </div>
-        </div>
-
-        {/* Interview Arena teaser -- deliberately kept inside this same
-            white section (not a new top-level section with its own
-            background) since this page has hit a real flex/background-
-            boundary bug from stacking differently-colored sections before. */}
-        <div className="mx-auto mt-8 flex max-w-6xl flex-col items-center justify-between gap-4 rounded-[2rem] bg-brand-blue px-6 py-8 text-center md:mt-10 md:flex-row md:px-10 md:text-left">
-          <div>
-            <h3 className="font-display text-lg uppercase leading-tight text-white md:text-xl">
-              Got Roasted? Defend It.
-            </h3>
-            <p className="mt-1 font-mono text-[11px] font-semibold text-white/70 md:text-xs">
-              take a live, brutally honest mock interview against your own resume and climb the Interview Arena
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-3">
-            {/* Primary action is starting one, not browsing rankings --
-                the arena link is secondary. */}
-            <Link
-              href="/interview/new"
-              className="rounded-full border-[1.5px] border-white bg-brand-lime px-6 py-2.5 font-display text-xs uppercase tracking-tight text-black shadow-sm transition-transform hover:-translate-y-0.5 md:text-sm"
-            >
-              Take Interview
-            </Link>
-            <Link
-              href="/interview-leaderboard"
-              className="rounded-full border border-white/40 px-5 py-2.5 font-display text-xs uppercase tracking-tight text-white transition-colors hover:bg-white/10 md:text-sm"
-            >
-              Arena
-            </Link>
           </div>
         </div>
       </section>
