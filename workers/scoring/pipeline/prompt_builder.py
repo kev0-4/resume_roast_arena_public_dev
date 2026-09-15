@@ -165,7 +165,7 @@ Quantified-impact check: {quantified_ratio}
 
 ---
 TASK:
-Write a concise resume roast (150–250 words) that:
+Write a concise resume roast (140–180 words) that:
 1. Opens with one punchy verdict sentence.
 2. Calls out the 2–3 most critical problems — reference actual content where possible.
 3. Acknowledges real strengths (skip if there are none).
