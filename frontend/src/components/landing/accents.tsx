@@ -68,12 +68,21 @@ export const SpinningRoastBadge = () => (
           d="M 50, 50 m -36, 0 a 36,36 0 1,1 72,0 a 36,36 0 1,1 -72,0"
           fill="none"
         />
+        {/* The circle path measures ~226 units; the old text (11px,
+            tracking-[0.18em]) needed ~303 -- 34% too long. Because the
+            path is a closed loop, the overflow didn't show as a clipped
+            tail, it read as the string cutting off and immediately
+            wrapping into its own next repeat: "GET R" running straight
+            into "UPLOAD", silently losing "OASTED" every time. Verified
+            with getComputedTextLength() against the path's own
+            getTotalLength() before and after -- this fits with ~40
+            units (18%) to spare. */}
         <text
-          className="font-mono text-[11px] font-bold uppercase tracking-[0.18em]"
+          className="font-mono text-[10.5px] font-bold uppercase tracking-[0.02em]"
           fill="black"
         >
           <textPath href="#badgeCirclePath" startOffset="0%">
-            UPLOAD YOUR RESUME • GET ROASTED •{" "}
+            UPLOAD RESUME • GET ROASTED •{" "}
           </textPath>
         </text>
       </svg>

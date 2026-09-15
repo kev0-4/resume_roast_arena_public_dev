@@ -125,6 +125,13 @@ export function AuthMenu() {
           >
             My Roasts
           </Link>
+          <Link
+            href="/interview/history"
+            onClick={() => setOpen(false)}
+            className="block w-full rounded-xl px-3 py-2.5 text-left font-mono text-sm font-semibold text-black transition-colors hover:bg-black/5"
+          >
+            My Interviews
+          </Link>
           <button
             onClick={async () => {
               setOpen(false);

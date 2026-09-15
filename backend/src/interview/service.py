@@ -391,6 +391,50 @@ def _interview_eligible_clause():
     return (InterviewStatusEnum.COMPLETED.value == InterviewSessions.status,)
 
 
+async def list_my_interviews(
+    db: AsyncSession, user_id, limit: int = 50, offset: int = 0
+) -> tuple[list[dict], int]:
+    """
+    A candidate's own interview history -- every status, not just
+    COMPLETED. Deliberately NOT filtered through _interview_eligible_
+    clause: an IN_PROGRESS or ABANDONED row is exactly what "my
+    interviews" should show a candidate looking at their own record,
+    even though the public leaderboard never shows it.
+    """
+    count_stmt = select(func.count()).select_from(InterviewSessions).where(InterviewSessions.user_id == user_id)
+    total = (await db.execute(count_stmt)).scalar_one()
+
+    rows_stmt = (
+        select(
+            InterviewSessions.id,
+            InterviewSessions.status,
+            InterviewSessions.score,
+            InterviewSessions.plan,
+            InterviewSessions.job_description,
+            InterviewSessions.created_at,
+            InterviewSessions.completed_at,
+        )
+        .where(InterviewSessions.user_id == user_id)
+        .order_by(InterviewSessions.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    result = await db.execute(rows_stmt)
+    rows = [
+        {
+            "id": row.id,
+            "status": row.status,
+            "score": row.score,
+            "vertical": (row.plan or {}).get("vertical"),
+            "job_description": row.job_description,
+            "created_at": row.created_at,
+            "completed_at": row.completed_at,
+        }
+        for row in result.all()
+    ]
+    return rows, total
+
+
 async def get_interview_leaderboard(db: AsyncSession, limit: int = 20, offset: int = 0) -> tuple[list[dict], int]:
     eligible = _interview_eligible_clause()
 
