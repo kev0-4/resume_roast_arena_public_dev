@@ -87,6 +87,12 @@ GEMINI_LIVE_VOICES = tuple(
 INTERVIEW_TOKEN_NEW_SESSION_SECONDS = int(os.getenv("INTERVIEW_TOKEN_NEW_SESSION_SECONDS", "120"))
 INTERVIEW_TOKEN_EXPIRE_SECONDS = int(os.getenv("INTERVIEW_TOKEN_EXPIRE_SECONDS", "660"))
 
+# Per-chunk client telemetry from the live interview: audio timings, socket
+# state, why a turn stalled. Invaluable while debugging a live call, far too
+# noisy to run in production -- it prints on every transcript chunk, which is
+# several times a second for the length of an interview. Off unless asked for.
+INTERVIEW_DIAG_LOG = os.getenv("INTERVIEW_DIAG_LOG", "false").lower() == "true"
+
 INGEST_RATE_LIMIT_MAX = int(os.getenv("INGEST_RATE_LIMIT_MAX", "5"))
 INGEST_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("INGEST_RATE_LIMIT_WINDOW_SECONDS", "3600"))
 
