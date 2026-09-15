@@ -155,6 +155,12 @@ class MyInterviewEntry(BaseModel):
     job_description: str
     created_at: datetime
     completed_at: Optional[datetime] = None
+    # Whether this interview can still be walked back into. Decided here
+    # rather than from created_at on the client: the window is measured
+    # from last ACTIVITY, which the client has no view of, and a clock
+    # that disagrees with the server's would offer a rejoin the
+    # voice-token route then refuses.
+    can_rejoin: bool = False
 
 
 class MyInterviewsResponse(BaseModel):

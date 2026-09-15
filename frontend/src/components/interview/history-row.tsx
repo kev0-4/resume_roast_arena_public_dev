@@ -10,7 +10,8 @@
 // of linking somewhere that would just say "this room has closed."
 
 import { useState } from "react";
-import { AlertCircle, ChevronDown, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { AlertCircle, ChevronDown, Loader2, Play } from "lucide-react";
 import { relativeTime } from "@/lib/relative-time";
 import { getInterview, type InterviewDetail, type MyInterviewEntry } from "@/lib/interview-api";
 import { useAuth } from "@/lib/auth-context";
@@ -52,10 +53,14 @@ export function InterviewHistoryRow({ entry }: { entry: MyInterviewEntry }) {
 
   return (
     <div className="border-b border-black/8 last:border-0">
+      {/* The rejoin link sits BESIDE the row button, not inside it: an
+          anchor nested in a button is invalid HTML, and the row button is
+          disabled for an in-progress interview anyway. */}
+      <div className="flex items-center">
       <button
         onClick={toggle}
         disabled={!canExpand}
-        className={`group flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors md:gap-4 ${
+        className={`group flex min-w-0 flex-1 items-center gap-3 px-4 py-3.5 text-left transition-colors md:gap-4 ${
           canExpand ? "hover:bg-black/[0.02]" : "cursor-default"
         }`}
       >
@@ -74,7 +79,7 @@ export function InterviewHistoryRow({ entry }: { entry: MyInterviewEntry }) {
           </span>
         )}
 
-        {bucket === "processing" && (
+        {bucket === "processing" && !entry.can_rejoin && (
           <span className="flex flex-shrink-0 items-center gap-1.5 rounded-full bg-black/5 px-3 py-1 font-mono text-xs font-semibold text-black/60">
             <Loader2 size={12} className="animate-spin" />
             In progress
@@ -95,6 +100,17 @@ export function InterviewHistoryRow({ entry }: { entry: MyInterviewEntry }) {
           />
         )}
       </button>
+
+        {entry.can_rejoin && (
+          <Link
+            href={`/interview/${entry.id}`}
+            className="mr-4 flex flex-shrink-0 items-center gap-1.5 rounded-full border-2 border-black bg-brand-lime px-3.5 py-1.5 font-mono text-[11px] font-black uppercase tracking-wide text-black shadow-[2px_2px_0_#000] transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0_#000]"
+          >
+            <Play size={11} strokeWidth={3} />
+            Rejoin
+          </Link>
+        )}
+      </div>
 
       {expanded && (
         <div className="border-t border-black/8 bg-black/[0.015] px-4 py-4 md:px-6">

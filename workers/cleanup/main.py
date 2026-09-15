@@ -11,6 +11,8 @@ Flow:
     cleanup_raw_uploads()        -- delete raw/<id>/ blobs older than 24h
     cleanup_expired_anonymous_sessions()  -- delete whole sessions (row + all
                                               blobs) for anon users older than 30d
+    finalize_stale_interviews()  -- score or abandon interviews left IN_PROGRESS
+                                    by a closed tab, older than 60 minutes
     sleep(CLEANUP_SWEEP_INTERVAL_SECONDS)
 """
 
@@ -29,7 +31,11 @@ from backend.src.services.blob import initialize_blob_storage
 from backend.src.db.session import get_db_sqlalchemy
 from backend.src.config import CLEANUP_SWEEP_INTERVAL_SECONDS
 
-from .sweep import cleanup_raw_uploads, cleanup_expired_anonymous_sessions
+from .sweep import (
+    cleanup_raw_uploads,
+    cleanup_expired_anonymous_sessions,
+    finalize_stale_interviews,
+)
 
 _shutdown_event = asyncio.Event()
 
@@ -47,9 +53,16 @@ async def run_sweep_once() -> None:
         try:
             raw_count = await cleanup_raw_uploads(db)
             anon_count = await cleanup_expired_anonymous_sessions(db)
+            interview_counts = await finalize_stale_interviews(db)
             logger.info(
                 "Cleanup sweep complete",
-                extra={"raw_deleted": raw_count, "sessions_deleted": anon_count},
+                extra={
+                    "raw_deleted": raw_count,
+                    "sessions_deleted": anon_count,
+                    "interviews_scored": interview_counts["scored"],
+                    "interviews_abandoned": interview_counts["abandoned"],
+                    "interviews_deferred": interview_counts["deferred"],
+                },
             )
         finally:
             await db.close()

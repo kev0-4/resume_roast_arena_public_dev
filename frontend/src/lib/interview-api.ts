@@ -291,6 +291,11 @@ export interface MyInterviewEntry {
   job_description: string;
   created_at: string;
   completed_at: string | null;
+  /** Still inside the window where the live room can be walked back into.
+   *  Server-decided: it's measured from last activity, which the browser
+   *  can't see, and a client clock that disagreed would offer a rejoin the
+   *  voice-token route then refuses. */
+  can_rejoin: boolean;
 }
 
 export interface MyInterviewsResponse {

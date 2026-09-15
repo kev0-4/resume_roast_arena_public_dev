@@ -93,6 +93,25 @@ INTERVIEW_TOKEN_EXPIRE_SECONDS = int(os.getenv("INTERVIEW_TOKEN_EXPIRE_SECONDS",
 # several times a second for the length of an interview. Off unless asked for.
 INTERVIEW_DIAG_LOG = os.getenv("INTERVIEW_DIAG_LOG", "false").lower() == "true"
 
+# How long an IN_PROGRESS interview can go without activity before the
+# cleanup worker finalizes it. Nothing about a live session survives this
+# long -- the token expires around 11 minutes and the conversation itself
+# is capped well under that -- so past this window there is provably
+# nothing to return to, and the row is only still IN_PROGRESS because the
+# tab was closed without ever reaching /complete.
+#
+# Doubles as the rejoin window the My Interviews page offers: inside it,
+# a closed tab is recoverable; outside it, the interview is finalized.
+INTERVIEW_STALE_AFTER_MINUTES = int(os.getenv("INTERVIEW_STALE_AFTER_MINUTES", "60"))
+
+# How many stale interviews one sweep pass will finalize. The backlog on
+# the FIRST run after this ships is every interview ever closed by closing
+# the tab, and each one with real speech in it costs a Gemini scoring call
+# -- measured on the dev database, that first pass was ~2,100 rows in a
+# single burst. The sweep runs on an interval, so a cap drains the backlog
+# over successive passes instead of spending it all at once. Oldest first.
+INTERVIEW_STALE_SWEEP_BATCH = int(os.getenv("INTERVIEW_STALE_SWEEP_BATCH", "50"))
+
 INGEST_RATE_LIMIT_MAX = int(os.getenv("INGEST_RATE_LIMIT_MAX", "5"))
 INGEST_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("INGEST_RATE_LIMIT_WINDOW_SECONDS", "3600"))
 

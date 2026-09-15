@@ -30,6 +30,7 @@ built here, server-side, and handed to the browser already assembled.
 """
 
 import asyncio
+import datetime
 import json
 import uuid
 from contextlib import asynccontextmanager
@@ -47,12 +48,13 @@ from ..db.interview_sessions import InterviewSessions, InterviewStatusEnum
 from ..dependencies.auth import get_current_user
 from ..dependencies.rate_limit import check_interview_start_rate_limit
 from ..services.session_service import get_session as get_resume_session
-from ..services.blob import read_blob, upload_interview_transcript
-from ..config import GEMINI_LIVE_MODEL, INTERVIEW_DIAG_LOG
+from ..services.blob import upload_interview_transcript
+from ..config import GEMINI_LIVE_MODEL, INTERVIEW_DIAG_LOG, INTERVIEW_STALE_AFTER_MINUTES
 from ..interview import service as interview_service
+from ..interview import artifacts as interview_artifacts
+from ..interview import finalizer as interview_finalizer
 from ..interview import prompt_builder as interview_prompts
 from ..interview import llm_client as interview_llm
-from ..interview import validator as interview_validator
 from ..interview import planner as interview_planner
 from ..interview import catalogue
 from ..interview.tools import INTERVIEW_TOOLS
@@ -84,19 +86,6 @@ interview_leaderboard_router = APIRouter()
 _MAX_CHUNKS_PER_POST = 500
 _MAX_CHUNK_TEXT = 5000
 _MAX_TOTAL_CHUNKS = 5000
-
-
-async def _load_resume_context(resume_session_id) -> tuple[dict, dict]:
-    """Reads anonymized.json + roast.json for a resume session concurrently."""
-    anonymized_path = f"anonymized/{resume_session_id}/anonymized.json"
-    roast_path = f"roast/{resume_session_id}/roast.json"
-
-    async def _read_json(blob_path: str) -> dict:
-        raw = await asyncio.to_thread(read_blob, blob_path)
-        return json.loads(raw)
-
-    anonymized, roast = await asyncio.gather(_read_json(anonymized_path), _read_json(roast_path))
-    return anonymized, roast
 
 
 @asynccontextmanager
@@ -137,13 +126,6 @@ async def _get_owned_interview(interview_id: str, curr_user: Users, db: AsyncSes
     return interview
 
 
-async def _read_transcript(interview: InterviewSessions) -> list[dict]:
-    if not interview.transcript_blob_path:
-        return []
-    raw = await asyncio.to_thread(read_blob, interview.transcript_blob_path)
-    return json.loads(raw)
-
-
 # ---------------------------------------------------------------------------
 # Start: mint a credential, not a conversation
 # ---------------------------------------------------------------------------
@@ -179,7 +161,7 @@ async def start_interview(
     if resume_session.status != JobStatusEnum.DONE.value:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Resume roast isn't finished yet")
 
-    anonymized, roast = await _load_resume_context(resume_session.id)
+    anonymized, roast = await interview_artifacts.load_resume_context(resume_session.id)
     system_context = interview_prompts.build_interview_system_context(anonymized, roast, body.job_description)
     resume_text = interview_prompts.build_resume_display_text(anonymized)
 
@@ -308,7 +290,7 @@ async def post_interview_transcript(
             detail=f"Interview is {interview.status}, not in progress",
         )
 
-    existing = await _read_transcript(interview)
+    existing = await interview_artifacts.read_transcript(interview)
 
     # Read-modify-write on a single blob. Safe enough here because one
     # browser tab posts these sequentially, and a lost update costs a few
@@ -326,6 +308,13 @@ async def post_interview_transcript(
     blob_path = await asyncio.to_thread(upload_interview_transcript, str(interview.id), merged)
     if interview.transcript_blob_path != blob_path:
         await interview_service.set_transcript_blob_path(db, interview, blob_path)
+    else:
+        # Every flush is proof of life, and the stale sweep reads updated_at
+        # to decide what is dead. The branch above only fires on the FIRST
+        # flush (the path never changes again), so without this the row
+        # stops being touched ~5 seconds in and a perfectly live interview
+        # ages into looking abandoned.
+        await interview_service.touch_interview(db, interview)
 
     return InterviewTranscriptAck(accepted=len(merged) - len(existing), total_chunks=len(merged))
 
@@ -650,7 +639,7 @@ async def mint_voice_token(
     if interview.status != InterviewStatusEnum.IN_PROGRESS.value:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Interview is {interview.status}")
 
-    anonymized, roast = await _load_resume_context(interview.resume_session_id)
+    anonymized, roast = await interview_artifacts.load_resume_context(interview.resume_session_id)
     system_context = interview_prompts.build_interview_system_context(
         anonymized, roast, interview.job_description
     )
@@ -660,7 +649,7 @@ async def mint_voice_token(
         system_context, remaining_minutes
     ) + interview_planner.build_agenda_block(plan_now, interview.current_round or 0)
 
-    chunks = await _read_transcript(interview)
+    chunks = await interview_artifacts.read_transcript(interview)
     utterances = interview_service.merge_into_utterances(chunks)
 
     last = (interview.round_results or [])[-1] if interview.round_results else None
@@ -737,42 +726,27 @@ async def complete_interview(
             detail=f"Interview is {interview.status} and can't be scored",
         )
 
-    chunks = await _read_transcript(interview)
-    utterances = interview_service.merge_into_utterances(chunks)
+    # The actual ending lives in interview/finalizer.py, because the cleanup
+    # worker has to do exactly this to a tab that was closed without ever
+    # reaching this route, and the two must not drift apart.
+    try:
+        outcome, interview = await interview_finalizer.finalize_in_progress_interview(
+            db,
+            interview,
+            skipped_questions=body.skipped_questions,
+            ended_early=body.ended_early.model_dump() if body.ended_early else None,
+        )
+    except interview_finalizer.ScoringUnavailable as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The interviewer is temporarily unavailable. Please try again in a moment.",
+        ) from e
 
-    # Nothing the candidate said means nothing to grade. Ending here avoids
-    # spending a Gemini call on silence and keeps an empty session off the
-    # leaderboard entirely.
-    if not any(u["speaker"] == "candidate" for u in utterances):
-        await interview_service.mark_interview_abandoned(db, interview)
+    if outcome == "abandoned":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="You didn't say anything, so there's nothing to score. Start another interview when you're ready.",
         )
-
-    anonymized, roast = await _load_resume_context(interview.resume_session_id)
-    system_context = interview_prompts.build_interview_system_context(anonymized, roast, interview.job_description)
-    scoring_prompt = interview_prompts.build_scoring_prompt(
-        system_context,
-        utterances,
-        skipped_questions=body.skipped_questions,
-        ended_early=body.ended_early.model_dump() if body.ended_early else None,
-        # Server-side record of the graded exercises. Read from the row
-        # rather than accepted from the client: these grades were decided
-        # here, against answer keys and expected outputs that never left
-        # this process.
-        round_results=interview.round_results or [],
-        # Server-side record of the graded exercises. Read from the row
-        # rather than accepted from the client: these grades were decided
-        # here, against answer keys and expected outputs that never left
-        # this process.
-    )
-
-    async with _gemini_call_guard():
-        raw_score, _usage, _model = await interview_llm.generate_score(scoring_prompt)
-
-    validated = interview_validator.validate_score_response(raw_score)
-    interview = await interview_service.finalize_interview(db, interview, validated)
 
     return InterviewScoreResult(
         interview_id=str(interview.id),
@@ -825,6 +799,7 @@ async def get_my_interviews(
     interview_id and hit that route's uuid.UUID(...) cast, 404ing.
     """
     interviews, total = await interview_service.list_my_interviews(db, curr_user.id, limit, offset)
+    rejoin_cutoff = datetime.datetime.utcnow() - datetime.timedelta(minutes=INTERVIEW_STALE_AFTER_MINUTES)
     return MyInterviewsResponse(
         total=total,
         limit=limit,
@@ -838,6 +813,14 @@ async def get_my_interviews(
                 job_description=row["job_description"],
                 created_at=row["created_at"],
                 completed_at=row["completed_at"],
+                # Same window the cleanup sweep finalizes on, read the same
+                # way, so the button is never offered for an interview the
+                # sweep is about to close -- or refused for one it isn't.
+                can_rejoin=(
+                    row["status"] == InterviewStatusEnum.IN_PROGRESS.value
+                    and row["updated_at"] is not None
+                    and row["updated_at"] >= rejoin_cutoff
+                ),
             )
             for row in interviews
         ],
@@ -856,7 +839,7 @@ async def get_interview(
     """
     interview = await _get_owned_interview(interview_id, curr_user, db)
 
-    chunks = await _read_transcript(interview)
+    chunks = await interview_artifacts.read_transcript(interview)
     transcript = [
         TranscriptEntry(seq=i, speaker=u["speaker"], text=u["text"], at=u.get("at"))
         for i, u in enumerate(interview_service.merge_into_utterances(chunks))

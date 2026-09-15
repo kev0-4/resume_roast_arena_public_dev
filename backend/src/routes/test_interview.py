@@ -35,13 +35,14 @@ import json
 import uuid
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from backend.src.db.session import AsyncSessionLocal, engine
 from backend.src.services.session_service import create_sessions as create_resume_session, get_session
 from backend.src.services.user_service import get_or_create_users_from_claims
 from backend.src.services.blob import initialize_blob_storage, upload_anonymized, upload_roast
 from backend.src.db.sessions import JobStatusEnum
-from backend.src.db.interview_sessions import InterviewStatusEnum
+from backend.src.db.interview_sessions import InterviewSessions, InterviewStatusEnum
 from backend.src import create_app
 
 from src.dependencies.auth import get_current_user
@@ -99,6 +100,21 @@ async def _make_done_resume_session_id(db, user_id) -> str:
     db.add(session)
     await db.commit()
     return str(session_id)
+
+
+async def _backdate_interview_activity(db, interview_id, *, minutes):
+    """
+    Ages an interview's last-activity clock, the only practical way to test
+    a 60-minute window. Set explicitly so the column's own onupdate=now()
+    does not win: SQLAlchemy applies onupdate only when the column is
+    absent from the UPDATE's SET clause.
+    """
+    row = (
+        await db.execute(select(InterviewSessions).where(InterviewSessions.id == uuid.UUID(interview_id)))
+    ).scalar_one()
+    row.updated_at = datetime.datetime.utcnow() - datetime.timedelta(minutes=minutes)
+    db.add(row)
+    await db.commit()
 
 
 class _FakeCurrUser:
@@ -761,6 +777,80 @@ class TestMyInterviews:
 
         ids = [row["id"] for row in resp.json()["interviews"]]
         assert ids == [second["interview_id"], first["interview_id"]]
+
+    def test_a_live_interview_is_marked_rejoinable(self, monkeypatch):
+        # Backs the Rejoin button: a tab closed a moment ago is still a
+        # live interview, and the room can be walked back into.
+        _patch_gemini(monkeypatch)
+        holder = {}
+
+        async def setup():
+            async with AsyncSessionLocal() as db:
+                holder["user_id"] = await _make_user_id(db, f"rejoin1-{uuid.uuid4().hex[:6]}")
+                holder["resume_session_id"] = await _make_done_resume_session_id(db, holder["user_id"])
+
+        _run(setup)
+        app = create_app()
+        _start_interview(app, holder["user_id"], holder["resume_session_id"])
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/interview/me")
+
+        entry = resp.json()["interviews"][0]
+        assert entry["status"] == "IN_PROGRESS"
+        assert entry["can_rejoin"] is True
+
+    def test_an_interview_past_the_window_is_not_rejoinable(self, monkeypatch):
+        # The other half of the contract with the cleanup sweep: once an
+        # interview is stale enough for the sweep to finalize it, the UI
+        # must stop offering a rejoin the voice-token route would refuse.
+        _patch_gemini(monkeypatch)
+        holder = {}
+
+        async def setup():
+            async with AsyncSessionLocal() as db:
+                holder["user_id"] = await _make_user_id(db, f"rejoin2-{uuid.uuid4().hex[:6]}")
+                holder["resume_session_id"] = await _make_done_resume_session_id(db, holder["user_id"])
+
+        _run(setup)
+        app = create_app()
+        start = _start_interview(app, holder["user_id"], holder["resume_session_id"])
+
+        async def age_it():
+            async with AsyncSessionLocal() as db:
+                await _backdate_interview_activity(db, start["interview_id"], minutes=61)
+
+        _run(age_it)
+
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/interview/me")
+
+        entry = resp.json()["interviews"][0]
+        assert entry["status"] == "IN_PROGRESS"
+        assert entry["can_rejoin"] is False
+
+    def test_a_finished_interview_is_never_rejoinable(self, monkeypatch):
+        _patch_gemini(monkeypatch)
+        holder = {}
+
+        async def setup():
+            async with AsyncSessionLocal() as db:
+                holder["user_id"] = await _make_user_id(db, f"rejoin3-{uuid.uuid4().hex[:6]}")
+                holder["resume_session_id"] = await _make_done_resume_session_id(db, holder["user_id"])
+
+        _run(setup)
+        app = create_app()
+        start = _start_interview(app, holder["user_id"], holder["resume_session_id"])
+
+        with TestClient(app) as client:
+            client.post(f"/api/v1/interview/{start['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION})
+            scored = client.post(f"/api/v1/interview/{start['interview_id']}/complete", json={})
+            assert scored.status_code == 200, scored.text
+            resp = client.get("/api/v1/interview/me")
+
+        entry = resp.json()["interviews"][0]
+        assert entry["status"] == "COMPLETED"
+        assert entry["can_rejoin"] is False
 
 
 CODE_ROUND_PLAN = [
