@@ -1127,7 +1127,7 @@
         "INSERT INTO page_events (user_id, event_at, path) VALUES\n                 (7, '2026-01-01 09:00', '/'),\n                 (7, '2026-01-01 09:20', '/pricing'),\n                 (7, '2026-01-01 10:05', '/'),\n                 (9, '2026-01-01 09:00', '/');"
       ],
       "wrap_candidate_as_view": true,
-      "verify": "SELECT user_id, session_start, session_end, event_count FROM candidate_answer ORDER BY user_id, session_start;",
+      "verify": "SELECT user_id, session_start::text, session_end::text, event_count FROM candidate_answer ORDER BY user_id, session_start;",
       "expected": [
         [
           7,

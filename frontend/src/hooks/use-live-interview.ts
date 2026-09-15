@@ -556,6 +556,17 @@ export function useLiveInterview(start: InterviewStartResponse | null, getIdToke
     if (start) await connectWith(start);
   }, [start, connectWith]);
 
+  // Dev-only, mirrors firebase.ts's __TEST_AUTH__ hook: lets
+  // scripts/interview_smoke_test drive begin_round/end_interview via a
+  // text turn (see LiveInterviewSession.sendText's docstring for why
+  // text rather than audio). No-op in any production build.
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production" || typeof window === "undefined") return;
+    (window as unknown as { __TEST_LIVE__: unknown }).__TEST_LIVE__ = {
+      sendText: (text: string) => sessionRef.current?.sendText(text),
+    };
+  }, []);
+
   const toggleMute = useCallback(() => {
     setMuted((prev) => {
       const next = !prev;

@@ -127,6 +127,10 @@ async def _evaluate(name: str, tier: str, fixture: dict) -> dict:
         "substance_score": result.substance_score,
         "substance_reasoning": result.substance_reasoning,
         "word_count": anonymized["metrics"].get("word_count", 0),
+        # The ROAST's own length, not the resume's (the field above) --
+        # workers/scoring/pipeline/prompt_builder.py asks for 140-180
+        # words.
+        "roast_word_count": len(result.roast.split()),
         "structural_codes": [i.code for i in scoring_result.issues],
         "structural_deduction": summary.get("critical_issues", 0) * 20
         + summary.get("high_issues", 0) * 10
@@ -218,7 +222,61 @@ async def main() -> int:
         print(f"\n{len(failures)} FAILURES:")
         for f in failures:
             print(f"  {f['tier']}/{f['name']}: {f['error'][:160]}")
-    return 0
+
+    # --- pass/fail gate -----------------------------------------------
+    # Previously this script only printed a table for a human to eyeball.
+    # These turn it into a real gate: run it, read one line, know whether
+    # the roast pipeline regressed. Thresholds are deliberately loose --
+    # this catches a broken pipeline or a real regression, not day-to-day
+    # LLM variance, which is not what an ad hoc script run occasionally
+    # should be flagging.
+    gate_failures: list[str] = []
+
+    if failures:
+        gate_failures.append(f"{len(failures)} fixture(s) failed to score at all")
+
+    # 140-180 is the prompt's own target (prompt_builder.py); a wide
+    # band around it catches real drift (the pipeline silently reverting
+    # to the old 150-250 range, say) without failing on ordinary
+    # per-generation variance.
+    for r in results:
+        wc = r["roast_word_count"]
+        if not (100 <= wc <= 220):
+            gate_failures.append(f"{r['tier']}/{r['name']}: roast is {wc} words, well outside the 140-180 target")
+
+    # Monotonicity: the single best defense against a scoring regression.
+    # A top-tier resume scoring at or below a bad-tier one means the
+    # score is not measuring what it claims to.
+    def _median(field: str, tier: str) -> float | None:
+        vals = sorted(r[field] for r in results if r["tier"] == tier)
+        return vals[len(vals) // 2] if vals else None
+
+    top_med = _median("composite_score", "top")
+    bad_med = _median("composite_score", "bad")
+    if top_med is not None and bad_med is not None and top_med - bad_med < 2:
+        gate_failures.append(
+            f"top-tier median composite ({top_med}) is not meaningfully above bad-tier's ({bad_med})"
+        )
+
+    # Vertical skew was a named finding of an earlier design and the
+    # reason this eval exists at all -- if it comes back, that is exactly
+    # what this gate is for.
+    if by_vertical:
+        vertical_medians = [sorted(v)[len(v) // 2] for v in by_vertical.values()]
+        spread = max(vertical_medians) - min(vertical_medians)
+        if spread > 25:
+            gate_failures.append(f"top-tier substance skews {spread} points across verticals (>25)")
+
+    print("\n" + "=" * 70)
+    if gate_failures:
+        print(f"GATE: FAILED ({len(gate_failures)} issue(s))")
+        for g in gate_failures:
+            print(f"  - {g}")
+    else:
+        print("GATE: PASSED")
+    print("=" * 70)
+
+    return 1 if gate_failures else 0
 
 
 if __name__ == "__main__":
