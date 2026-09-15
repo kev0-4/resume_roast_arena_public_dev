@@ -15,6 +15,7 @@ separately deployable services with their own import roots).
 import re
 from typing import Any, Dict, List
 
+from .catalogue import get_question
 from .schemas import SCORE_MIN, SCORE_MAX
 
 # ---------------------------------------------------------------------------
@@ -477,12 +478,121 @@ out whether they can reason their way to it.
 """
 
 
+_ROUND_LABELS = {
+    "CODE": "Coding exercise",
+    "SQL": "SQL exercise",
+    "MCQ": "Quick-fire questions",
+    "WRITTEN": "Written answer",
+}
+
+
+def _exercise_rounds_block(round_results: List[Dict[str, Any]] | None) -> str:
+    """
+    Puts the already-graded exercise rounds in front of the final scorer.
+
+    This exists because they were not there, and the omission was
+    expensive: one candidate scored 10/10 on a coding round and came out
+    of scoring with a final 1, because the scorer was handed the
+    conversation transcript and nothing else. The round was graded, stored
+    and shown to the candidate, and then counted for nothing on the
+    leaderboard -- which makes the whole exercise feature decorative.
+
+    Conversation-only interviews produce NO block at all, deliberately.
+    An HR or IB candidate the planner correctly gave no exercise must not
+    be told "they sat no exercises" -- that reads as a gap and would cap a
+    vertical for a decision the product made on their behalf.
+    """
+    exercises = [
+        r for r in (round_results or [])
+        if isinstance(r, dict) and r.get("kind") != "CONVERSATION" and r.get("question_id")
+    ]
+    if not exercises:
+        return ""
+
+    blocks = []
+    for result in exercises:
+        entry = get_question(result.get("question_id", "")) or {}
+        fmt = result.get("format") or entry.get("format") or "Exercise"
+        label = _ROUND_LABELS.get(fmt, fmt)
+        title = entry.get("title") or result.get("question_id")
+        review = result.get("review") or {}
+        score = review.get("score")
+
+        lines = [
+            f'{label} -- "{title}": scored '
+            f'{score if score is not None else "?"}/{SCORE_MAX}'
+            + (f' in {result["language"]}' if result.get("language") else "")
+            + "."
+        ]
+
+        cases = result.get("cases") or {}
+        case_bits = []
+        if cases.get("visible_total"):
+            case_bits.append(
+                f'{cases.get("visible_passed", 0)} of {cases["visible_total"]} visible tests passed'
+            )
+        if cases.get("hidden_total"):
+            case_bits.append(
+                f'{cases.get("hidden_passed", 0)} of {cases["hidden_total"]} HIDDEN tests passed'
+            )
+        if case_bits:
+            lines.append("  Tests: " + ", ".join(case_bits) + ".")
+
+        conduct = (result.get("conduct") or "").strip()
+        if conduct:
+            lines.append("  " + conduct.replace("\n", " "))
+
+        for field, heading in (("strengths", "Good"), ("problems", "Wrong")):
+            items = [str(i).strip() for i in (review.get(field) or []) if str(i).strip()]
+            if items:
+                lines.append(f"  {heading}: " + "; ".join(items[:4]))
+
+        notes = (review.get("interviewer_notes") or "").strip()
+        if notes:
+            lines.append("  Grader's notes: " + notes.replace("\n", " "))
+
+        blocks.append("\n".join(lines))
+
+    # Stated as a share rather than arithmetic because the output is one
+    # integer, not a weighted sum -- and because the conversation is still
+    # what this product is for. Two exercises is most of the interview's
+    # time, so it gets close to half.
+    weight = (
+        "The exercise is roughly a THIRD of this candidate's final score."
+        if len(exercises) == 1
+        else f"The {len(exercises)} exercises together are roughly HALF of this candidate's final score."
+    )
+
+    return f"""
+---
+EXERCISES THEY ACTUALLY SAT, ALREADY GRADED:
+
+{chr(10).join(blocks)}
+
+These scores are evidence and they MUST move the final score. {weight} \
+The rest is the conversation below, which includes them being debriefed \
+on this work -- how they defended it there matters as much as the grade.
+
+A strong exercise score cannot be ignored. If you are about to give a \
+final score far BELOW an exercise score of 8 or more, the conversation \
+must contain something that genuinely justifies it -- admitted cheating, \
+refusing to engage, or being unable to explain their own submission -- \
+and you must name that reason plainly in weaknesses. "The conversation \
+was weak" is not enough on its own.
+
+Equally, a good conversation does not rescue a failed exercise. If they \
+scored 3 or less, or failed hidden tests they could not reason their way \
+to when asked, that is a real limit on the score however well they talk.
+"""
+
+
 def build_scoring_prompt(
     system_context: str,
     utterances: List[Dict[str, Any]],
     *,
     skipped_questions: int = 0,
     ended_early: Dict[str, Any] | None = None,
+    round_results: List[Dict[str, Any]] | None = None,
 ) -> str:
     """
     Scores the finished live conversation.
@@ -498,6 +608,11 @@ def build_scoring_prompt(
     rather than inferred from the transcript because "did they actually
     decline, or was the answer merely weak?" is exactly the judgement the
     scorer would get wrong, and the interviewer already made it live.
+
+    round_results is the server's own record of the exercise rounds, taken
+    from the interview row rather than the client: the grades were decided
+    here, against expected values and answer keys that never left this
+    process, so unlike the transcript they are not client-assertable.
     """
     history_lines = []
     for utterance in utterances:
@@ -547,9 +662,21 @@ def build_scoring_prompt(
         else ""
     )
 
+    exercise_block = _exercise_rounds_block(round_results)
+    # The task line otherwise tells the scorer this is purely a resume
+    # defence, which flatly contradicts the block above it.
+    graded_on = (
+        "based on how well they defended and elaborated on their resume "
+        "under real questioning AND how they did on the graded exercises "
+        "above, taken together"
+        if exercise_block
+        else "based on how well they defended and elaborated on their resume "
+        "under real questioning"
+    )
+
     return f"""\
 {system_context}
-
+{exercise_block}
 ---
 FULL INTERVIEW TRANSCRIPT:
 
@@ -557,8 +684,7 @@ FULL INTERVIEW TRANSCRIPT:
 {conduct_block}
 ---
 TASK: The interview is over. Score this candidate's performance from \
-{SCORE_MIN} to {SCORE_MAX} based on how well they defended and \
-elaborated on their resume under real questioning -- specificity, \
+{SCORE_MIN} to {SCORE_MAX} {graded_on} -- specificity, \
 honesty, depth, and how well their answers actually addressed the job \
 description above. A candidate who gave vague, evasive, or unsupported \
 answers scores low even if their resume looked fine on paper; a \

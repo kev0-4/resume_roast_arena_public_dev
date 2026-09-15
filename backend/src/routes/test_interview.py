@@ -671,8 +671,8 @@ MCQ_ROUND_PLAN = [
 
 
 class TestRounds:
-    def _setup(self, monkeypatch, suffix, plan_rounds):
-        calls = _patch_gemini(monkeypatch, plan_rounds=plan_rounds)
+    def _setup(self, monkeypatch, suffix, plan_rounds, review_score=6):
+        calls = _patch_gemini(monkeypatch, plan_rounds=plan_rounds, review_score=review_score)
         holder = {"calls": calls}
 
         async def setup():
@@ -770,6 +770,54 @@ class TestRounds:
         assert "interviewer_notes" not in json.dumps(body)
         assert "Press on the empty-input case." not in json.dumps(body)
         assert body["problems"] == ["Did not handle empty input."]
+
+    def test_a_graded_exercise_reaches_the_final_scorer(self, monkeypatch):
+        # The bug this guards: round_results was stored, shown to the
+        # candidate, fed to the debrief -- and never passed to scoring. One
+        # real interview scored 10/10 on its coding round and came out with
+        # a final score of 1, because the scorer was handed the transcript
+        # and nothing else. That made the whole exercise feature decorative
+        # as far as the leaderboard was concerned.
+        h = self._setup(monkeypatch, "roundscore", CODE_ROUND_PLAN, review_score=10)
+        app = h["app"]
+
+        with TestClient(app) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION})
+            client.post(f"/api/v1/interview/{h['interview_id']}/advance", json={})
+            submit = client.post(
+                f"/api/v1/interview/{h['interview_id']}/round/1/submit",
+                json={"answer": "def merge_intervals(x): return x", "language": "python", "seconds_taken": 300},
+            )
+            complete = client.post(f"/api/v1/interview/{h['interview_id']}/complete", json={})
+
+        assert submit.status_code == 200, submit.text
+        assert submit.json()["score"] == 10
+        assert complete.status_code == 200, complete.text
+
+        prompt = h["calls"]["scoring_prompt"]
+        assert "EXERCISES THEY ACTUALLY SAT" in prompt
+        assert "10/10" in prompt
+        assert "MUST move the final score" in prompt
+        # The grader's findings travel with the score, so the scorer can
+        # weigh a 10 that failed a hidden case differently from a clean one.
+        assert "Did not handle empty input." in prompt
+        assert "Press on the empty-input case." in prompt
+
+    def test_conversation_only_interview_gets_no_exercise_block(self, monkeypatch):
+        # An HR or IB candidate the planner correctly gave no exercise must
+        # not be told they sat none -- that reads as a gap and would cap a
+        # whole vertical for a decision the product made for them.
+        h = self._setup(
+            monkeypatch,
+            "convonly",
+            [{"kind": "CONVERSATION", "question_id": "", "minutes": 8, "focus": "Resume."}],
+        )
+        with TestClient(h["app"]) as client:
+            client.post(f"/api/v1/interview/{h['interview_id']}/transcript", json={"chunks": A_REAL_CONVERSATION})
+            resp = client.post(f"/api/v1/interview/{h['interview_id']}/complete", json={})
+
+        assert resp.status_code == 200, resp.text
+        assert "EXERCISES THEY ACTUALLY SAT" not in h["calls"]["scoring_prompt"]
 
     def test_one_voice_for_the_whole_interview(self, monkeypatch):
         # The interviewer must not become a different person after the

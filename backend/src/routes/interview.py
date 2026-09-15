@@ -48,7 +48,7 @@ from ..dependencies.auth import get_current_user
 from ..dependencies.rate_limit import check_interview_start_rate_limit
 from ..services.session_service import get_session as get_resume_session
 from ..services.blob import read_blob, upload_interview_transcript
-from ..config import GEMINI_LIVE_MODEL
+from ..config import GEMINI_LIVE_MODEL, INTERVIEW_DIAG_LOG
 from ..interview import service as interview_service
 from ..interview import prompt_builder as interview_prompts
 from ..interview import llm_client as interview_llm
@@ -291,7 +291,7 @@ async def post_interview_transcript(
     """
     interview = await _get_owned_interview(interview_id, curr_user, db)
 
-    if body.client_diag is not None:
+    if INTERVIEW_DIAG_LOG and body.client_diag is not None:
         print(f"[interview-diag] {interview.id} {json.dumps(body.client_diag, default=str)[:600]}", flush=True)
 
     if interview.status != InterviewStatusEnum.IN_PROGRESS.value:
@@ -749,6 +749,15 @@ async def complete_interview(
         utterances,
         skipped_questions=body.skipped_questions,
         ended_early=body.ended_early.model_dump() if body.ended_early else None,
+        # Server-side record of the graded exercises. Read from the row
+        # rather than accepted from the client: these grades were decided
+        # here, against answer keys and expected outputs that never left
+        # this process.
+        round_results=interview.round_results or [],
+        # Server-side record of the graded exercises. Read from the row
+        # rather than accepted from the client: these grades were decided
+        # here, against answer keys and expected outputs that never left
+        # this process.
     )
 
     async with _gemini_call_guard():

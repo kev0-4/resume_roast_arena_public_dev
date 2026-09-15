@@ -148,6 +148,126 @@ class TestBuildScoringPrompt:
         assert "is NOT itself a negative" in prompt
 
 
+def _exercise(**overrides):
+    result = {
+        "index": 1,
+        "question_id": "lru-cache-design",
+        "format": "CODE",
+        "language": "python",
+        "submission": "class LRUCache: ...",
+        "seconds_taken": 554,
+        "pasted": False,
+        "runs": 3,
+        "failed_runs": 1,
+        "cases": {
+            "visible_passed": 4,
+            "visible_total": 4,
+            "hidden_passed": 1,
+            "hidden_total": 2,
+            "failed_hidden": ["reinsert-existing-key"],
+        },
+        "conduct": "Took 9 minutes. Ran the code 3 times.",
+        "review": {
+            "correct": False,
+            "complexity": "O(1)",
+            "strengths": ["Correct doubly-linked list."],
+            "problems": ["Re-inserting an existing key leaves a stale node."],
+            "interviewer_notes": "Ask what happens on a repeated put.",
+            "score": 8,
+        },
+    }
+    result.update(overrides)
+    return result
+
+
+class TestExerciseRoundsInScoring:
+    """
+    The gap these cover: a candidate scored 10/10 on a coding round and
+    came out of scoring with a final 1, because round_results was never
+    passed to the scorer at all.
+    """
+
+    def test_exercise_score_reaches_the_scorer(self):
+        prompt = pb.build_scoring_prompt("CTX", [], round_results=[_exercise()])
+        assert "EXERCISES THEY ACTUALLY SAT" in prompt
+        assert "8/10" in prompt
+
+    def test_names_the_question_not_just_its_id(self):
+        prompt = pb.build_scoring_prompt("CTX", [], round_results=[_exercise()])
+        # Resolved through the catalogue, so the scorer reads a title.
+        assert "lru-cache-design" not in prompt
+        assert "Coding exercise" in prompt
+
+    def test_hidden_test_results_reach_the_scorer(self):
+        prompt = pb.build_scoring_prompt("CTX", [], round_results=[_exercise()])
+        assert "1 of 2 HIDDEN tests passed" in prompt
+
+    def test_grader_findings_and_notes_reach_the_scorer(self):
+        prompt = pb.build_scoring_prompt("CTX", [], round_results=[_exercise()])
+        assert "Correct doubly-linked list." in prompt
+        assert "stale node" in prompt
+        assert "repeated put" in prompt
+
+    def test_a_high_exercise_score_cannot_be_silently_ignored(self):
+        prompt = pb.build_scoring_prompt("CTX", [], round_results=[_exercise(review={"score": 10})])
+        assert "MUST move the final score" in prompt
+        assert "name that reason plainly in weaknesses" in prompt
+
+    def test_a_failed_exercise_is_not_rescued_by_good_talk(self):
+        prompt = pb.build_scoring_prompt("CTX", [], round_results=[_exercise()])
+        assert "does not rescue a failed exercise" in prompt
+
+    def test_one_exercise_is_weighted_lighter_than_two(self):
+        one = pb.build_scoring_prompt("CTX", [], round_results=[_exercise()])
+        two = pb.build_scoring_prompt(
+            "CTX", [], round_results=[_exercise(), _exercise(index=2, question_id="merge-intervals")]
+        )
+        assert "roughly a THIRD" in one
+        assert "roughly HALF" in two
+
+    def test_the_task_line_stops_calling_it_a_pure_resume_defence(self):
+        with_exercise = pb.build_scoring_prompt("CTX", [], round_results=[_exercise()])
+        assert "graded exercises" in with_exercise
+
+    # --- the conversation-only path must be untouched ---
+
+    def test_conversation_only_gets_no_block_at_all(self):
+        # An HR or IB candidate the planner correctly gave no exercise must
+        # not be told they sat none: that reads as a gap and would cap a
+        # whole vertical for a decision the product made for them.
+        prompt = pb.build_scoring_prompt("CTX", [], round_results=[])
+        assert "EXERCISES THEY ACTUALLY SAT" not in prompt
+        assert "graded exercises" not in prompt
+
+    def test_conversation_rounds_are_not_mistaken_for_exercises(self):
+        prompt = pb.build_scoring_prompt(
+            "CTX", [], round_results=[{"index": 0, "kind": "CONVERSATION"}]
+        )
+        assert "EXERCISES THEY ACTUALLY SAT" not in prompt
+
+    def test_passing_nothing_is_byte_identical_to_before(self):
+        # Every interview created before this change has round_results NULL.
+        utterances = [{"speaker": "candidate", "text": "I did X."}]
+        assert pb.build_scoring_prompt("CTX", utterances) == pb.build_scoring_prompt(
+            "CTX", utterances, round_results=None
+        )
+
+    def test_a_stale_question_id_does_not_crash_scoring(self):
+        # Questions can be removed from the catalogue; an interview mid-flight
+        # must still be scorable.
+        prompt = pb.build_scoring_prompt(
+            "CTX", [], round_results=[_exercise(question_id="deleted-question")]
+        )
+        assert "deleted-question" in prompt
+        assert "8/10" in prompt
+
+    def test_survives_a_round_result_with_missing_fields(self):
+        prompt = pb.build_scoring_prompt(
+            "CTX", [], round_results=[{"index": 1, "question_id": "merge-intervals"}]
+        )
+        assert "EXERCISES THEY ACTUALLY SAT" in prompt
+
+
 class TestBuildResumeDisplayText:
     def test_includes_resume_sections(self):
         text = pb.build_resume_display_text(_anonymized())
