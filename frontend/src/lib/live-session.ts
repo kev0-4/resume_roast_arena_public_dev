@@ -140,6 +140,27 @@ export class LiveInterviewSession {
   }
 
   /**
+   * A text turn attributed to the candidate, outside the mic path.
+   *
+   * Not wired to any UI -- the product is voice-only by design. Exists
+   * for scripts/interview_smoke_test's Playwright runner (see the
+   * dev-only hook in use-live-interview.ts): the actual audio-in path
+   * was exhaustively verified, in both this SDK and a hand-rolled Python
+   * client, to never produce input_transcription for REPLAYED audio
+   * (TTS or a real recorded voice, from a real mic or Chrome's fake
+   * device) -- while `sendClientContent` text turns reliably work every
+   * time. That gap points at something about live-captured-vs-replayed
+   * audio, not at this method; text stays the one reliable way to drive
+   * begin_round/end_interview from outside a real live conversation.
+   */
+  sendText(text: string): void {
+    this.session?.sendClientContent({
+      turns: [{ role: "user", parts: [{ text }] }],
+      turnComplete: true,
+    });
+  }
+
+  /**
    * Acknowledges a tool call. Required for skip_question: the model waits
    * for the response before continuing, so without this the interview
    * stalls in silence right after agreeing to move on -- the exact moment

@@ -27,4 +27,14 @@ service-account*.json
 # quality-scoring-eval/run_shipped_eval.py runs without it.
 quality-scoring-eval/real_resumes.py
 quality-scoring-eval/real_eval_results*.json
+quality-scoring-eval/shipped_eval_results*.json
 quality-scoring-eval/__pycache__/
+
+# scripts/interview_smoke_test/: an on-demand, real-money integration test
+# (see scripts/interview_smoke_test/run.py's docstring). Its cached audio
+# fixtures are synthesized/recorded speech -- never committed, whether
+# TTS output or a real recorded voice, and regenerated locally on demand.
+scripts/interview_smoke_test/.cache/
+scripts/interview_smoke_test/**/*.mp3
+scripts/interview_smoke_test/**/*.wav
+scripts/interview_smoke_test/**/*.pcm16
