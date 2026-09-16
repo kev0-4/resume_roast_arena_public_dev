@@ -386,3 +386,25 @@ class TestBuildRoastPrompt:
             scoring_result=_make_scoring_result(),
         )
         assert "PII" in prompt or "real name" in prompt
+
+    def test_fixes_must_name_the_specific_offending_text(self):
+        # A real user read the fix "Consolidate the duplicated sections and
+        # standardize your layout" as "merge my Experience and Open Source
+        # sections" -- which is not what it meant, and would have made their
+        # resume worse. Fixes that only give a general directive leave the
+        # reader guessing which part of their own document is wrong.
+        #
+        # Highlights have been grounded in verbatim resume text since they
+        # were introduced; this asserts fixes carry the same requirement, so
+        # the instruction cannot be quietly dropped back to "be actionable".
+        anonymized = _make_anonymized(blocks={})
+        prompt = build_roast_prompt(
+            anonymized=anonymized,
+            scoring_result=_make_scoring_result(),
+        )
+        assert "name the SPECIFIC thing" in prompt
+        assert "without having to guess" in prompt
+        # The banned-verb list is the operative half: these are exactly the
+        # words that produced the ambiguous fix in the first place.
+        for vague_verb in ("consolidate", "standardize", "improve", "optimize"):
+            assert vague_verb in prompt

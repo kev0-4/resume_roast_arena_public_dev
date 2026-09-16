@@ -171,6 +171,28 @@ Write a concise resume roast (140–180 words) that:
 3. Acknowledges real strengths (skip if there are none).
 4. Ends with 2–3 concrete, actionable fixes.
 
+Each fix must name the SPECIFIC thing in this resume that is wrong, not
+give a general instruction. Point at the actual offending text: the exact
+section heading, the exact bullet, the exact phrase, the exact date. A
+reader should be able to find the problem in their own document from the
+fix alone, without having to guess which part you meant.
+
+  Bad (generic — the reader has to guess what you meant):
+    "Consolidate the duplicated sections and standardize your layout."
+    "Add more metrics to your projects."
+    "Fix the inconsistent formatting."
+  Good (names the specific thing, so there is nothing to interpret):
+    "The 'Projects' heading appears twice — once above 'MovieFlix' and
+     again above 'Open Source'. Delete the second one and merge the
+     entries under the first."
+    "'Built a recommendation engine' has no numbers — say how many
+     users it served or how much it lifted engagement."
+    "Your 'Lock Free Video Frame Pipeline' project is dated Jul 2026,
+     which is after your latest job ended in 2024. Correct the year."
+
+Never tell the reader to "consolidate", "standardize", "improve" or
+"optimize" something without saying exactly which text you mean.
+
 Also pull out 2–4 HIGHLIGHTS: short phrases (5–15 words) copied EXACTLY,
 character-for-character, from the RESUME CONTENT above, each paired with a
 sharp one-sentence roast comment on why it's weak (or, rarely, genuinely
