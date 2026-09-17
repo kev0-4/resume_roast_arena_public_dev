@@ -1910,3 +1910,89 @@ Not a full section write-up — the live mock-interview feature (real-time Gemin
 2. **Deep, multi-round interviews.** Teased quietly on `/interview/new` ("Deep, multi-round interviews -- coming soon") as of PR #26. Not designed yet — no schema/format decisions made.
 
 Neither item started. Revisit this section when either is picked up.
+
+# 46. Logging — events now actually reach production (2026-09-17)
+
+## The state this replaced
+
+`emit_event` was the only logging in the product: 147 call sites across 19 modules. It appended each event to a local file called `log_entry.json` and printed `"Successfully appended entry to log_entry.json"`.
+
+That print was the **only** thing that ever reached Azure. Confirmed by reading production directly:
+
+```
+az containerapp logs show --name ca-backend --resource-group rg-resume-roast-arena --tail 12 --type console
+...
+{"Log": "F Successfully appended entry to log_entry.json"}
+```
+
+The events themselves went into a file inside the container — unreadable from outside, wiped on every restart and every new revision. The service effectively had no logging.
+
+Two further problems with the file approach:
+
+- **Quadratic cost.** Every event read the whole file, parsed it, appended one entry, and rewrote the whole file. The copies committed to this repo had reached 513KB and 157KB — that was the per-event cost by the end.
+- **Committed to git.** Neither file was gitignored, so log noise landed in commits and had to be reverted by hand constantly during development.
+
+## What changed
+
+`emit_event` now writes one JSON object per line to stdout, and nothing to disk. The signature is unchanged, so all 147 call sites work untouched.
+
+This needed no new infrastructure. The Container Apps environment already ships stdout to Log Analytics:
+
+```
+az containerapp env list -g rg-resume-roast-arena --query "[].{name:name, logs:properties.appLogsConfiguration.destination}" -o tsv
+cae-resume-roast-arena   log-analytics
+```
+
+Output shape:
+
+```json
+{"ts":"2026-09-17T16:48:47.092359+00:00","event":"ingest.received","level":"INFO","session_id":"0942...","route":"/api/v1/ingest","bytes":84213}
+{"ts":"2026-09-17T16:48:47.092497+00:00","event":"llm.call_failed","level":"ERROR","provider":"gemini","attempt":3}
+{"ts":"2026-09-17T16:48:47.092538+00:00","event":"auth.login","level":"INFO","email":"a@b.com","password":"[REDACTED]","api_key":"[REDACTED]"}
+```
+
+Three decisions worth recording:
+
+1. **Level is inferred when the caller doesn't set one.** Previously everything without an explicit `status` logged as `UNKNOWN`, which makes the single most important query — "show me today's errors" — impossible to write. Now an event named `*_failed` / `*.exception` / `*dead_letter` is ERROR, `*timeout` / `*retry` / `*rate_limit` / `*stale` is WARNING, everything else INFO. An explicit valid `status` still wins.
+
+2. **Secrets are redacted before writing.** Callers pass payloads straight through, so one careless `emit_event(..., {"password": ...})` would otherwise put credentials in a queryable store. Keys in `_REDACT_KEYS` are replaced at any nesting depth.
+
+3. **Logging can never break a request.** Every failure path is swallowed, including unserialisable payloads (which fall back to a minimal valid line). A broken logger is not worth a 500.
+
+`with_trace` was a stub returning `None`, imported by three modules and never called. Implemented rather than deleted, so those imports keep working and there's an obvious place to hang request correlation later.
+
+## Queries that now work
+
+In Log Analytics (`cae-resume-roast-arena`'s workspace), console lines land in `ContainerAppConsoleLogs_CL.Log_s`:
+
+```kql
+// today's errors, newest first
+ContainerAppConsoleLogs_CL
+| where TimeGenerated > ago(24h)
+| where Log_s has '"level":"ERROR"'
+| order by TimeGenerated desc
+
+// error count by event name
+ContainerAppConsoleLogs_CL
+| where TimeGenerated > ago(24h)
+| where Log_s has '"level":"ERROR"'
+| extend e = extract('"event":"([^"]+)"', 1, Log_s)
+| summarize count() by e
+| order by count_ desc
+
+// follow one upload across all six workers
+ContainerAppConsoleLogs_CL
+| where Log_s has "<session_id>"
+| order by TimeGenerated asc
+```
+
+## Verified
+
+- 21 new tests (the module had none), covering output shape, level inference, secret redaction, unserialisable payloads, and an explicit assertion that **nothing is written to disk**
+- full suite 399 passed; the 6 `backend/` leaderboard failures are pre-existing and reproduce identically on `main`
+- the two committed `log_entry.json` files removed and gitignored
+- **incidental finding:** `workers/cleanup/test_sweep.py` had been intermittently failing under `pytest-randomly`'s shuffling. Six consecutive randomised full-suite runs after removing the file-writing showed zero sweep failures, where runs with the files still present showed them twice. Suggestive, not proven — a shared mutable file in the working directory is a plausible cause.
+
+## Not done here
+
+**Alerting.** Logs are now queryable but nothing watches them. The next step is an Azure Monitor alert rule on the ERROR query above, wired to email. That is a separate change and needs a decision on what is worth being woken up for.
