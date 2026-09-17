@@ -53,21 +53,21 @@ def _make_scoring_result(issues=None, strengths=None) -> ScoringResult:
 
 class TestNormalizePlaceholders:
     def test_single_email(self):
-        assert normalize_placeholders("reach me at {{EMAIL_1}}") == "reach me at [EMAIL]"
+        assert normalize_placeholders("reach me at {{EMAIL_1}}") == "reach me at [EMAIL_1]"
 
     def test_single_phone(self):
-        assert normalize_placeholders("call {{PHONE_1}}") == "call [PHONE]"
+        assert normalize_placeholders("call {{PHONE_1}}") == "call [PHONE_1]"
 
     def test_single_url(self):
-        assert normalize_placeholders("see {{URL_1}}") == "see [URL]"
+        assert normalize_placeholders("see {{URL_1}}") == "see [URL_1]"
 
     def test_multiple_same_type(self):
         result = normalize_placeholders("{{EMAIL_1}} and {{EMAIL_2}}")
-        assert result == "[EMAIL] and [EMAIL]"
+        assert result == "[EMAIL_1] and [EMAIL_2]"
 
     def test_multiple_different_types(self):
         result = normalize_placeholders("{{EMAIL_1}} / {{PHONE_1}} / {{URL_1}}")
-        assert result == "[EMAIL] / [PHONE] / [URL]"
+        assert result == "[EMAIL_1] / [PHONE_1] / [URL_1]"
 
     def test_no_placeholders(self):
         text = "No placeholders here, just plain text."
@@ -78,10 +78,31 @@ class TestNormalizePlaceholders:
 
     def test_preserves_surrounding_text(self):
         result = normalize_placeholders("Email: {{EMAIL_1}}. Phone: {{PHONE_1}}.")
-        assert result == "Email: [EMAIL]. Phone: [PHONE]."
+        assert result == "Email: [EMAIL_1]. Phone: [PHONE_1]."
 
     def test_high_numbered_placeholder(self):
-        assert normalize_placeholders("{{URL_99}}") == "[URL]"
+        assert normalize_placeholders("{{URL_99}}") == "[URL_99]"
+
+    def test_distinct_values_never_collapse_to_identical_tokens(self):
+        """
+        The regression this function used to cause.
+
+        Tika appends a PDF's hyperlink list to the extracted text, so a
+        resume can carry a dozen DISTINCT links. Discarding the placeholder
+        index turned them into a dozen identical [URL] tokens, and the model
+        -- correctly reading what it was given -- told the candidate to
+        delete their "duplicated URLs". They were all different.
+        """
+        text = normalize_placeholders(
+            "{{URL_1}}\n{{URL_2}}\n{{URL_3}}\n{{URL_4}}")
+        tokens = text.split()
+        assert len(set(tokens)) == len(tokens), (
+            f"distinct links collapsed into duplicates: {tokens}")
+
+    def test_contact_header_links_stay_distinguishable(self):
+        # GitHub and LinkedIn in one header must not read as the same link.
+        result = normalize_placeholders("{{URL_1}} | {{URL_2}}")
+        assert result == "[URL_1] | [URL_2]"
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +122,7 @@ class TestSectionText:
 
     def test_placeholder_normalized(self):
         blocks = [_make_block("Contact: {{EMAIL_1}}")]
-        assert _section_text(blocks) == "Contact: [EMAIL]"
+        assert _section_text(blocks) == "Contact: [EMAIL_1]"
 
     def test_empty_block_list(self):
         assert _section_text([]) == ""
@@ -153,7 +174,7 @@ class TestFormatResumeSections:
         # advice off the back of it.
         blocks = {
             "experience": [_make_block("Engineer at Acme.", start=500)],
-            "other": [_make_block("Jane Doe | [EMAIL] | [PHONE]", start=0)],
+            "other": [_make_block("Jane Doe | [EMAIL_1] | [PHONE_1]", start=0)],
             "education": [_make_block("B.Sc.", start=900)],
         }
         result = _format_resume_sections(blocks)
@@ -297,7 +318,7 @@ class TestBuildRoastPrompt:
             scoring_result=_make_scoring_result(),
         )
         assert "{{EMAIL_1}}" not in prompt
-        assert "[EMAIL]" in prompt
+        assert "[EMAIL_1]" in prompt
 
     def test_issues_appear_in_prompt(self):
         anonymized = _make_anonymized(blocks={})

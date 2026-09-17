@@ -6,9 +6,10 @@ Builds a structured LLM prompt from anonymized resume content + scoring results.
 Design (Option A): consumes the anonymized dict already in memory in the scoring
 processor — no extra blob read required.
 
-Placeholder conversion: stored format {{EMAIL_1}} → LLM-facing [EMAIL].
+Placeholder conversion: stored format {{EMAIL_1}} → LLM-facing [EMAIL_1].
 Reason: double-brace syntax looks like a template variable to an LLM; bracket
-notation clearly communicates redaction.
+notation clearly communicates redaction. The INDEX is preserved -- it used to
+be dropped, which made distinct values indistinguishable to the model.
 """
 
 import re
@@ -21,12 +22,25 @@ from ..schemas import ScoringResult, Issue, Severity, Strength
 # Placeholder normalisation
 # ---------------------------------------------------------------------------
 
-_PLACEHOLDER_RE = re.compile(r"\{\{([A-Z]+)_\d+\}\}")
+_PLACEHOLDER_RE = re.compile(r"\{\{([A-Z]+)_(\d+)\}\}")
 
 
 def normalize_placeholders(text: str) -> str:
-    """Convert {{EMAIL_1}} → [EMAIL], {{PHONE_2}} → [PHONE], etc."""
-    return _PLACEHOLDER_RE.sub(lambda m: f"[{m.group(1)}]", text)
+    """
+    Convert {{EMAIL_1}} → [EMAIL_1], {{PHONE_2}} → [PHONE_2], etc.
+
+    The index is KEPT. It used to be discarded, which meant a resume whose
+    PDF carries twelve distinct links reached the model as twelve identical
+    [URL] tokens -- so the model told the candidate to "delete the duplicated
+    URLs" for links that are all different. Same for a header reading
+    [URL] | [URL], which is really GitHub and LinkedIn.
+
+    Only the braces needed changing: {{...}} reads as a template variable to
+    an LLM, brackets read as a redaction. The number never had to go with
+    them, and dropping it threw away the one thing that says these are
+    different values.
+    """
+    return _PLACEHOLDER_RE.sub(lambda m: f"[{m.group(1)}_{m.group(2)}]", text)
 
 
 # ---------------------------------------------------------------------------

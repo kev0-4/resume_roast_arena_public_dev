@@ -22,12 +22,22 @@ from .schemas import SCORE_MIN, SCORE_MAX
 # Section formatting (duplicated from workers/scoring/pipeline/prompt_builder.py)
 # ---------------------------------------------------------------------------
 
-_PLACEHOLDER_RE = re.compile(r"\{\{([A-Z]+)_\d+\}\}")
+_PLACEHOLDER_RE = re.compile(r"\{\{([A-Z]+)_(\d+)\}\}")
 
 
 def normalize_placeholders(text: str) -> str:
-    """Convert {{EMAIL_1}} -> [EMAIL], {{PHONE_2}} -> [PHONE], etc."""
-    return _PLACEHOLDER_RE.sub(lambda m: f"[{m.group(1)}]", text)
+    """
+    Convert {{EMAIL_1}} -> [EMAIL_1], {{PHONE_2}} -> [PHONE_2], etc.
+
+    The index is KEPT -- see the twin of this function in
+    workers/scoring/pipeline/prompt_builder.py for why. Short version:
+    collapsing every link to a bare [URL] made distinct values look like
+    duplicates, and the model dutifully told candidates to delete them.
+
+    This copy also feeds build_resume_display_text, so the candidate's own
+    side pane shows [URL_1] / [URL_2] rather than two identical [URL]s.
+    """
+    return _PLACEHOLDER_RE.sub(lambda m: f"[{m.group(1)}_{m.group(2)}]", text)
 
 
 _SECTION_ORDER = [

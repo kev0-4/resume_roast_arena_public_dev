@@ -21,10 +21,10 @@ def _roast(**overrides):
 
 class TestNormalizePlaceholders:
     def test_converts_bracket_placeholder(self):
-        assert pb.normalize_placeholders("Contact: {{EMAIL_1}}") == "Contact: [EMAIL]"
+        assert pb.normalize_placeholders("Contact: {{EMAIL_1}}") == "Contact: [EMAIL_1]"
 
     def test_multiple_placeholders(self):
-        assert pb.normalize_placeholders("{{EMAIL_1}} {{PHONE_2}}") == "[EMAIL] [PHONE]"
+        assert pb.normalize_placeholders("{{EMAIL_1}} {{PHONE_2}}") == "[EMAIL_1] [PHONE_2]"
 
     def test_no_placeholders_unchanged(self):
         assert pb.normalize_placeholders("plain text") == "plain text"
