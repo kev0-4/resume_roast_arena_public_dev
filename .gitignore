@@ -38,3 +38,8 @@ scripts/interview_smoke_test/.cache/
 scripts/interview_smoke_test/**/*.mp3
 scripts/interview_smoke_test/**/*.wav
 scripts/interview_smoke_test/**/*.pcm16
+
+# Structured telemetry now goes to stdout (Log Analytics), never to a file.
+# These were committed by the old file-writing emit_event and reached 513KB.
+log_entry.json
+**/log_entry.json
