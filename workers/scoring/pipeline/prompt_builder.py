@@ -64,60 +64,82 @@ def _section_text(block_list: List[Dict]) -> str:
     return "\n".join(parts)
 
 
-def _section_start(block_list: List[Dict]) -> int | None:
-    """
-    Earliest character offset this section occupies in the ORIGINAL document.
-
-    The segmenter records a real source_span on every block (see
-    workers/normalization/pipeline/segmenter.py); this is what lets the
-    prompt show the resume in the order the candidate actually wrote it.
-    """
-    starts = [
-        b["source_span"]["start"]
-        for b in block_list
-        if isinstance(b, dict)
-        and isinstance(b.get("source_span"), dict)
-        and isinstance(b["source_span"].get("start"), int)
-    ]
-    return min(starts) if starts else None
+def _block_start(block: Dict) -> int | None:
+    """Character offset of this block in the ORIGINAL document, if recorded."""
+    span = block.get("source_span")
+    if isinstance(span, dict) and isinstance(span.get("start"), int):
+        return span["start"]
+    return None
 
 
 def _format_resume_sections(blocks: Dict[str, List[Dict]]) -> str:
     """
-    Render sections in TRUE document order.
+    Render the resume block-by-block in TRUE document order.
 
-    This used to emit a fixed canonical order (summary, experience, projects,
-    ... other) regardless of the real layout, which silently lied to the LLM
-    about where anything was. In practice the contact/name header lands in the
-    catch-all 'other' bucket at offset 0 -- the very TOP of almost every
-    resume -- and canonical order printed it LAST, so the model kept telling
-    people their contact details were "stranded at the very bottom" when they
-    were already at the top. Verified across 12 consecutive production roasts:
-    11 were shown in the wrong order and 9 produced false positional advice.
+    Two bugs led here, in order:
 
-    Sections without usable spans keep the old canonical position as a
-    fallback, so a malformed artifact degrades to previous behaviour rather
-    than vanishing.
+    1. The original emitted a fixed canonical order (summary, experience,
+       ... other) regardless of real layout. A candidate's contact header is
+       not a recognised section, so it lands in the catch-all 'other' bucket
+       at offset 0 -- the TOP of almost every resume -- and canonical order
+       printed 'other' LAST. The model kept telling people their contact
+       details were "stranded at the very bottom" when they were at the top.
+
+    2. Sorting whole SECTIONS by their earliest offset fixed section order but
+       not this: a section's blocks can be scattered through the document.
+       'other' routinely holds the contact header at offset 0 AND stray
+       trailing fragments near the end. Grouped under one header at
+       min(start), the model was told all of it sat at the top, and kept
+       misplacing the trailing fragments.
+
+    So blocks are flattened, sorted by their own offset, and only ADJACENT
+    blocks of the same section are merged into one labelled run. A section
+    that genuinely appears twice in the document therefore renders twice --
+    which is the truth, and is also what lets the model report a duplicated
+    heading structurally instead of inferring it from repeated text.
+
+    Blocks with no usable span fall back to the end, ordered by the old
+    canonical rank, so a malformed artifact degrades instead of losing
+    content.
     """
-    ordered: List[tuple] = []
-    for section, block_list in blocks.items():
-        text = _section_text(block_list)
-        if not text:
-            continue
-        start = _section_start(block_list)
-        if start is None:
-            # No span: fall back to canonical rank, pushed after anything
-            # that does have a real position.
-            rank = _SECTION_ORDER.index(section) if section in _SECTION_ORDER else len(_SECTION_ORDER)
-            ordered.append((1, rank, section, text))
-        else:
-            ordered.append((0, start, section, text))
+    positioned: List[tuple] = []
+    unpositioned: List[tuple] = []
 
-    ordered.sort(key=lambda t: (t[0], t[1]))
+    for section, block_list in blocks.items():
+        if not isinstance(block_list, list):
+            continue
+        for block in block_list:
+            if not isinstance(block, dict):
+                continue
+            text = normalize_placeholders((block.get("text") or "").strip())
+            if not text:
+                continue
+            start = _block_start(block)
+            if start is None:
+                rank = (
+                    _SECTION_ORDER.index(section)
+                    if section in _SECTION_ORDER
+                    else len(_SECTION_ORDER)
+                )
+                unpositioned.append((rank, section, text))
+            else:
+                positioned.append((start, section, text))
+
+    positioned.sort(key=lambda t: t[0])
+    unpositioned.sort(key=lambda t: t[0])
+    flat = [(s, t) for _, s, t in positioned] + [(s, t) for _, s, t in unpositioned]
+
+    # Merge only CONSECUTIVE blocks of the same section.
+    runs: List[tuple] = []
+    for section, text in flat:
+        if runs and runs[-1][0] == section:
+            runs[-1][1].append(text)
+        else:
+            runs.append((section, [text]))
 
     parts = [
-        f"[{_SECTION_LABELS.get(section, section.upper())}]\n{text}"
-        for _, _, section, text in ordered
+        f"[{_SECTION_LABELS.get(section, section.upper())}]\n" + "\n".join(texts)
+        for section, texts in runs
     ]
     return "\n\n".join(parts) if parts else "(no content extracted)"
 
