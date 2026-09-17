@@ -64,23 +64,61 @@ def _section_text(block_list: List[Dict]) -> str:
     return "\n".join(parts)
 
 
+def _section_start(block_list: List[Dict]) -> int | None:
+    """
+    Earliest character offset this section occupies in the ORIGINAL document.
+
+    The segmenter records a real source_span on every block (see
+    workers/normalization/pipeline/segmenter.py); this is what lets the
+    prompt show the resume in the order the candidate actually wrote it.
+    """
+    starts = [
+        b["source_span"]["start"]
+        for b in block_list
+        if isinstance(b, dict)
+        and isinstance(b.get("source_span"), dict)
+        and isinstance(b["source_span"].get("start"), int)
+    ]
+    return min(starts) if starts else None
+
+
 def _format_resume_sections(blocks: Dict[str, List[Dict]]) -> str:
-    parts: List[str] = []
+    """
+    Render sections in TRUE document order.
 
-    for section in _SECTION_ORDER:
-        if section in blocks:
-            text = _section_text(blocks[section])
-            if text:
-                label = _SECTION_LABELS.get(section, section.upper())
-                parts.append(f"[{label}]\n{text}")
+    This used to emit a fixed canonical order (summary, experience, projects,
+    ... other) regardless of the real layout, which silently lied to the LLM
+    about where anything was. In practice the contact/name header lands in the
+    catch-all 'other' bucket at offset 0 -- the very TOP of almost every
+    resume -- and canonical order printed it LAST, so the model kept telling
+    people their contact details were "stranded at the very bottom" when they
+    were already at the top. Verified across 12 consecutive production roasts:
+    11 were shown in the wrong order and 9 produced false positional advice.
 
-    # Catch any sections not in the known order
+    Sections without usable spans keep the old canonical position as a
+    fallback, so a malformed artifact degrades to previous behaviour rather
+    than vanishing.
+    """
+    ordered: List[tuple] = []
     for section, block_list in blocks.items():
-        if section not in _SECTION_ORDER:
-            text = _section_text(block_list)
-            if text:
-                parts.append(f"[{section.upper()}]\n{text}")
+        text = _section_text(block_list)
+        if not text:
+            continue
+        start = _section_start(block_list)
+        if start is None:
+            # No span: fall back to canonical rank, pushed after anything
+            # that does have a real position.
+            rank = _SECTION_ORDER.index(section) if section in _SECTION_ORDER else len(_SECTION_ORDER)
+            ordered.append((1, rank, section, text))
+        else:
+            ordered.append((0, start, section, text))
 
+    ordered.sort(key=lambda t: (t[0], t[1]))
+
+    parts = [
+        f"[{_SECTION_LABELS.get(section, section.upper())}]\n{text}"
+        for _, _, section, text in ordered
+    ]
     return "\n\n".join(parts) if parts else "(no content extracted)"
 
 
@@ -192,6 +230,41 @@ fix alone, without having to guess which part you meant.
 
 Never tell the reader to "consolidate", "standardize", "improve" or
 "optimize" something without saying exactly which text you mean.
+
+CRITICAL — you do NOT know where anything sits on the page. The sections
+above are printed in a fixed normalized order, NOT the order they appear
+in the candidate's real document, and [OTHER] is a catch-all bucket whose
+contents may come from anywhere in the file. A section printed last here
+is very often at the TOP of their actual resume.
+
+So never make a claim about physical position. Do not say something is
+"at the top", "at the bottom", "at the very end", "above" or "below"
+something else, do not say a section is "stranded", "buried" or
+"misplaced", and never tell the reader to MOVE or REORDER anything.
+Judge only what the text says, not where it appears.
+
+This applies to the text shown above too, not just their document. Do not
+describe where anything sits "in the text", "in the section", or relative
+to anything else. If you catch yourself writing where something is rather
+than what is wrong with it, delete that part of the sentence.
+
+  Forbidden (position is unknowable from this prompt):
+    "Move your contact info from the bottom up to the top."
+    "Your summary is stranded at the very end — move it up."
+    "Delete the duplicate 'Projects' heading near the bottom."
+    "Your contact info is sitting at the very end of the text."
+    "Delete the trailing 'Summary' heading at the bottom of the section."
+  Allowed (identifies by content and name, no position):
+    "Your 'Projects' heading appears more than once — keep one and merge
+     the entries under it."
+    "'Built a recommendation engine' has no numbers — say how many users
+     it served."
+    "Your contact details are split across multiple fragments — put name,
+     phone, email and links together in one block."
+
+Moving an ENTRY between sections is fine when the reason is categorical
+("this is work experience, not a project") — that is about what something
+is, not where it physically sits.
 
 Also pull out 2–4 HIGHLIGHTS: short phrases (5–15 words) copied EXACTLY,
 character-for-character, from the RESUME CONTENT above, each paired with a

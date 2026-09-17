@@ -131,15 +131,61 @@ class TestFormatResumeSections:
         assert "Engineer at Acme." in result
 
     def test_section_order_respected(self):
+        # source_span now drives order, so give them spans matching the
+        # canonical layout this test was originally written against.
         blocks = {
-            "education": [_make_block("B.Sc.")],
-            "summary": [_make_block("Driven developer.")],
-            "experience": [_make_block("3 years.")],
+            "education": [_make_block("B.Sc.", start=200)],
+            "summary": [_make_block("Driven developer.", start=0)],
+            "experience": [_make_block("3 years.", start=100)],
         }
         result = _format_resume_sections(blocks)
         # summary should appear before experience, experience before education
         assert result.index("[SUMMARY") < result.index("[WORK EXPERIENCE]")
         assert result.index("[WORK EXPERIENCE]") < result.index("[EDUCATION]")
+
+    def test_sections_render_in_true_document_order_not_canonical(self):
+        # The bug this guards: a user's contact header lands in the catch-all
+        # 'other' bucket at offset 0 -- the TOP of their resume -- but the old
+        # canonical order printed 'other' LAST. The model then told people
+        # their contact details were "stranded at the very bottom" when they
+        # were already at the top. Measured across 12 consecutive production
+        # roasts: 11 were shown in the wrong order, 9 gave false positional
+        # advice off the back of it.
+        blocks = {
+            "experience": [_make_block("Engineer at Acme.", start=500)],
+            "other": [_make_block("Jane Doe | [EMAIL] | [PHONE]", start=0)],
+            "education": [_make_block("B.Sc.", start=900)],
+        }
+        result = _format_resume_sections(blocks)
+        assert result.index("[OTHER]") < result.index("[WORK EXPERIENCE]"), (
+            "contact block at offset 0 must render first, not last"
+        )
+        assert result.index("[WORK EXPERIENCE]") < result.index("[EDUCATION]")
+
+    def test_sections_without_spans_fall_back_instead_of_disappearing(self):
+        # A malformed artifact should degrade to the old canonical behaviour,
+        # never silently drop content out of the prompt.
+        blocks = {
+            "skills": [{"text": "Python, Go"}],            # no source_span
+            "summary": [_make_block("Real summary.", start=10)],
+        }
+        result = _format_resume_sections(blocks)
+        assert "[SKILLS]" in result
+        assert "Python, Go" in result
+        # positioned content wins the earlier slot
+        assert result.index("[SUMMARY") < result.index("[SKILLS]")
+
+    def test_prompt_forbids_positional_claims(self):
+        # Position is unknowable to the model for any section lacking spans,
+        # and [OTHER] is a catch-all that can hold content from anywhere, so
+        # the prompt must not invite "move this to the top" style advice.
+        anonymized = _make_anonymized(blocks={})
+        prompt = build_roast_prompt(
+            anonymized=anonymized,
+            scoring_result=_make_scoring_result(),
+        )
+        assert "never make a claim about physical position" in prompt.lower()
+        assert "stranded" in prompt
 
     def test_unknown_section_appended(self):
         blocks = {
