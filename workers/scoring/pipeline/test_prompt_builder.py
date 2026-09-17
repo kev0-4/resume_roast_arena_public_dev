@@ -12,6 +12,8 @@ from .prompt_builder import (
     _format_strengths,
     _format_resume_sections,
     _section_text,
+    _label_trailing_link_dump,
+    _LINK_DUMP_NOTE,
 )
 from ..schemas import ScoringResult, Issue, Strength, Severity
 
@@ -475,3 +477,65 @@ class TestBuildRoastPrompt:
         # words that produced the ambiguous fix in the first place.
         for vague_verb in ("consolidate", "standardize", "improve", "optimize"):
             assert vague_verb in prompt
+
+
+# ---------------------------------------------------------------------------
+# _label_trailing_link_dump
+# ---------------------------------------------------------------------------
+
+class TestTrailingLinkDump:
+    """
+    Tika appends a PDF's hyperlink TARGETS as plain text at the end of the
+    extracted document. The candidate sees the word "GradeIT" on their page;
+    we see a list of raw URLs they cannot find anywhere. The model then gave
+    advice about text that is not on the resume.
+
+    These pin the labelling and, more importantly, the cases where it must
+    stay quiet. The function never deletes -- a wrong label costs a little
+    roast coverage, a wrong deletion costs the candidate their content.
+    """
+
+    def test_trailing_link_dump_is_labelled(self):
+        rendered = (
+            "[WORK EXPERIENCE]\n"
+            "Built the ingest path, cut p99 from 800ms to 95ms.\n"
+            "[URL_1]\n[URL_2]\n[URL_3]\n[EMAIL_1]"
+        )
+        out = _label_trailing_link_dump(rendered)
+        assert _LINK_DUMP_NOTE in out
+        # the note goes BEFORE the run, not after it
+        assert out.index(_LINK_DUMP_NOTE) < out.index("[URL_1]")
+
+    def test_nothing_is_deleted(self):
+        rendered = "[OTHER]\nJane Doe\n[URL_1]\n[URL_2]\n[URL_3]"
+        out = _label_trailing_link_dump(rendered)
+        for kept in ("Jane Doe", "[URL_1]", "[URL_2]", "[URL_3]"):
+            assert kept in out
+
+    def test_two_links_are_left_alone(self):
+        # A contact header of GitHub + LinkedIn is not a machine dump.
+        rendered = "[OTHER]\nJane Doe\n[URL_1]\n[URL_2]"
+        assert _label_trailing_link_dump(rendered) == rendered
+
+    def test_links_with_words_are_left_alone(self):
+        # A real, human-written links section carries labels.
+        rendered = (
+            "[OTHER]\n"
+            "Portfolio: [URL_1]\nGitHub: [URL_2]\nLinkedIn: [URL_3]"
+        )
+        assert _label_trailing_link_dump(rendered) == rendered
+
+    def test_links_in_the_middle_are_left_alone(self):
+        # Only a run at the very END is the extraction artifact.
+        rendered = (
+            "[OTHER]\n[URL_1]\n[URL_2]\n[URL_3]\n"
+            "[WORK EXPERIENCE]\nShipped the thing."
+        )
+        assert _label_trailing_link_dump(rendered) == rendered
+
+    def test_resume_without_a_dump_is_untouched(self):
+        rendered = "[SUMMARY]\nBackend engineer.\n\n[EDUCATION]\nState University"
+        assert _label_trailing_link_dump(rendered) == rendered
+
+    def test_empty_input(self):
+        assert _label_trailing_link_dump("") == ""
