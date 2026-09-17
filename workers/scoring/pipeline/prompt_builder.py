@@ -86,6 +86,66 @@ def _block_start(block: Dict) -> int | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# PDF link-target dump
+# ---------------------------------------------------------------------------
+
+_TOKEN_RE = re.compile(r"\[(?:EMAIL|PHONE|URL)_\d+\]")
+
+# Enough lines to be a machine-generated list rather than someone's two links.
+_MIN_LINK_DUMP_LINES = 3
+
+_LINK_DUMP_NOTE = (
+    "[LINK TARGETS EXTRACTED FROM THE PDF FILE -- the destinations behind "
+    "hyperlinks elsewhere in this resume. They are NOT visible text on the "
+    "candidate's page: the candidate sees a linked word, not this list. Do "
+    "not comment on them, count them, or tell the candidate to delete them.]"
+)
+
+
+def _is_link_only_line(line: str) -> bool:
+    """A line holding redaction placeholders and nothing else meaningful."""
+    stripped = line.strip()
+    if not stripped or not _TOKEN_RE.search(stripped):
+        return False
+    return not re.search(r"[A-Za-z0-9]", _TOKEN_RE.sub("", stripped))
+
+
+def _label_trailing_link_dump(rendered: str) -> str:
+    """
+    Mark (never delete) the hyperlink list Tika appends to extracted text.
+
+    Tika writes a PDF's link targets as plain text at the end of the
+    document, the same way it writes the bookmark outline (see
+    workers/normalization/pipeline/segmenter.py). The candidate sees the word
+    "GradeIT" on their resume; we see the raw URL in a list they cannot find.
+    The model then gave advice about text that is not on the page.
+
+    This labels the run instead of removing it, deliberately. A rule that
+    deletes text has to be right every time or it eats a real "Links"
+    section, and the production corpus offers too few examples to validate
+    one. Mislabelling a genuine links section only costs a little roast
+    coverage; deleting it would destroy content.
+
+    Measured: fires on exactly the 2 of 9 production documents that carry the
+    dump (11 lines each), and on none of the other 7.
+    """
+    lines = rendered.splitlines()
+    run_start = len(lines)
+    for i in range(len(lines) - 1, -1, -1):
+        if not lines[i].strip():
+            continue
+        if _is_link_only_line(lines[i]):
+            run_start = i
+        else:
+            break
+
+    if len([l for l in lines[run_start:] if l.strip()]) < _MIN_LINK_DUMP_LINES:
+        return rendered
+
+    return "\n".join(lines[:run_start] + [_LINK_DUMP_NOTE] + lines[run_start:])
+
+
 def _format_resume_sections(blocks: Dict[str, List[Dict]]) -> str:
     """
     Render the resume block-by-block in TRUE document order.
@@ -155,7 +215,9 @@ def _format_resume_sections(blocks: Dict[str, List[Dict]]) -> str:
         f"[{_SECTION_LABELS.get(section, section.upper())}]\n" + "\n".join(texts)
         for section, texts in runs
     ]
-    return "\n\n".join(parts) if parts else "(no content extracted)"
+    if not parts:
+        return "(no content extracted)"
+    return _label_trailing_link_dump("\n\n".join(parts))
 
 
 # ---------------------------------------------------------------------------

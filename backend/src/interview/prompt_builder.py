@@ -78,6 +78,56 @@ def _block_start(block: Dict) -> int | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# PDF link-target dump (duplicated from workers/scoring/pipeline/prompt_builder.py)
+# ---------------------------------------------------------------------------
+
+_TOKEN_RE = re.compile(r"\[(?:EMAIL|PHONE|URL)_\d+\]")
+
+_MIN_LINK_DUMP_LINES = 3
+
+_LINK_DUMP_NOTE = (
+    "[LINK TARGETS EXTRACTED FROM THE PDF FILE -- the destinations behind "
+    "hyperlinks elsewhere in this resume. They are NOT visible text on the "
+    "candidate's page: the candidate sees a linked word, not this list. Do "
+    "not comment on them, count them, or tell the candidate to delete them.]"
+)
+
+
+def _is_link_only_line(line: str) -> bool:
+    """A line holding redaction placeholders and nothing else meaningful."""
+    stripped = line.strip()
+    if not stripped or not _TOKEN_RE.search(stripped):
+        return False
+    return not re.search(r"[A-Za-z0-9]", _TOKEN_RE.sub("", stripped))
+
+
+def _label_trailing_link_dump(rendered: str) -> str:
+    """
+    Mark (never delete) the hyperlink list Tika appends to extracted text.
+
+    See the twin of this function in workers/scoring/pipeline/prompt_builder.py
+    for the full reasoning. It matters twice over here: the interviewer reads
+    this text, and build_resume_display_text() renders it into the candidate's
+    own side pane -- so without the label the interviewer could ask about a
+    list of URLs the candidate cannot see on their own resume.
+    """
+    lines = rendered.splitlines()
+    run_start = len(lines)
+    for i in range(len(lines) - 1, -1, -1):
+        if not lines[i].strip():
+            continue
+        if _is_link_only_line(lines[i]):
+            run_start = i
+        else:
+            break
+
+    if len([l for l in lines[run_start:] if l.strip()]) < _MIN_LINK_DUMP_LINES:
+        return rendered
+
+    return "\n".join(lines[:run_start] + [_LINK_DUMP_NOTE] + lines[run_start:])
+
+
 def _format_resume_sections(blocks: Dict[str, List[Dict]]) -> str:
     """
     Render the resume block-by-block in TRUE document order.
@@ -134,7 +184,9 @@ def _format_resume_sections(blocks: Dict[str, List[Dict]]) -> str:
         f"[{_SECTION_LABELS.get(section, section.upper())}]\n" + "\n".join(texts)
         for section, texts in runs
     ]
-    return "\n\n".join(parts) if parts else "(no content extracted)"
+    if not parts:
+        return "(no content extracted)"
+    return _label_trailing_link_dump("\n\n".join(parts))
 
 
 # ---------------------------------------------------------------------------
