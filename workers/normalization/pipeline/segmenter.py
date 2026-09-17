@@ -50,7 +50,10 @@ def segment_text(raw_text: str) -> dict:
 
    # 2. Split text into lines with spans
 
-    lines = _split_lines_with_spans(raw_text)
+    # Materialised because _drop_trailing_heading_index has to look at the
+    # tail, which a generator can't do.
+    lines = list(_split_lines_with_spans(raw_text))
+    lines = _drop_trailing_heading_index(lines)
 
     # ------------------------------------------------------------
     # 3. Iterate lines, detect headers, accumulate content
@@ -122,6 +125,82 @@ def segment_text(raw_text: str) -> dict:
 
 
 # ---------------------------------- Helper functions
+
+_HEADINGISH = re.compile(r"^[A-Za-z][A-Za-z&/\- ]{2,39}$")
+
+# A heading index needs at least this many lines before we believe it, and at
+# least this many of them must be headings we actually recognise. Two anchors
+# stop a genuine trailing list (e.g. three short interests) being eaten.
+_MIN_INDEX_RUN = 3
+_MIN_KNOWN_HEADINGS = 2
+
+
+def _is_bare_heading(line_text: str) -> bool:
+    """A line that is ONLY a section heading -- no body, no punctuation."""
+    stripped = line_text.strip()
+    if not stripped or not _HEADINGISH.match(stripped):
+        return False
+    # "Summary: I build..." is a heading with content, not a bare heading.
+    return not stripped.endswith((".", ":", ",", ";"))
+
+
+def _drop_trailing_heading_index(lines):
+    """
+    Remove a trailing run of bare section headings with no content under them.
+
+    Tika emits a PDF's outline/bookmark entries as plain text at the END of
+    the extracted document, so a resume whose PDF has bookmarks arrives
+    looking like:
+
+        ...last real bullet...
+            Summary
+            Education
+            Technical Skills
+            Experience
+            Projects
+
+    Those are not something the candidate wrote -- they are navigation
+    metadata. But the segmenter reads each one as a real heading, so every
+    section gains a second, empty occurrence, and the roast then tells the
+    candidate to "delete your duplicate 'Projects' heading" for a duplicate
+    that does not exist in their document. Measured on production artifacts:
+    6 of 12 recent resumes carried one of these phantom indexes.
+
+    Deliberately conservative: only a run at the very END, only when it is at
+    least _MIN_INDEX_RUN lines long, and only when at least
+    _MIN_KNOWN_HEADINGS of them match SECTION_PATTERNS -- so a real trailing
+    list of short items is left alone.
+    """
+    if not lines:
+        return lines
+
+    run_start = len(lines)
+    for i in range(len(lines) - 1, -1, -1):
+        text = lines[i][0].strip()
+        if not text:
+            continue  # blank lines inside the run are fine
+        if _is_bare_heading(text):
+            run_start = i
+        else:
+            break
+
+    run = [l for l in lines[run_start:] if l[0].strip()]
+    if len(run) < _MIN_INDEX_RUN:
+        return lines
+
+    known = sum(
+        1 for line_text, _, _ in run
+        if any(p.match(line_text.strip()) for p in SECTION_PATTERNS.values())
+    )
+    if known < _MIN_KNOWN_HEADINGS:
+        return lines
+
+    emit_event(
+        "normalization.trailing_heading_index_dropped",
+        {"lines_dropped": len(run), "headings": [l[0].strip() for l in run], "status": "INFO"},
+    )
+    return lines[:run_start]
+
 
 def _split_lines_with_spans(text: str):
     """

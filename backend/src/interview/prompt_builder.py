@@ -60,19 +60,70 @@ def _section_text(block_list: List[Dict]) -> str:
     return "\n".join(parts)
 
 
+def _block_start(block: Dict) -> int | None:
+    """Character offset of this block in the ORIGINAL document, if recorded."""
+    span = block.get("source_span")
+    if isinstance(span, dict) and isinstance(span.get("start"), int):
+        return span["start"]
+    return None
+
+
 def _format_resume_sections(blocks: Dict[str, List[Dict]]) -> str:
-    parts: List[str] = []
-    for section in _SECTION_ORDER:
-        if section in blocks:
-            text = _section_text(blocks[section])
-            if text:
-                label = _SECTION_LABELS.get(section, section.upper())
-                parts.append(f"[{label}]\n{text}")
+    """
+    Render the resume block-by-block in TRUE document order.
+
+    Kept byte-for-byte equivalent to the roast worker's own copy in
+    workers/scoring/pipeline/prompt_builder.py -- see that docstring for the
+    full history. Short version: emitting a fixed canonical order told the
+    model the contact header (which lands in the catch-all 'other' bucket at
+    offset 0, the TOP of most resumes) was at the bottom, and sorting whole
+    sections still mislocated the stray trailing fragments that also land in
+    'other'. Only ADJACENT same-section blocks are merged, so a section that
+    genuinely repeats renders twice.
+
+    This matters twice over here: the interviewer reasons about the resume
+    from this text, AND build_resume_display_text() below renders it straight
+    into the candidate's own side pane during the live call -- so a wrong
+    order was being shown to both sides of the interview.
+    """
+    positioned: List[tuple] = []
+    unpositioned: List[tuple] = []
+
     for section, block_list in blocks.items():
-        if section not in _SECTION_ORDER:
-            text = _section_text(block_list)
-            if text:
-                parts.append(f"[{section.upper()}]\n{text}")
+        if not isinstance(block_list, list):
+            continue
+        for block in block_list:
+            if not isinstance(block, dict):
+                continue
+            text = normalize_placeholders((block.get("text") or "").strip())
+            if not text:
+                continue
+            start = _block_start(block)
+            if start is None:
+                rank = (
+                    _SECTION_ORDER.index(section)
+                    if section in _SECTION_ORDER
+                    else len(_SECTION_ORDER)
+                )
+                unpositioned.append((rank, section, text))
+            else:
+                positioned.append((start, section, text))
+
+    positioned.sort(key=lambda t: t[0])
+    unpositioned.sort(key=lambda t: t[0])
+    flat = [(s, t) for _, s, t in positioned] + [(s, t) for _, s, t in unpositioned]
+
+    runs: List[tuple] = []
+    for section, text in flat:
+        if runs and runs[-1][0] == section:
+            runs[-1][1].append(text)
+        else:
+            runs.append((section, [text]))
+
+    parts = [
+        f"[{_SECTION_LABELS.get(section, section.upper())}]\n" + "\n".join(texts)
+        for section, texts in runs
+    ]
     return "\n\n".join(parts) if parts else "(no content extracted)"
 
 
