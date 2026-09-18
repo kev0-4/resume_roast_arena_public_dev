@@ -1,0 +1,94 @@
+# Production watchdog.
+#
+# Asks two questions every 15 minutes and fails the run if either answer is
+# bad. A failed scheduled run emails the repo owner, which is the whole
+# alerting mechanism -- no Azure alert rules, no third-party service, no
+# cost. This repo is public, so the Actions minutes are free.
+#
+#   1. /api/v1/health/          can the backend reach Postgres, Redis, Blob?
+#   2. /api/v1/health/pipeline  is work actually finishing?
+#
+# Question 2 is the one that matters most. Question 1 stayed green while a
+# worker was dead and every upload sat half-done, because it only checks the
+# backend's own dependencies.
+#
+# Running OUTSIDE Azure is deliberate: an Azure-hosted alert cannot tell you
+# that Azure is unreachable. This can.
+#
+# To change where it points, edit BACKEND below, or set a repository
+# variable named BACKEND_URL (Settings -> Secrets and variables -> Actions
+# -> Variables) and it wins. The host is not a secret -- browsers call it
+# directly on every page load.
+#
+# Note: GitHub disables scheduled workflows after 60 days with no commits to
+# the repo, and cron runs are best-effort -- a 15-minute schedule can arrive
+# late under load. Fine for catching an outage; not a tight guarantee.
+
+name: watchdog
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: # so you can also run it on demand from the Actions tab
+
+# Never let two watchdog runs overlap, and never let a queued one pile up
+# behind a slow one.
+concurrency:
+  group: watchdog
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BACKEND: ${{ vars.BACKEND_URL || 'https://ca-backend.kindsky-b771c1d7.centralus.azurecontainerapps.io' }}
+
+    steps:
+      - name: Dependencies reachable
+        run: |
+          # Three attempts, 30s apart. A single failed probe is usually a
+          # cold start or a blip -- alerting on that trains you to ignore
+          # the alert, which is worse than having none.
+          for attempt in 1 2 3; do
+            code=$(curl -sS -o /tmp/health.json -w '%{http_code}' \
+                     --max-time 30 "$BACKEND/api/v1/health/" || echo "000")
+            if [ "$code" = "200" ]; then
+              echo "OK (attempt $attempt)"
+              cat /tmp/health.json
+              exit 0
+            fi
+            echo "attempt $attempt: HTTP $code"
+            cat /tmp/health.json 2>/dev/null || true
+            [ "$attempt" -lt 3 ] && sleep 30
+          done
+
+          echo "::error title=Backend unhealthy::/api/v1/health/ did not return 200 after 3 attempts over ~1 minute. One of Postgres, Redis or Blob Storage is unreachable from the backend -- the response body above says which."
+          exit 1
+
+      - name: Work is finishing
+        if: always() # a stuck pipeline is worth knowing about even if step 1 failed
+        run: |
+          for attempt in 1 2 3; do
+            code=$(curl -sS -o /tmp/pipeline.json -w '%{http_code}' \
+                     --max-time 30 "$BACKEND/api/v1/health/pipeline" || echo "000")
+            if [ "$code" = "200" ]; then
+              echo "OK (attempt $attempt)"
+              cat /tmp/pipeline.json
+              exit 0
+            fi
+            echo "attempt $attempt: HTTP $code"
+            cat /tmp/pipeline.json 2>/dev/null || true
+            [ "$attempt" -lt 3 ] && sleep 30
+          done
+
+          # likely_stalled_stage names the stage that stopped, which usually
+          # names the worker to restart.
+          stage=$(python3 -c "import json;print(json.load(open('/tmp/pipeline.json')).get('likely_stalled_stage') or 'unknown')" 2>/dev/null || echo "unknown")
+          total=$(python3 -c "import json;print(json.load(open('/tmp/pipeline.json')).get('stuck_total','?'))" 2>/dev/null || echo "?")
+
+          echo "::error title=Pipeline stalled::$total resumes have been stuck for over 30 minutes, most of them at stage '$stage'. That stage's worker is the one to look at. Full breakdown in the response body above."
+          exit 1
