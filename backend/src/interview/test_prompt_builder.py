@@ -346,3 +346,118 @@ class TestDebriefDiscussesTheSolution:
         # Asserted on one line rather than the whole sentence -- the
         # template wraps, and a wrap is not a behaviour change.
         assert "never to be read out as an" in text
+
+
+# ---------------------------------------------------------------------------
+# Link-list labelling and heading de-duplication (twin of the roast worker)
+# ---------------------------------------------------------------------------
+
+def _lines(n):
+    return "\n".join(f"Built thing number {i} for the platform." for i in range(n))
+
+
+def _two_page_blocks():
+    """A real 2-page shape: contact header, sections with headings, page 1's
+    hidden link list inside the last block of page 1, then page 2's section."""
+    return {
+        "other": [{"text": "Jane Doe\n{{EMAIL_1}}\n{{URL_1}}\n{{URL_2}}",
+                   "source_span": {"start": 0, "end": 60}}],
+        "summary": [{"text": "Professional Summary\nBackend engineer.",
+                     "source_span": {"start": 70, "end": 120},
+                     "heading": "Professional Summary"}],
+        "experience": [{"text": "Experience\n" + _lines(12),
+                        "source_span": {"start": 130, "end": 900},
+                        "heading": "Experience"}],
+        "projects": [{"text": "Projects\nBuilt a thing.\n{{URL_3}}\n{{URL_4}}\n{{URL_5}}\n{{URL_6}}",
+                      "source_span": {"start": 1000, "end": 1200},
+                      "heading": "Projects"}],
+        "certifications": [{"text": "Certifications\nAWS SA",
+                            "source_span": {"start": 1300, "end": 1400},
+                            "heading": "Certifications"}],
+    }
+
+
+class TestInterviewLinkAndHeadingHandling:
+    """
+    This copy also feeds build_resume_display_text, which renders into the
+    candidate's OWN side pane during the live call -- so a mistake here is
+    shown to the person being interviewed, not just to the model.
+    """
+
+    def test_a_mid_document_link_list_is_labelled(self):
+        out = pb._format_resume_sections(_two_page_blocks())
+        assert out.count(pb._LINK_DUMP_NOTE) == 1
+        assert out.index(pb._LINK_DUMP_NOTE) < out.index("[URL_3]")
+        assert out.index("[URL_6]") < out.index("[CERTIFICATIONS]")
+
+    def test_the_contact_header_is_never_mistaken_for_a_link_list(self):
+        # "[EMAIL_1] / [URL_1] / [URL_2]" one per line at the very top.
+        out = pb._format_resume_sections(_two_page_blocks())
+        top = out.split("[SUMMARY / OBJECTIVE]")[0]
+        assert pb._LINK_DUMP_NOTE not in top
+
+    def test_headings_are_not_repeated_under_their_labels(self):
+        out = pb._format_resume_sections(_two_page_blocks())
+        assert "Professional Summary" not in out
+        assert "Experience\n" not in out.replace("[WORK EXPERIENCE]\n", "")
+        assert "Certifications\n" not in out.replace("[CERTIFICATIONS]\n", "")
+
+    def test_no_content_is_lost(self):
+        out = pb._format_resume_sections(_two_page_blocks())
+        for kept in ("Jane Doe", "Backend engineer.", "Built thing number 11",
+                     "Built a thing.", "AWS SA", "[URL_3]", "[URL_6]"):
+            assert kept in out
+
+    def test_legacy_blocks_without_the_heading_field_render_as_before(self):
+        blocks = {"summary": [{"text": "Summary\nBackend engineer.",
+                               "source_span": {"start": 0, "end": 30}}]}
+        assert pb._format_resume_sections(blocks) == "[SUMMARY / OBJECTIVE]\nSummary\nBackend engineer."
+
+
+class TestTwinParityWithTheRoastWorker:
+    """
+    backend/ and workers/ deliberately duplicate the renderer (they are
+    separately deployable, with no shared import root). That is only safe if
+    the two copies never drift, and until now nothing checked. This does: same
+    input, byte-identical output.
+    """
+
+    def test_both_copies_render_the_same_thing(self):
+        from workers.scoring.pipeline import prompt_builder as wpb
+
+        cases = [
+            _two_page_blocks(),
+            {"summary": [{"text": "Summary\nBackend engineer.",
+                          "source_span": {"start": 0, "end": 30}}]},
+            {"summary": [{"text": "Summary\nBackend engineer.",
+                          "source_span": {"start": 0, "end": 30},
+                          "heading": "Summary"}]},
+            {"projects": [{"text": "Projects", "source_span": {"start": 0, "end": 8},
+                           "heading": "Projects"}]},
+            {"other": [{"text": "{{EMAIL_1}}\n{{PHONE_1}}\n{{URL_1}}",
+                        "source_span": {"start": 0, "end": 30}}]},
+            {},
+        ]
+        for blocks in cases:
+            assert pb._format_resume_sections(blocks) == wpb._format_resume_sections(blocks)
+
+    def test_the_link_note_and_thresholds_are_identical(self):
+        from workers.scoring.pipeline import prompt_builder as wpb
+        assert pb._LINK_DUMP_NOTE == wpb._LINK_DUMP_NOTE
+        assert pb._HEADER_ZONE_LINES == wpb._HEADER_ZONE_LINES
+        assert pb._MIN_LINK_DUMP_LINES == wpb._MIN_LINK_DUMP_LINES
+
+
+class TestCandidateSidePane:
+    def test_the_candidates_own_pane_has_no_doubled_heading_and_keeps_everything(self):
+        # build_resume_display_text renders straight into the candidate's side
+        # pane during the live call, so this is what the person being
+        # interviewed actually reads.
+        shown = pb.build_resume_display_text({"content": {"blocks": _two_page_blocks()}})
+        assert "Professional Summary" not in shown
+        assert "Backend engineer." in shown
+        assert "AWS SA" in shown
+
+    def test_a_malformed_artifact_still_degrades_to_empty(self):
+        assert pb.build_resume_display_text({}) == ""
+        assert pb.build_resume_display_text({"content": {"blocks": "nope"}}) == ""

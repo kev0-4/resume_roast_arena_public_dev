@@ -91,9 +91,18 @@ def _block_start(block: Dict) -> int | None:
 # ---------------------------------------------------------------------------
 
 _TOKEN_RE = re.compile(r"\[(?:EMAIL|PHONE|URL)_\d+\]")
+_URLISH_TOKEN_RE = re.compile(r"\[(?:EMAIL|URL)_\d+\]")
+_PHONE_TOKEN_RE = re.compile(r"\[PHONE_\d+\]")
 
 # Enough lines to be a machine-generated list rather than someone's two links.
 _MIN_LINK_DUMP_LINES = 3
+
+# A run this close to the top of the resume is the contact header, not a link
+# dump. Stacked contact lines ("[EMAIL_1]" / "[URL_1]" / "[URL_2]", one per
+# line) look exactly like a short dump, and telling the model that the
+# candidate's own contact details are invisible file metadata would be wrong.
+# Measured in NON-BLANK lines of the rendered text, section labels included.
+_HEADER_ZONE_LINES = 8
 
 _LINK_DUMP_NOTE = (
     "[LINK TARGETS EXTRACTED FROM THE PDF FILE -- the destinations behind "
@@ -104,46 +113,98 @@ _LINK_DUMP_NOTE = (
 
 
 def _is_link_only_line(line: str) -> bool:
-    """A line holding redaction placeholders and nothing else meaningful."""
+    """
+    A line holding link/email placeholders and nothing else meaningful.
+
+    A line carrying a PHONE placeholder never qualifies: the hidden link list
+    Tika writes holds URLs and mailto: targets, so a phone number means this is
+    the candidate's real, visible contact block.
+    """
     stripped = line.strip()
-    if not stripped or not _TOKEN_RE.search(stripped):
+    if not stripped or _PHONE_TOKEN_RE.search(stripped):
+        return False
+    if not _URLISH_TOKEN_RE.search(stripped):
         return False
     return not re.search(r"[A-Za-z0-9]", _TOKEN_RE.sub("", stripped))
 
 
-def _label_trailing_link_dump(rendered: str) -> str:
+def _label_link_dumps(rendered: str) -> str:
     """
-    Mark (never delete) the hyperlink list Tika appends to extracted text.
+    Mark (never delete) every hyperlink list Tika appended to the extracted text.
 
-    Tika writes a PDF's link targets as plain text at the end of the
-    document, the same way it writes the bookmark outline (see
+    Tika writes a PDF's link targets as plain text at the END OF EACH PAGE,
+    the same way it writes the bookmark outline (see
     workers/normalization/pipeline/segmenter.py). The candidate sees the word
     "GradeIT" on their resume; we see the raw URL in a list they cannot find.
     The model then gave advice about text that is not on the page.
 
-    This labels the run instead of removing it, deliberately. A rule that
-    deletes text has to be right every time or it eats a real "Links"
-    section, and the production corpus offers too few examples to validate
-    one. Mislabelling a genuine links section only costs a little roast
-    coverage; deleting it would destroy content.
+    This used to look only at the very end of the document, which handled every
+    single-page PDF and missed every multi-page one: on a 2-page resume the
+    first page's list lands mid-document, slipped through, and the roast told
+    the candidate to delete "[URL_1] through [URL_10]" in 3 of 16 runs. So it
+    now labels every qualifying run wherever it sits, one note per run.
 
-    Measured: fires on exactly the 2 of 9 production documents that carry the
-    dump (11 lines each), and on none of the other 7.
+    A run qualifies when it is 3+ consecutive link-only lines (blank lines
+    between them don't break it) AND either it is the very last thing in the
+    document or it starts outside the contact-header zone at the top. That
+    zone, and the PHONE exclusion in _is_link_only_line, exist because a real
+    stacked contact block is the one thing a mid-document rule could wrongly
+    swallow.
+
+    Labels rather than removes, deliberately. A rule that deletes text has to
+    be right every time or it eats a real "Links" section; mislabelling one
+    only costs a little roast coverage.
     """
     lines = rendered.splitlines()
-    run_start = len(lines)
-    for i in range(len(lines) - 1, -1, -1):
-        if not lines[i].strip():
+    nonblank = [i for i, line in enumerate(lines) if line.strip()]
+
+    insert_before: List[int] = []
+    pos = 0
+    while pos < len(nonblank):
+        if not _is_link_only_line(lines[nonblank[pos]]):
+            pos += 1
             continue
-        if _is_link_only_line(lines[i]):
-            run_start = i
-        else:
-            break
+        end = pos
+        while end + 1 < len(nonblank) and _is_link_only_line(lines[nonblank[end + 1]]):
+            end += 1
+        if end - pos + 1 >= _MIN_LINK_DUMP_LINES:
+            is_last_thing = end == len(nonblank) - 1
+            in_header_zone = pos < _HEADER_ZONE_LINES
+            if is_last_thing or not in_header_zone:
+                insert_before.append(nonblank[pos])
+        pos = end + 1
 
-    if len([l for l in lines[run_start:] if l.strip()]) < _MIN_LINK_DUMP_LINES:
+    if not insert_before:
         return rendered
+    # bottom-up, so earlier indices stay valid as notes are inserted
+    for idx in reversed(insert_before):
+        lines.insert(idx, _LINK_DUMP_NOTE)
+    return "\n".join(lines)
 
-    return "\n".join(lines[:run_start] + [_LINK_DUMP_NOTE] + lines[run_start:])
+
+def _strip_own_heading(block: Dict, text: str) -> str:
+    """
+    Drop the block's opening heading line, because the caller prints a section
+    label above it.
+
+    The segmenter keeps a section's heading as the first line of its block text
+    (offsets and downstream signals depend on that) and, since this field was
+    added, also records it separately as block["heading"]. Rendering both the
+    "[SUMMARY / OBJECTIVE]" label and the untouched text showed the model
+    "Summary" twice, and it sometimes told the candidate to delete the
+    "redundant" heading -- roughly 1 roast in 6.
+
+    Only strips when the recorded heading really is the first line, so a block
+    without the field (anything written before it existed) is left exactly as
+    it was.
+    """
+    heading = block.get("heading")
+    if not isinstance(heading, str) or not heading.strip():
+        return text
+    first, _, rest = text.partition("\n")
+    if first.strip() == normalize_placeholders(heading.strip()):
+        return rest.strip()
+    return text
 
 
 def _format_resume_sections(blocks: Dict[str, List[Dict]]) -> str:
@@ -188,6 +249,9 @@ def _format_resume_sections(blocks: Dict[str, List[Dict]]) -> str:
             text = normalize_placeholders((block.get("text") or "").strip())
             if not text:
                 continue
+            # May leave "" for a section that is only its heading; that is kept
+            # so the model still sees the section exists and is empty.
+            text = _strip_own_heading(block, text)
             start = _block_start(block)
             if start is None:
                 rank = (
@@ -217,7 +281,7 @@ def _format_resume_sections(blocks: Dict[str, List[Dict]]) -> str:
     ]
     if not parts:
         return "(no content extracted)"
-    return _label_trailing_link_dump("\n\n".join(parts))
+    return _label_link_dumps("\n\n".join(parts))
 
 
 # ---------------------------------------------------------------------------

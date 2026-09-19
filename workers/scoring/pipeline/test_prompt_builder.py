@@ -12,7 +12,8 @@ from .prompt_builder import (
     _format_strengths,
     _format_resume_sections,
     _section_text,
-    _label_trailing_link_dump,
+    _label_link_dumps,
+    _strip_own_heading,
     _LINK_DUMP_NOTE,
 )
 from ..schemas import ScoringResult, Issue, Strength, Severity
@@ -480,62 +481,245 @@ class TestBuildRoastPrompt:
 
 
 # ---------------------------------------------------------------------------
-# _label_trailing_link_dump
+# _label_link_dumps
 # ---------------------------------------------------------------------------
 
-class TestTrailingLinkDump:
-    """
-    Tika appends a PDF's hyperlink TARGETS as plain text at the end of the
-    extracted document. The candidate sees the word "GradeIT" on their page;
-    we see a list of raw URLs they cannot find anywhere. The model then gave
-    advice about text that is not on the resume.
+def _body_lines(n):
+    """n distinct, ordinary content lines, to push a run out of the header zone."""
+    return "\n".join(f"Built thing number {i} for the platform." for i in range(n))
 
-    These pin the labelling and, more importantly, the cases where it must
-    stay quiet. The function never deletes -- a wrong label costs a little
-    roast coverage, a wrong deletion costs the candidate their content.
+
+class TestLinkDumpLabelling:
+    """
+    Tika appends a PDF's hyperlink TARGETS as plain text at the end of EACH
+    PAGE. The candidate sees the word "GradeIT" on their page; we see a list of
+    raw URLs they cannot find anywhere. The model then gave advice about text
+    that is not on the resume.
+
+    The first version only looked at the very end of the document, which
+    covered every one-page PDF and missed every multi-page one. These pin both
+    what must be labelled and -- more importantly -- what must NOT be, because
+    the mid-document rule can now reach real content.
+
+    The function never deletes: a wrong label costs a little roast coverage, a
+    wrong deletion costs the candidate their content.
     """
 
     def test_trailing_link_dump_is_labelled(self):
         rendered = (
-            "[WORK EXPERIENCE]\n"
-            "Built the ingest path, cut p99 from 800ms to 95ms.\n"
+            "[WORK EXPERIENCE]\n" + _body_lines(10) + "\n"
             "[URL_1]\n[URL_2]\n[URL_3]\n[EMAIL_1]"
         )
-        out = _label_trailing_link_dump(rendered)
-        assert _LINK_DUMP_NOTE in out
-        # the note goes BEFORE the run, not after it
+        out = _label_link_dumps(rendered)
+        assert out.count(_LINK_DUMP_NOTE) == 1
         assert out.index(_LINK_DUMP_NOTE) < out.index("[URL_1]")
 
+    def test_mid_document_link_dump_is_labelled(self):
+        # The two-page-PDF case: page 1's list sits before page 2's content.
+        rendered = (
+            "[WORK EXPERIENCE]\n" + _body_lines(12) + "\n"
+            "[URL_1]\n[URL_2]\n[URL_3]\n[URL_4]\n\n"
+            "[CERTIFICATIONS]\nAWS Solutions Architect"
+        )
+        out = _label_link_dumps(rendered)
+        assert out.count(_LINK_DUMP_NOTE) == 1
+        # sits before the run and NOT after it
+        assert out.index(_LINK_DUMP_NOTE) < out.index("[URL_1]")
+        # and the content that follows is untouched
+        assert out.index("[URL_4]") < out.index("[CERTIFICATIONS]")
+
+    def test_each_pages_link_list_is_labelled_once(self):
+        rendered = (
+            "[WORK EXPERIENCE]\n" + _body_lines(12) + "\n"
+            "[URL_1]\n[URL_2]\n[URL_3]\n\n"
+            "[PROJECTS]\n" + _body_lines(6) + "\n"
+            "[URL_4]\n[URL_5]\n[URL_6]"
+        )
+        out = _label_link_dumps(rendered)
+        assert out.count(_LINK_DUMP_NOTE) == 2
+
+    def test_blank_lines_inside_a_run_do_not_split_it(self):
+        rendered = (
+            "[WORK EXPERIENCE]\n" + _body_lines(12) + "\n"
+            "[URL_1]\n\n[URL_2]\n\n[URL_3]\n\n[CERTIFICATIONS]\nAWS SA"
+        )
+        assert _label_link_dumps(rendered).count(_LINK_DUMP_NOTE) == 1
+
     def test_nothing_is_deleted(self):
-        rendered = "[OTHER]\nJane Doe\n[URL_1]\n[URL_2]\n[URL_3]"
-        out = _label_trailing_link_dump(rendered)
-        for kept in ("Jane Doe", "[URL_1]", "[URL_2]", "[URL_3]"):
+        rendered = (
+            "[OTHER]\nJane Doe\n[WORK EXPERIENCE]\n" + _body_lines(12) + "\n"
+            "[URL_1]\n[URL_2]\n[URL_3]\n[CERTIFICATIONS]\nAWS SA"
+        )
+        out = _label_link_dumps(rendered)
+        for kept in ("Jane Doe", "[URL_1]", "[URL_2]", "[URL_3]", "AWS SA"):
             assert kept in out
+        # every original line survives, in order; only notes were added
+        assert [l for l in out.splitlines() if l != _LINK_DUMP_NOTE] == rendered.splitlines()
+
+    def test_stacked_contact_header_at_the_top_is_left_alone(self):
+        # The false positive a mid-document rule invites: a contact block
+        # written one item per line looks exactly like a short link dump, and
+        # telling the model the candidate's own email is invisible file
+        # metadata would be wrong.
+        rendered = (
+            "[OTHER]\nJane Doe\n[EMAIL_1]\n[URL_1]\n[URL_2]\n\n"
+            "[WORK EXPERIENCE]\n" + _body_lines(10)
+        )
+        assert _label_link_dumps(rendered) == rendered
+
+    def test_a_run_containing_a_phone_number_is_never_a_dump(self):
+        # The hidden list holds URLs and mailto: targets. A phone means this
+        # is the candidate's visible contact block -- even at the very end.
+        rendered = "[WORK EXPERIENCE]\n" + _body_lines(12) + "\n[EMAIL_1]\n[PHONE_1]\n[URL_1]"
+        assert _label_link_dumps(rendered) == rendered
 
     def test_two_links_are_left_alone(self):
-        # A contact header of GitHub + LinkedIn is not a machine dump.
-        rendered = "[OTHER]\nJane Doe\n[URL_1]\n[URL_2]"
-        assert _label_trailing_link_dump(rendered) == rendered
+        rendered = "[WORK EXPERIENCE]\n" + _body_lines(12) + "\n[URL_1]\n[URL_2]"
+        assert _label_link_dumps(rendered) == rendered
 
     def test_links_with_words_are_left_alone(self):
         # A real, human-written links section carries labels.
         rendered = (
-            "[OTHER]\n"
+            "[OTHER]\n" + _body_lines(12) + "\n"
             "Portfolio: [URL_1]\nGitHub: [URL_2]\nLinkedIn: [URL_3]"
         )
-        assert _label_trailing_link_dump(rendered) == rendered
-
-    def test_links_in_the_middle_are_left_alone(self):
-        # Only a run at the very END is the extraction artifact.
-        rendered = (
-            "[OTHER]\n[URL_1]\n[URL_2]\n[URL_3]\n"
-            "[WORK EXPERIENCE]\nShipped the thing."
-        )
-        assert _label_trailing_link_dump(rendered) == rendered
+        assert _label_link_dumps(rendered) == rendered
 
     def test_resume_without_a_dump_is_untouched(self):
-        rendered = "[SUMMARY]\nBackend engineer.\n\n[EDUCATION]\nState University"
-        assert _label_trailing_link_dump(rendered) == rendered
+        rendered = "[SUMMARY / OBJECTIVE]\nBackend engineer.\n\n[EDUCATION]\nState University"
+        assert _label_link_dumps(rendered) == rendered
 
     def test_empty_input(self):
-        assert _label_trailing_link_dump("") == ""
+        assert _label_link_dumps("") == ""
+
+    def test_end_to_end_through_format_resume_sections(self):
+        # The real shape: page 1's list is inside the last block of page 1,
+        # and the next section starts page 2.
+        blocks = {
+            "other": [{"text": "Jane Doe\n{{EMAIL_1}} | {{PHONE_1}}",
+                       "source_span": {"start": 0, "end": 40}}],
+            "experience": [{"text": "Experience\n" + _body_lines(12),
+                            "source_span": {"start": 100, "end": 900},
+                            "heading": "Experience"}],
+            "projects": [{"text": "Projects\nBuilt a thing.\n{{URL_1}}\n{{URL_2}}\n{{URL_3}}\n{{URL_4}}",
+                          "source_span": {"start": 1000, "end": 1200},
+                          "heading": "Projects"}],
+            "certifications": [{"text": "Certifications\nAWS SA",
+                                "source_span": {"start": 1300, "end": 1400},
+                                "heading": "Certifications"}],
+        }
+        out = _format_resume_sections(blocks)
+        assert out.count(_LINK_DUMP_NOTE) == 1
+        assert out.index(_LINK_DUMP_NOTE) < out.index("[URL_1]")
+        assert out.index("[URL_4]") < out.index("[CERTIFICATIONS]")
+
+
+# ---------------------------------------------------------------------------
+# _strip_own_heading / heading shown once
+# ---------------------------------------------------------------------------
+
+class TestHeadingShownOnce:
+    """
+    The segmenter keeps a section's heading as the first line of its block, and
+    the prompt prints its own [SECTION] label above every block, so the model
+    saw "Summary" twice and sometimes told the candidate to delete the
+    "redundant" one (roughly 1 roast in 6).
+    """
+
+    def test_heading_is_not_repeated_under_its_label(self):
+        blocks = {"summary": [{"text": "Summary\nBackend engineer.",
+                               "source_span": {"start": 0, "end": 30},
+                               "heading": "Summary"}]}
+        out = _format_resume_sections(blocks)
+        assert out == "[SUMMARY / OBJECTIVE]\nBackend engineer."
+
+    def test_only_the_heading_line_is_removed(self):
+        blocks = {"experience": [{"text": "Experience\nBuilt A.\nBuilt B.\nBuilt C.",
+                                  "source_span": {"start": 0, "end": 60},
+                                  "heading": "Experience"}]}
+        out = _format_resume_sections(blocks)
+        for kept in ("Built A.", "Built B.", "Built C."):
+            assert kept in out
+        assert "Experience\n" not in out
+
+    def test_qualified_heading_is_removed_too(self):
+        blocks = {"summary": [{"text": "Professional Summary\nBackend engineer.",
+                               "source_span": {"start": 0, "end": 40},
+                               "heading": "Professional Summary"}]}
+        assert "Professional Summary" not in _format_resume_sections(blocks)
+
+    def test_block_without_the_field_is_left_exactly_as_it_was(self):
+        # Artifacts written before the field existed. Old behaviour, unchanged.
+        blocks = {"summary": [{"text": "Summary\nBackend engineer.",
+                               "source_span": {"start": 0, "end": 30}}]}
+        assert _format_resume_sections(blocks) == "[SUMMARY / OBJECTIVE]\nSummary\nBackend engineer."
+
+    def test_a_heading_that_is_not_the_first_line_is_never_stripped(self):
+        # The field is only trusted when it actually matches, so a mismatch
+        # can never delete real content.
+        blocks = {"summary": [{"text": "Something else\nBackend engineer.",
+                               "source_span": {"start": 0, "end": 30},
+                               "heading": "Summary"}]}
+        assert "Something else" in _format_resume_sections(blocks)
+
+    def test_a_section_that_is_only_a_heading_still_shows_as_present(self):
+        # An empty "Projects" section is information: keep the label.
+        blocks = {"projects": [{"text": "Projects",
+                                "source_span": {"start": 0, "end": 8},
+                                "heading": "Projects"}]}
+        assert "[PROJECTS]" in _format_resume_sections(blocks)
+
+    def test_first_line_match_ignores_surrounding_whitespace(self):
+        assert _strip_own_heading({"heading": "Summary"}, "Summary  \nBody") == "Body"
+
+    def test_non_string_heading_is_ignored(self):
+        assert _strip_own_heading({"heading": 7}, "Summary\nBody") == "Summary\nBody"
+
+
+# ---------------------------------------------------------------------------
+# Segment -> render: nothing but headings may ever disappear
+# ---------------------------------------------------------------------------
+
+class TestNoContentLostBetweenSegmenterAndPrompt:
+    """
+    The heading de-duplication deletes a line from the prompt, so the property
+    that matters is: after segmenting and rendering, EVERY line of the original
+    that is not purely a heading is still there. An earlier draft failed this on
+    "Summary: Backend engineer, five years." -- the line starts with a heading
+    word but carries content, and it was deleted along with the heading.
+    """
+
+    DOCS = {
+        "plain": "Jane Doe\n\nSummary\nBackend engineer.\n\nExperience\nBuilt X in 2022.\n\nEducation\nState U\n",
+        "inline summary": "Jane Doe\n\nSummary: Backend engineer, five years.\nBuilt payment APIs.\n\nEducation\nState U\n",
+        "inline experience": "Jane Doe\n\nExperience: Acme Corp, Engineer, 2021 - present\nBuilt X.\n\nEducation\nState U\n",
+        "qualified": "Jane Doe\n\nProfessional Summary\nBackend engineer.\n\nProfessional Experience\nAcme, 2021 - now\nBuilt X.\n",
+        "colon heading": "Jane Doe\n\nProfessional Summary:\nBackend engineer.\n\nSkills:\nPython, Go\n",
+        "heading-only section": "Jane Doe\nBackend engineer with five years of experience.\n\nProjects\n\nEducation\nState University, B.Sc., 2021\n",
+        "indented headings": "Jane Doe\n\n\tSummary\nBackend engineer.\n\n\tEducation\nState U\n",
+        "sentence that looks like a heading": "Jane Doe\n\nSummary\nBackend engineer.\nProfessional experience in Python and Go\n\nEducation\nState U\n",
+    }
+
+    @staticmethod
+    def _is_pure_heading(line):
+        from workers.normalization.pipeline.segmenter import SECTION_PATTERNS
+        s = line.strip().rstrip(":").strip()
+        return bool(s) and len(s) <= 50 and any(p.match(s) for p in SECTION_PATTERNS.values()) \
+            and ":" not in line.strip()[:-1]
+
+    def test_every_non_heading_line_survives(self):
+        from workers.normalization.pipeline.segmenter import segment_text
+        for name, raw in self.DOCS.items():
+            rendered = _format_resume_sections(segment_text(raw))
+            for line in raw.splitlines():
+                if not line.strip() or self._is_pure_heading(line):
+                    continue
+                assert line.strip() in rendered, (
+                    f"[{name}] lost a content line: {line.strip()!r}\n--- rendered ---\n{rendered}")
+
+    def test_legitimate_duplicate_headings_are_still_removed(self):
+        from workers.normalization.pipeline.segmenter import segment_text
+        rendered = _format_resume_sections(segment_text(self.DOCS["plain"]))
+        assert "Summary\n" not in rendered
+        assert "Education\n" not in rendered
+        assert "[SUMMARY / OBJECTIVE]" in rendered

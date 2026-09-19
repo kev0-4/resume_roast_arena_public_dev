@@ -1996,3 +1996,140 @@ ContainerAppConsoleLogs_CL
 ## Not done here
 
 **Alerting.** Logs are now queryable but nothing watches them. The next step is an Azure Monitor alert rule on the ERROR query above, wired to email. That is a separate change and needs a decision on what is worth being woken up for.
+
+*Superseded by section 47 — alerting was built without Azure alert rules, because the user's constraint was that it must cost nothing.*
+
+# 47. Alerting — a watchdog that costs nothing (2026-09-18)
+
+## The constraint
+
+"Don't add alerting rules if they cost money." Azure Monitor log-search alert rules carry a per-rule monthly charge, so they are out. Everything below is £0.
+
+## What was actually wrong
+
+Not "we have no alerts" — that was the easy reading. The real problem is that **the most likely failure is invisible to the obvious alert.**
+
+`GET /health/` checks that the backend can reach Postgres, Redis and Blob Storage. All three can be perfectly healthy while a worker process is dead and every upload sits half-finished forever. Measured against live production, `/health/` returns `200 Healthy` in that state. A dead worker reported green.
+
+So an uptime check on `/health/` would have told us nothing about the failure we actually care about.
+
+## `GET /health/pipeline`
+
+A second endpoint, deliberately separate from `/health/`:
+
+| | `/health/` | `/health/pipeline` |
+|---|---|---|
+| Question | can I reach my dependencies? | is work finishing? |
+| Shape | liveness-probe shaped | watchdog shaped |
+| Fails when | Postgres/Redis/Blob unreachable | work stuck > 30 min |
+
+They must not be merged. `/health/` is the shape a container liveness probe wants, and a probe that failed because a *different* service was stuck would restart the wrong container. (No probes are currently configured on `ca-backend` — verified — but the separation removes the footgun.)
+
+The query: count `Sessions` in a non-terminal status (anything but `DONE`/`FAILED`) whose `updated_at` is older than 30 minutes, grouped by status.
+
+```json
+{
+  "status": "Degraded",
+  "stuck_total": 7,
+  "stuck_by_status": {"SCORING": 6, "QUEUED": 1},
+  "likely_stalled_stage": "SCORING",
+  "threshold_minutes": 30,
+  "tolerated": 3
+}
+```
+
+Three design decisions:
+
+1. **No worker heartbeat.** A heartbeat can lie — a process stays alive with its consumer loop wedged and still ticks. Work not moving cannot lie. This also needs zero changes to the six workers.
+
+2. **The stuck status localises the fault for free.** A pile of `SCORING` names the scoring worker; a pile of `ROASTING` names the LLM worker. `likely_stalled_stage` is what turns the alert into an action.
+
+3. **A tolerance of 3, and a 30-minute threshold.** One wedged session is a curiosity (a user closing a tab mid-upload leaves one behind); several at once is a worker down. The full pipeline normally runs in well under a minute, so 30 minutes cannot be mistaken for "busy". Alerting on single abandoned uploads is how alerts get ignored.
+
+It returns 503 when degraded, so the watchdog decides on the status code alone and parses nothing. A failed query returns `"status": "Unknown"` plus 503 — "I could not find out" must be distinguishable from "everything is fine", and both from "it is broken".
+
+## `.github/workflows/watchdog.yml`
+
+Cron every 15 minutes, curls both endpoints, fails the run if either does not answer 200. **A failed scheduled run emails the repo owner — that is the entire alerting mechanism.** No Azure alert rule, no third-party service, no signup.
+
+Two properties worth keeping:
+
+- **It runs outside Azure.** An Azure-hosted alert cannot tell you Azure is unreachable. This can.
+- **Free.** The repo is public, so Actions minutes are unmetered.
+
+Each check retries 3 times, 30 seconds apart. A single failed probe is usually a cold start or a blip, and alerting on those trains you to ignore the alert — which is worse than having none.
+
+Backend URL comes from the `BACKEND_URL` repository variable if set, else a hardcoded default. The host is not a secret; browsers call it on every page load.
+
+## Verified
+
+- 12 new tests, real Postgres. They cover what counts as stuck (in-progress work never counts, terminal work never counts, the 30-minute boundary), the 503 contract, fault localisation, and the response shape.
+- Both watchdog shell paths exercised against live production: the success path returned `200 Healthy` and exited 0; the failure path (the pipeline endpoint not yet deployed, so 404) retried 3×, emitted the error annotation, and exited 1. It degrades gracefully when the body is not parseable JSON, printing `?`/`unknown` rather than crashing.
+- Full suite 411 passed. The 6 `backend/` leaderboard failures are pre-existing — failure lists captured on this branch and on clean `main` and diffed: identical.
+
+**One bug found in my own tests, worth recording.** The first draft retired every already-stuck session in the shared dev database before asserting, so the endpoint's global verdict would be deterministic. That broke four tests in `workers/cleanup/test_sweep.py`, which legitimately depend on sessions this file had no business touching. Rewritten to never mutate rows it did not create: measure a baseline, add known rows, assert on the delta and on invariants that hold whatever else is in the table. The lesson generalises to any test of an endpoint whose answer depends on whole-table state.
+
+## Merge ordering
+
+`deploy` runs on push to `main`, so merging ships the endpoint and the workflow in the same push; the first cron fires up to 15 minutes later, by which point the deploy has finished. If the deploy fails, the watchdog alerting about it is correct behaviour, not a false alarm. `workflow_dispatch` is enabled so it can be run on demand from the Actions tab after deploying.
+
+## Not done here
+
+- **Error-rate alerting.** Now possible thanks to section 46, but it is the noisiest and least specific signal. Worth adding only after there is a baseline for what a normal error level looks like.
+- **Repeat emails.** A sustained outage emails every 15 minutes. Correct for a real outage, irritating during a long fix. No suppression window is implemented.
+- **Worker-level detail.** The stalled *stage* is reported, not which replica of that worker died.
+
+
+# 48. Roast accuracy — section headings, page-break link lists, doubled headings (2026-09-19)
+
+Found by scoring the user's own 2-page resume through the real pipeline locally. Three bugs that made the roast say wrong things about a resume, fixed together because they share one code path (segmenter → prompt renderer).
+
+## The three fixes
+
+**1. "Professional Summary" / "Professional Experience" were not recognised** (`segmenter.py` `SECTION_PATTERNS`). Only headings that *start* with Summary/Profile/Objective or Experience/Work Experience/Employment matched. The experience case was expensive, not cosmetic: with no experience section the rule engine raised `NO_EXPERIENCE` (critical) and `NO_DATES_IN_EXPERIENCE` (high), a −15 structural cost, and the candidate's experience was filed under whichever section came before it. Added qualified forms (`Professional|Career|Executive` + Summary/Profile/Objective, `Professional|Relevant` + Experience) as **whole-line** matches only, so a sentence beginning "Professional experience in Python and Go" can never become a heading. Unqualified behaviour is unchanged.
+
+**2. The hidden PDF link list was only labelled at the very end of the document** (PR #33). Tika writes a page's link targets at the end of *each page*, so a 2-page PDF has one mid-document. `_label_trailing_link_dump` became `_label_link_dumps`: every run of 3+ link-only lines is labelled, wherever it sits. Two guards, because a mid-document rule can now reach real content: a run inside the first 8 non-blank lines is the contact header, not a dump (stacked `[EMAIL]/[URL]/[URL]` lines look identical), and a line with a `[PHONE_n]` placeholder never counts (the hidden list holds URLs and `mailto:` targets). Still label-only, never deletes.
+
+**3. Headings were printed twice.** The segmenter keeps the heading as the first line of a block's text and the prompt prints its own `[SECTION]` label above it, so the model saw "Summary" twice and sometimes told the candidate to delete the "redundant" one. Blocks now also carry `heading` (additive; `text` and `source_span` are untouched, so entity spans, metrics and signals see no difference) and both prompt renderers drop that first line. Blocks written before the field existed render exactly as before.
+
+The renderer code exists twice (backend/ and workers/ share no import root). The shared region is byte-identical, and a new parity test renders the same resumes through both and demands identical output, so the duplication can no longer drift silently.
+
+## A flaw in my own first version, caught before it shipped
+
+The first cut recorded the whole heading *line*. For `Summary: Backend engineer, five years.` that line starts with a heading word but carries the candidate's actual content, and the renderer deleted it. A comparison against the real corpus showed one instance: a user's `Certifications: Azure AZ900 (in progress)…` line, their whole certification list, was being dropped from what the AI sees. The heading is now recorded only when the line is *purely* a heading (`_heading_only`; a trailing colon is allowed, inline text is not), and a property test asserts that after segmenting and rendering, every line that is not a pure heading is still present.
+
+## Measured
+
+12 real resumes (the 9 distinct documents in production blob storage plus 3 of the user's), before vs after, both renderers (the roast prompt and the live interview's side pane):
+
+| | before | after |
+|---|---|---|
+| resumes whose sections changed | | 4 of 12 |
+| resumes whose structural cost changed | | 4 of 12, +8 points recovered, 0 lost |
+| content lines lost / gained / changed unexpectedly | | **0 / 0 / 0** |
+| duplicated headings removed | | 50 |
+| link-list notes added | | 4 (exactly the four 2-page resumes) |
+
+Synthetic check for the case the corpus lacks: a resume headed "Professional Experience" goes from 3 issues to 1 and −15 to −10 (the remaining −10 is the synthetic resume being short). Traps (a sentence starting the same way, "Leadership Experience", plain headings) are unchanged.
+
+Tests: 40 new; full suite identical failing set to main (the 6 known leaderboard failures), 451 passing vs 411.
+
+Live LLM, 10 runs per side on the four affected resumes: advice telling the candidate to delete the hidden link list went **2 → 0** of 40. The doubled-heading advice did not occur in either sample (0/40 vs 0/40), so its rate reduction is not demonstrated by this data; its fix rests on the deterministic result above.
+
+## The finding that matters: the content score is sensitive to prompt layout
+
+The AI's content score (`substance_score`) fell by about 4 points on those four resumes (86.8 → 83.0, 95% CI −5.4 to −2.3), which more than cancels the +2 the structural fix recovers. Ablating each fix on its own showed the same ~3–4 point drop for **each** one, and the three together were not worse than one, which is not what three independent effects look like. A **null perturbation** settled it: putting one extra blank line between resume sections, which carries no meaning, moved the score by **−3.1 points (CI −5.0 to −1.3)**, the same size as any fix. Blank lines *after* the resume changed nothing.
+
+So the drop is the scorer reacting to how the resume is laid out in the prompt, not evidence that any fix damaged the content. The old layout happens to land near a stable 85 for these resumes (old-code sd 1.85 vs 3.3 for perturbed versions). Across the whole 12-resume corpus the mean content score moved 64.0 → 63.5, so this is not a systematic shift for every resume; it is a fragility that shows up strongly on some.
+
+Consequences worth knowing:
+- Net effect on the user's own resumes: about −2 points on the final score for the three affected ones (79.2 → 77.0, 78.0 → 75.0, 79.2 → 77.0), and −2.1 (not detectable) on the one-page one (89.9 → 87.8).
+- Scores are not perfectly comparable across a deploy that changes the prompt's layout, including on the leaderboard.
+- The right fix is a more stable scorer (average a few samples, or pin the layout), which multiplies Gemini calls and therefore cost. Not done here; logged as a bug.
+
+## Not done / known gaps
+
+- A qualified heading with text on the same line (`Professional Summary: backend engineer…`) is still not recognised; only the standalone form is. Deliberate: the whole-line rule is what keeps sentences from becoming headings.
+- PR #31's trailing-heading-index guard will wipe a document made *only* of short unpunctuated lines (found while writing a test with a four-word document). Real resumes contain sentences, so this is a low-risk edge.
+- Already-stored artifacts keep the old behaviour (no `heading` field); only new uploads benefit.
+- The live interview itself was verified by rendering its exact text on real resumes and by tests, not by a spoken session (needs a microphone).
