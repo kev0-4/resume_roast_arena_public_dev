@@ -19,9 +19,14 @@ expected output
   "other": [ ... ]
 }
 
+A block opened by a heading that is nothing but a heading also carries an
+optional "heading": str (that line, stripped). "text" still begins with it.
+Blocks opened by a line that carries content ("Summary: Backend engineer...")
+and the run of lines before the first heading have no "heading" key.
+
 '''
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 from backend.src.utils.telemetry import emit_event
 
 SECTION_ORDER = [
@@ -33,9 +38,27 @@ SECTION_ORDER = [
     "certifications",
     "other",
 ]
+# The unqualified forms below match any line that STARTS with the word, which
+# has always been loose. The qualified forms ("Professional Summary",
+# "Relevant Experience") are deliberately stricter: they must be the WHOLE
+# line, so an ordinary sentence that happens to begin "Professional experience
+# in Python and Go" can never be promoted to a heading.
+#
+# Why they exist: "Professional Summary" and "Professional Experience" are two
+# of the most common headings on real resumes, and neither matched. The
+# experience case was expensive, not cosmetic -- with no experience section the
+# rule engine raised NO_EXPERIENCE (critical) plus NO_DATES_IN_EXPERIENCE
+# (high), together a -15 point structural cost, and the experience content was
+# filed under whatever section came before it.
 SECTION_PATTERNS = {
-    "summary": re.compile(r"^(summary|profile|objective)\b", re.I),
-    "experience": re.compile(r"^(experience|work experience|employment)\b", re.I),
+    "summary": re.compile(
+        r"^(summary|profile|objective)\b"
+        r"|^(professional|career|executive)\s+(summary|profile|objective)\s*:?\s*$",
+        re.I),
+    "experience": re.compile(
+        r"^(experience|work experience|employment)\b"
+        r"|^(professional|relevant)\s+(experience|work experience)\s*:?\s*$",
+        re.I),
     "education": re.compile(r"^(education|academics)\b", re.I),
     "skills": re.compile(r"^(skills|technical skills|technologies)\b", re.I),
     "projects": re.compile(r"^(projects|academic projects)\b", re.I),
@@ -61,6 +84,9 @@ def segment_text(raw_text: str) -> dict:
     buffer_lines = []
     buffer_start = None
     prev_end = None
+    # The heading line this buffer was opened with, or None when the buffer
+    # started without one (the run of lines before the first heading).
+    buffer_heading = None
 
     for line_text, start, end in lines:
         header = _detect_header(line_text)
@@ -74,11 +100,13 @@ def segment_text(raw_text: str) -> dict:
                     buffer_lines=buffer_lines,
                     start=buffer_start,
                     end=prev_end if prev_end is not None else buffer_start,
+                    heading=buffer_heading,
                 )
 
             # Start new section and retain header text
             current_section = header
             buffer_lines = [line_text]
+            buffer_heading = _heading_only(line_text)
             buffer_start = start
             prev_end = end
             continue
@@ -98,6 +126,7 @@ def segment_text(raw_text: str) -> dict:
             buffer_lines=buffer_lines,
             start=buffer_start,
             end=prev_end if prev_end is not None else buffer_start,
+            heading=buffer_heading,
         )
 
     # ------------------------------------------------------------
@@ -133,6 +162,26 @@ _HEADINGISH = re.compile(r"^[A-Za-z][A-Za-z&/\- ]{2,39}$")
 # stop a genuine trailing list (e.g. three short interests) being eaten.
 _MIN_INDEX_RUN = 3
 _MIN_KNOWN_HEADINGS = 2
+
+
+def _heading_only(line_text: str) -> Optional[str]:
+    """
+    The stripped line if it is NOTHING BUT a heading, else None.
+
+    This gates the block["heading"] field, and it has to be strict: a renderer
+    deletes the recorded heading line so it isn't printed twice. A line like
+    "Summary: Backend engineer, five years." is detected as a heading (it
+    starts with the word) but it also CARRIES CONTENT, and recording it would
+    make the renderer delete the candidate's actual summary. So only a line
+    that is purely heading words qualifies -- a trailing colon is allowed
+    ("Professional Summary:"), inline text after it is not.
+
+    Anything not recorded simply keeps the old behaviour (the heading shows
+    twice), which is a cosmetic quirk; a wrongly recorded one is data loss.
+    """
+    stripped = line_text.strip()
+    core = stripped[:-1].rstrip() if stripped.endswith(":") else stripped
+    return stripped if _HEADINGISH.match(core) else None
 
 
 def _is_bare_heading(line_text: str) -> bool:
@@ -242,6 +291,7 @@ def _flush_buffer(
     buffer_lines: List[str],
     start: int,
     end: int,
+    heading: Optional[str] = None,
 ):
     # Lines already have \n endings from keepends=True, just concatenate
     text = "".join(buffer_lines)
@@ -254,13 +304,22 @@ def _flush_buffer(
     if not rstripped:
         return
 
-    blocks[section].append(
-        {
-            "text": rstripped,
-            "source_span": {
-                "start": start + leading,
-                "end": end,
-            },
-        }
-    )
+    block = {
+        "text": rstripped,
+        "source_span": {
+            "start": start + leading,
+            "end": end,
+        },
+    }
+    # Which line of `text` is the heading that opened this block, kept as its
+    # own field. `text` still begins with it (offsets, entity spans, metrics
+    # and signals all depend on that), but a renderer that prints its own
+    # section label above the block needs to know so it can avoid showing the
+    # heading twice -- the model read the doubled word as a real duplicate and
+    # told candidates to delete their own "Summary" heading. Only present when
+    # the block was opened by a heading; blocks written before this field
+    # existed simply lack it, and every consumer treats that as "unknown".
+    if heading:
+        block["heading"] = heading
+    blocks[section].append(block)
     
